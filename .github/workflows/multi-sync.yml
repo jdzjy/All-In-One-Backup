@@ -30,6 +30,20 @@ jobs:
           repository: ChenyangGao/p123client # 【已修改】原作者用户名/仓库名
           path: temp/p123client # 【已修改】临时存放的文件夹名称
 
+      # 新增：拉取第三个目标仓库：pansou
+      - name: Checkout Target Repo 3
+        uses: actions/checkout@v3
+        with:
+          repository: fish2018/pansou
+          path: temp/pansou
+
+      # 新增：拉取第四个目标仓库：pansou-web
+      - name: Checkout Target Repo 4
+        uses: actions/checkout@v3
+        with:
+          repository: fish2018/pansou-web
+          path: temp/pansou-web          
+
       # 4. 转移文件并提交到你的总仓库
       - name: Process and Commit
         run: |
@@ -39,12 +53,17 @@ jobs:
           # 【核心防删库逻辑】删除别人仓库的 .git 隐藏文件夹，断开与原作者的命运绑定
           rm -rf ../temp/p115client/.git
           rm -rf ../temp/p123client/.git
+          rm -rf ../temp/pansou/.git
+          rm -rf ../temp/pansou-web/.git          
           
           # 将纯代码同步到你主仓库的指定子文件夹中
           # 如果你的总仓库里还没有这两个文件夹，rsync 会自动创建它们
           rsync -a --delete ../temp/p115client/ ./p115client/ # 【已修改】同步到你仓库下的 p115client 文件夹
           rsync -a --delete ../temp/p123client/ ./p123client/ # 【已修改】同步到你仓库下的 p123client 文件夹
-          
+          rsync -a --delete ../temp/pansou/ ./pansou/
+          rsync -a --delete ../temp/pansou-web/ ./pansou-web/
+
+
           # 配置 Git 机器人身份（保持默认即可，不需要改成你的真实邮箱）
           git config user.name 'GitHub Actions Bot'
           git config user.email 'actions@github.com'
