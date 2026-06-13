@@ -68,45 +68,31 @@ jobs:
           # 【逻辑分流】检查是否有代码更新
           if git diff --staged --quiet; then
             echo "未检测到代码更新。"
-            # 情况 1：无更新时的优雅文案
-            MSG=$(cat <<EOF
-    🔔 <b>代码聚合同步简报</b>
-
-    ☕ 您好，今日定时同步已顺利完成。
-    ✨ 您密切关注的几个目标仓库<b>均无任何更新</b>，备份库继续保持在最新状态。
-    EOF
-            )
+            
+            # 情况 1：无更新时的优雅文案 (解决 YAML 缩进冲突)
+            MSG="🔔 <b>代码聚合同步简报</b>"
+            MSG="$MSG"$'\n\n'"☕ 您好，今日定时同步已顺利完成。"
+            MSG="$MSG"$'\n'"✨ 您密切关注的几个目标仓库<b>均无任何更新</b>，备份库继续保持在最新状态。"
+            
           else
             echo "检测到代码更新，正在生成明细..."
-            # 抓取已被暂存的变更文件路径
             STAGED_FILES=$(git diff --cached --name-only)
             
-            # 情况 2：有更新时的优雅文案头部
-            MSG=$(cat <<EOF
-    🔔 <b>代码聚合同步简报</b>
-
-    🚀 您好，今日定时同步发现代码变动，已自动安全合并并推送至您的主分支。
-
-    <b>📋 本次更新细节如下：</b>
-    EOF
-            )
+            # 情况 2：有更新时的优雅文案头部 (解决 YAML 缩进冲突)
+            MSG="🔔 <b>代码聚合同步简报</b>"
+            MSG="$MSG"$'\n\n'"🚀 您好，今日定时同步发现代码变动，已自动安全合并并推送至您的主分支。"
+            MSG="$MSG"$'\n\n'"<b>📋 本次更新细节如下：</b>"
             
-            # 动态遍历这 4 个仓库目录，提炼出优雅的文件树明细
             for repo in p115client p123client pansou pansou-web; do
               if echo "$STAGED_FILES" | grep -q "^${repo}/"; then
-                # 提取该仓库下发生变动的文件，并美化为树状结构（限制显示前10个文件防止消息过长）
                 REPO_FILES=$(echo "$STAGED_FILES" | grep "^${repo}/" | sed "s|^${repo}/|  └── 📄 |" | head -n 10)
                 TOTAL_COUNT=$(echo "$STAGED_FILES" | grep -c "^${repo}/" || true)
                 
-                MSG="${MSG}
-
-    📦 <b>${repo}</b>
-    ${REPO_FILES}"
+                MSG="$MSG"$'\n\n'"📦 <b>${repo}</b>"
+                MSG="$MSG"$'\n'"${REPO_FILES}"
                 
-                # 如果单库更新文件超过10个，展示省略号提示
                 if [ "$TOTAL_COUNT" -gt 10 ]; then
-                  MSG="${MSG}
-      └── 📝 <i>...等共 ${TOTAL_COUNT} 个文件变动</i>"
+                  MSG="$MSG"$'\n'"  └── 📝 <i>...等共 ${TOTAL_COUNT} 个文件变动</i>"
                 fi
               fi
             done
