@@ -2,7 +2,7 @@ name: Sync Multiple Repositories
 
 on:
   schedule:
-    - cron: '0 2 * * *' # 每天北京时间上午 10:00 自动运行
+    - cron: '0 11 * * *' # 每天北京时间上午 19:00 自动运行
   workflow_dispatch: # 允许手动点击触发
 
 jobs:
