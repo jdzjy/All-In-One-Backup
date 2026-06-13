@@ -2,8 +2,8 @@ name: Sync Multiple Repositories
 
 on:
   schedule:
-    - cron: '0 2 * * *' # 每天北京时间上午 10:00 自动运行。你可以根据需要修改时间。
-  workflow_dispatch: # 允许你在 GitHub Actions 页面手动点击按钮触发同步
+    - cron: '0 2 * * *' # 每天北京时间上午 10:00 自动运行
+  workflow_dispatch: # 允许手动点击触发
 
 jobs:
   sync_repos:
@@ -16,65 +16,113 @@ jobs:
         with:
           path: main-repo
 
-      # 2. 拉取第一个目标仓库：p115client
+      # 2. 拉取各个目标仓库
       - name: Checkout Target Repo 1
         uses: actions/checkout@v3
         with:
-          repository: ChenyangGao/p115client # 【已修改】原作者用户名/仓库名
-          path: temp/p115client # 【已修改】临时存放的文件夹名称
+          repository: ChenyangGao/p115client
+          path: temp/p115client
 
-      # 3. 拉取第二个目标仓库：p123client
       - name: Checkout Target Repo 2
         uses: actions/checkout@v3
         with:
-          repository: ChenyangGao/p123client # 【已修改】原作者用户名/仓库名
-          path: temp/p123client # 【已修改】临时存放的文件夹名称
+          repository: ChenyangGao/p123client
+          path: temp/p123client
 
-      # 新增：拉取第三个目标仓库：pansou
       - name: Checkout Target Repo 3
         uses: actions/checkout@v3
         with:
           repository: fish2018/pansou
           path: temp/pansou
 
-      # 新增：拉取第四个目标仓库：pansou-web
       - name: Checkout Target Repo 4
         uses: actions/checkout@v3
         with:
           repository: fish2018/pansou-web
-          path: temp/pansou-web          
+          path: temp/pansou-web
 
-      # 4. 转移文件并提交到你的总仓库
-      - name: Process and Commit
+      # 3. 核心处理、精准差异化提取与优雅通知
+      - name: Process, Commit and Notify
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }} # 从 GitHub Secrets 读取
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}     # 从 GitHub Secrets 读取
         run: |
-          # 进入你的主仓库目录
           cd main-repo
           
-          # 【核心防删库逻辑】删除别人仓库的 .git 隐藏文件夹，断开与原作者的命运绑定
-          rm -rf ../temp/p115client/.git
-          rm -rf ../temp/p123client/.git
-          rm -rf ../temp/pansou/.git
-          rm -rf ../temp/pansou-web/.git          
+          # 断开与原作者的命运绑定
+          rm -rf ../temp/p115client/.git ../temp/p123client/.git ../temp/pansou/.git ../temp/pansou-web/.git
           
-          # 将纯代码同步到你主仓库的指定子文件夹中
-          # 如果你的总仓库里还没有这两个文件夹，rsync 会自动创建它们
-          rsync -a --delete ../temp/p115client/ ./p115client/ # 【已修改】同步到你仓库下的 p115client 文件夹
-          rsync -a --delete ../temp/p123client/ ./p123client/ # 【已修改】同步到你仓库下的 p123client 文件夹
+          # 增量同步文件
+          rsync -a --delete ../temp/p115client/ ./p115client/
+          rsync -a --delete ../temp/p123client/ ./p123client/
           rsync -a --delete ../temp/pansou/ ./pansou/
           rsync -a --delete ../temp/pansou-web/ ./pansou-web/
-
-
-          # 配置 Git 机器人身份（保持默认即可，不需要改成你的真实邮箱）
+          
+          # 配置 Git 机器人身份
           git config user.name 'GitHub Actions Bot'
           git config user.email 'actions@github.com'
           
-          # 暂存所有更改
+          # 暂存所有更改以供 Git 比对
           git add .
           
-          # 如果有文件更新就 commit 并 push；如果没有变化则静默跳过，不会产生无意义的提交
+          # 【逻辑分流】检查是否有代码更新
           if git diff --staged --quiet; then
-            echo "没有发现任何代码更新。"
+            echo "未检测到代码更新。"
+            # 情况 1：无更新时的优雅文案
+            MSG=$(cat <<EOF
+    🔔 <b>代码聚合同步简报</b>
+
+    ☕ 您好，今日定时同步已顺利完成。
+    ✨ 您密切关注的几个目标仓库<b>均无任何更新</b>，备份库继续保持在最新状态。
+    EOF
+            )
           else
+            echo "检测到代码更新，正在生成明细..."
+            # 抓取已被暂存的变更文件路径
+            STAGED_FILES=$(git diff --cached --name-only)
+            
+            # 情况 2：有更新时的优雅文案头部
+            MSG=$(cat <<EOF
+    🔔 <b>代码聚合同步简报</b>
+
+    🚀 您好，今日定时同步发现代码变动，已自动安全合并并推送至您的主分支。
+
+    <b>📋 本次更新细节如下：</b>
+    EOF
+            )
+            
+            # 动态遍历这 4 个仓库目录，提炼出优雅的文件树明细
+            for repo in p115client p123client pansou pansou-web; do
+              if echo "$STAGED_FILES" | grep -q "^${repo}/"; then
+                # 提取该仓库下发生变动的文件，并美化为树状结构（限制显示前10个文件防止消息过长）
+                REPO_FILES=$(echo "$STAGED_FILES" | grep "^${repo}/" | sed "s|^${repo}/|  └── 📄 |" | head -n 10)
+                TOTAL_COUNT=$(echo "$STAGED_FILES" | grep -c "^${repo}/" || true)
+                
+                MSG="${MSG}
+
+    📦 <b>${repo}</b>
+    ${REPO_FILES}"
+                
+                # 如果单库更新文件超过10个，展示省略号提示
+                if [ "$TOTAL_COUNT" -gt 10 ]; then
+                  MSG="${MSG}
+      └── 📝 <i>...等共 ${TOTAL_COUNT} 个文件变动</i>"
+                fi
+              fi
+            done
+            
+            # 稳妥提交并推送到你的总仓库
             git commit -m "自动同步最新代码: $(date +'%Y-%m-%d %H:%M:%S')"
-            git push origin main # 【需注意】如果你的总仓库主分支叫 master，请把 main 改为 master
+            git push origin main
+          fi
+          
+          # 【发送通知】通过 Telegram API 发送格式化后的 HTML 优雅消息
+          if [ ! -z "$TG_BOT_TOKEN" ] && [ ! -z "$TG_CHAT_ID" ]; then
+            curl -s -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
+              --data-urlencode "chat_id=${TG_CHAT_ID}" \
+              --data-urlencode "parse_mode=HTML" \
+              --data-urlencode "text=${MSG}" > /dev/null
+            echo "Telegram 优雅通知已成功送达。"
+          else
+            echo "⚠️ 未检测到 TG_BOT_TOKEN 或 TG_CHAT_ID 密钥配置，跳过发送消息。"
           fi
