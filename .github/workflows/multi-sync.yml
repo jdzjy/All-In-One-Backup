@@ -67,19 +67,19 @@ jobs:
           
           # 【逻辑分流】检查是否有代码更新
           if git diff --staged --quiet; then
-            echo "未检测到代码更新。"
+            echo "未检测到GitHub代码更新。"
             
             # 情况 1：无更新时的优雅文案 (解决 YAML 缩进冲突)
-            MSG="🔔 <b>代码聚合同步简报</b>"
+            MSG="🔔 <b>GitHub同步简报</b>"
             MSG="$MSG"$'\n\n'"☕ 您好，今日定时同步已顺利完成。"
-            MSG="$MSG"$'\n'"✨ 您密切关注的几个目标仓库<b>均无任何更新</b>，备份库继续保持在最新状态。"
+            MSG="$MSG"$'\n'"✨ 您密切关注的几个GitHub仓库<b>均无任何更新</b>，备份库继续保持在最新状态。"
             
           else
             echo "检测到代码更新，正在生成明细..."
             STAGED_FILES=$(git diff --cached --name-only)
             
             # 情况 2：有更新时的优雅文案头部 (解决 YAML 缩进冲突)
-            MSG="🔔 <b>代码聚合同步简报</b>"
+            MSG="🔔 <b>GitHub同步简报</b>"
             MSG="$MSG"$'\n\n'"🚀 您好，今日定时同步发现代码变动，已自动安全合并并推送至您的主分支。"
             MSG="$MSG"$'\n\n'"<b>📋 本次更新细节如下：</b>"
             
