@@ -1276,3 +1276,4 @@ class P115MultipartUpload:
 
 # TODO: 增加一个工具函数，用于从某个本地目录下载到网盘目录，允许提供自定义的进度条调用
 # TODO: 增加一个工具函数，用于在两个115网盘之间的转移，允许提供自定义的进度条调用
+# TODO: 增加 3 个函数，upload、transfer、download，是直接可用的
