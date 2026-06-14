@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # encoding: utf-8
 
-__author__ = "ChenyangGao <https://chenyanggao.github.io>"
 __all__ = [
     "iter_fs_files", "iter_fs_files_serialized", "iter_fs_files_threaded", 
     "iter_fs_files_asynchronized", 

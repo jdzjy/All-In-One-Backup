@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 # encoding: utf-8
 
-__author__ = "ChenyangGao <https://chenyanggao.github.io>"
-
 from p115client.util import *
 
 from .attr import *
@@ -20,5 +18,5 @@ from .updatedb import *
 from .upload import *
 from .xys import *
 
-# TODO: 各种接口，除了能接受 id、pickcode、path，也能接受 attr（mapping）
+# TODO: 各种接口，除了能接受 id、pickcode、path、sha1，最好也能接受 attr（mapping）
 

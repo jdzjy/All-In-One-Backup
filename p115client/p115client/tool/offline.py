@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # encoding: utf-8
 
-__author__ = "ChenyangGao <https://chenyanggao.github.io>"
 __all__ = ["offline_iter", "offline_restart_iter"]
 __doc__ = "这个模块提供了一些和离线下载有关的函数"
 
@@ -195,4 +194,6 @@ def offline_restart_iter(
             resp["task"] = task
             yield Yield(resp)
     return run_gen_step_iter(gen_step, async_)
+
+# TODO: 增删改查等各种接口等封装，包括 open
 

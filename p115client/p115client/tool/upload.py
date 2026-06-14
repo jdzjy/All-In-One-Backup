@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-__author__ = "ChenyangGao <https://chenyanggao.github.io>"
 __all__ = [
     "upload_host_image", "iter_115_to_115", "iter_115_to_115_resume", 
     "sha1_for_check_existence", "upload_for_check_existence", 
@@ -41,6 +40,7 @@ from ..type import P115URL
 from ..tool import load_final_image
 from .attr import normalize_attr_simple
 from .download import iter_download_files
+from .edit import makedir
 from .iterdir import iterdir, iter_files_with_path, unescape_115_charref
 
 
@@ -282,14 +282,14 @@ def iter_115_to_115(
         if dir_ in dir_to_cid:
             return dir_to_cid[dir_]
         else:
-            resp = yield to_client.fs_makedirs_app(
+            pid = dir_to_cid[dir_] = yield makedir(
+                to_client, 
                 dir_, 
-                to_pid, 
+                pid=to_pid, 
+                contain_dir=True, 
                 async_=async_, 
                 **request_kwargs, 
             )
-            check_response(resp)
-            pid = dir_to_cid[dir_] = resp["cid"]
             return pid
     dir_to_cid = {"": 0}
     if use_iter_files:
@@ -481,14 +481,14 @@ def iter_115_to_115_resume(
                                 to_cid = attr["id"]
                                 break
                 else:
-                    resp = yield to_client.fs_makedirs_app(
+                    to_cid = yield makedir(
+                        to_client, 
                         name, 
-                        to_pid, 
+                        pid=to_pid, 
+                        contain_dir=True, 
                         async_=async_, 
                         **request_kwargs, 
                     )
-                    check_response(resp)
-                    to_cid = int(resp["cid"])
                 dirt_to_cid[()] = to_cid
                 id_to_dirnode: dict[int, tuple[str, int]] = {}
                 to_files: Any = iter_files_with_path(

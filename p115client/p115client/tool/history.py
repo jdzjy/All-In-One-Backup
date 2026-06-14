@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # encoding: utf-8
 
-__author__ = "ChenyangGao <https://chenyanggao.github.io>"
 __all__ = [
     "HISTORY_NAME_TO_TYPE", "HISTORY_TYPE_TO_NAME", 
     "iter_history_once", "iter_history", "iter_history_list", 

@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # encoding: utf-8
 
-__author__ = "ChenyangGao <https://chenyanggao.github.io>"
 __all__ = [
     "ensure_attr_path", "ensure_attr_path_using_star_event", "iterdir", "iterdir_traverse", 
     "iterdir_walk", "iter_stared_dirs", "iter_dirs", "iter_dirs_with_path", "iter_files", 
@@ -3423,7 +3422,7 @@ def get_dupfile_unique_keys(
     *, 
     async_: Literal[True], 
     **request_kwargs, 
-) -> Coroutine[None, None, set[tuple[str, int]]]:
+) -> Coroutine[Any, Any, set[tuple[str, int]]]:
     ...
 def get_dupfile_unique_keys(
     client: str | PathLike | P115Client, 
@@ -3432,7 +3431,7 @@ def get_dupfile_unique_keys(
     *, 
     async_: Literal[False, True] = False, 
     **request_kwargs, 
-) -> set[tuple[str, int]] | Coroutine[None, None, set[tuple[str, int]]]:
+) -> set[tuple[str, int]] | Coroutine[Any, Any, set[tuple[str, int]]]:
     """获取某个目录中，所有不重复的 (sha1, size) 集合
 
     :param client: 115 客户端或 cookies

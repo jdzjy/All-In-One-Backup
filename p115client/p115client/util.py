@@ -45,6 +45,7 @@ def complete_url(
     /, 
     base_url: str | Callable[[], str] = "", 
     app: str | Callable[[], str] = "", 
+    force_app: bool = False, 
     domain: str | Callable[[], str] = "", 
     as_query: bool = False, 
     query: Mapping[str, Any] | Sequence[tuple[str, Any]] = (), 
@@ -54,6 +55,7 @@ def complete_url(
     :param path: 请求路径
     :param base_url: 请求基地址，例如 `https://webapi.115.com`
     :param app: 使用此设备 app 的接口
+    :param force_app: 如果为 False（默认），则会对某些不在接受范围内的 `app` 改用可接受的值，如果为 True 则保持原样（传什么就用什么）
     :param domain: 域，拼接位置根据 `base_url` 和 `as_query` 确定
 
         - 如果 `base_url` 为空，那么 `base_url` 会被处理为 `http://{domain}.115.com`
@@ -87,6 +89,9 @@ def complete_url(
         base_url = base_url()
     if callable(app):
         app = app()
+    if app.startswith("="):
+        force_app = True
+        app = app[1:]
     if callable(domain):
         domain = domain()
     if path and not path.startswith("/"):
@@ -110,21 +115,22 @@ def complete_url(
     if app in ("windows", "mac", "linux"):
         app = "os_" + app
     if app and not path.startswith("/open/"):
-        if app in (
-            "ios", "115ios", "ipad", "115ipad", 
-            "android", "115android", "harmony", 
-            "wechatmini", "alipaymini", "tv", "apple_tv", 
-            "os_windows", "os_mac", "os_linux", 
-        ):
-            pass
-        elif app.endswith("ios"):
-            app = "ios"
-        elif app.endswith("ipad"):
-            app = "ipad"
-        elif app.endswith("android"):
-            app = "android"
-        else:
-            app = "android"
+        if not force_app:
+            if app in (
+                "ios", "115ios", "115ipad", "android", "115android", 
+                "harmony", "os_windows", "os_mac", "os_linux", 
+                # NOTE: 下面这几个值往往不可用，但 "wechatmini" 和 "alipaymini" 偶尔可用
+                # "wechatmini", "alipaymini", "ipad", "tv", "apple_tv", 
+            ):
+                pass
+            elif app.endswith("ios"):
+                app = "ios"
+            elif app.endswith("ipad"):
+                app = "115ipad"
+            elif app.endswith("android"):
+                app = "android"
+            else:
+                app = "android"
         path = "/" + app + path
     url = base_url
     if as_query:

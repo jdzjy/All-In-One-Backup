@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-__author__ = "ChenyangGao <https://chenyanggao.github.io>"
 __all__ = [
     "generate_auth_factory", "generate_cookies_factory", "generate_client_factory", 
     "make_pool", "auth_pool", "cookies_pool", "client_pool", "call_wrap_with_pool", 

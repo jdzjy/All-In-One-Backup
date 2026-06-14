@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # encoding: utf-8
 
-__author__ = "ChenyangGao <https://chenyanggao.github.io>"
 __all__ = [
     "DirNode", "P115UID", "P115Cookies", "P115DictAttrLikeMixin", 
     "P115DictAttrLike", "P115ID", "P115StrID", "P115URL", 
     "TaskResultTuple", 
 ]
+__doc__ = "各种通用的类型"
 
 from datetime import datetime, timedelta
 from functools import cached_property

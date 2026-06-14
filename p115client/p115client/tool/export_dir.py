@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # encoding: utf-8
 
-__author__ = "ChenyangGao <https://chenyanggao.github.io>"
 __all__ = [
     "export_dir_parse_iter_depth_name", "export_dir_parse_iter_dict", 
     "export_dir_parse_iter_path", "export_dir_parse_iter_patht", 

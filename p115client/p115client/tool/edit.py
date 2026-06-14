@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 # encoding: utf-8
 
-__author__ = "ChenyangGao <https://chenyanggao.github.io>"
 __all__ = [
     "update_abstract", "update_desc", "update_star", "update_label", "update_score", 
     "update_top", "update_show_play_long", "update_category_shortcut", "batch_unstar", 
-    "update_name", "post_event", "iter_batch_makedir", "batch_makedir", "copyfile", 
-    "renamefile", "transferfile", 
+    "update_name", "post_event", "makedir", "iter_batch_makedir", "batch_makedir", 
+    "copyfile", "renamefile", "transferfile", 
 ]
 __doc__ = "这个模块提供了一些和修改文件或目录信息有关的函数"
 
@@ -166,6 +165,7 @@ def update_desc(
     )
 
 
+# TODO: 要支持 open
 @overload
 def update_star(
     client: str | PathLike | P115Client, 
@@ -554,6 +554,7 @@ def update_category_shortcut(
     )
 
 
+# TODO: 要支持 open
 @overload
 def batch_unstar(
     client: str | PathLike | P115Client, 
@@ -639,6 +640,7 @@ def batch_unstar(
     return run_gen_step(gen_step, async_)
 
 
+# TODO: 要支持 open
 @overload
 def update_name(
     client: str | PathLike | P115Client, 
@@ -724,7 +726,6 @@ def update_name(
     return run_gen_step(gen_step, async_)
 
 
-# TODO: 是否能批量推送 "browse_audio" 或 "browse_video" 事件？
 @overload
 def post_event(
     client: str | PathLike | P115Client, 
@@ -767,6 +768,9 @@ def post_event(
 ) -> None | Coroutine:
     """批量将文件或目录推送事件
 
+    .. todo::
+        是否能批量推送 "browse_audio" 或 "browse_video" 事件？
+
     :param client: 115 客户端或 cookies
     :param ids: 一组文件或目录的 id 或 pickcode
     :param type: 事件类型
@@ -804,14 +808,96 @@ def post_event(
 
 
 @overload
+def makedir(
+    client: str | PathLike | P115Client | P115OpenClient, 
+    name: str, 
+    /, 
+    pid: int | str = 0, 
+    contain_dir: bool = False, 
+    app: str = "android", 
+    *, 
+    async_: Literal[False] = False, 
+    **request_kwargs, 
+) -> int:
+    ...
+@overload
+def makedir(
+    client: str | PathLike | P115Client | P115OpenClient, 
+    name: str, 
+    /, 
+    pid: int | str = 0, 
+    contain_dir: bool = False, 
+    app: str = "android", 
+    *, 
+    async_: Literal[True], 
+    **request_kwargs, 
+) -> Coroutine[Any, Any, int]:
+    ...
+def makedir(
+    client: str | PathLike | P115Client | P115OpenClient, 
+    name: str, 
+    /, 
+    pid: int | str = 0, 
+    contain_dir: bool = False, 
+    app: str = "android", 
+    *, 
+    async_: Literal[False, True] = False, 
+    **request_kwargs, 
+) -> int | Coroutine[Any, Any, int]:
+    """创建目录
+
+    :param client: 115 客户端或 cookies
+    :param name: 名称 或 路径（如果 `contain_dir` 为 True）
+    :param pid: 目录的 id 或 pickcode，如果输入的是 **名字或相对路径**，则创建在此目录下
+    :param contain_dir: 如果为 True，则要创建的是相对路径（文件存在也能正确返回），否则就是一个文件（即使其中包含 "/"，但文件存在时会报错）
+    :param app: 使用此设备的接口
+    :param async_: 是否异步
+    :param request_kwargs: 其它请求参数
+
+    :return: 目录 id
+    """
+    if isinstance(client, (str, PathLike)):
+        client = P115Client(client, check_for_relogin=True)
+    if app == "open" or not isinstance(client, P115Client):
+        if contain_dir:
+            raise ValueError("115 Open does not support one-shot multiple-level directories creation")
+        makedir: Callable = client.fs_mkdir_open
+    elif app in ("", "web", "desktop", "aps"):
+        if contain_dir:
+            makedir = client.fs_makedirs
+        else:
+            makedir = client.fs_mkdir
+    else:
+        request_kwargs["app"] = app
+        if contain_dir:
+            makedir = client.fs_makedirs_app
+        else:
+            makedir = client.fs_mkdir_app
+    def gen_step():
+        resp = yield makedir(
+            name, 
+            pid=to_id(pid), 
+            async_=async_, 
+            **request_kwargs, 
+        )
+        check_response(resp)
+        if "cid" in resp:
+            return int(resp["cid"])
+        data = resp["data"]
+        return int(data.get("category_id") or data["file_id"])
+    return run_gen_step(gen_step, async_)
+
+
+@overload
 def iter_batch_makedir(
-    client: str | PathLike | P115Client, 
+    client: str | PathLike | P115Client | P115OpenClient, 
     pairs: Iterable[str | tuple[int | str, str]], 
     /, 
     pid: int | str = 0, 
     contain_dir: bool = False, 
     mapping: None | MutableMapping[tuple[int, str], dict] = None, 
     max_workers: None | int = 0, 
+    app: str = "android", 
     *, 
     async_: Literal[False] = False, 
     **request_kwargs, 
@@ -819,26 +905,28 @@ def iter_batch_makedir(
     ...
 @overload
 def iter_batch_makedir(
-    client: str | PathLike | P115Client, 
+    client: str | PathLike | P115Client | P115OpenClient, 
     pairs: Iterable[str | tuple[int | str, str]], 
     /, 
     pid: int | str = 0, 
     contain_dir: bool = False, 
     mapping: None | MutableMapping[tuple[int, str], dict] = None, 
     max_workers: None | int = 0, 
+    app: str = "android", 
     *, 
     async_: Literal[True], 
     **request_kwargs, 
 ) -> AsyncIterator[tuple[tuple[int, str], dict]]:
     ...
 def iter_batch_makedir(
-    client: str | PathLike | P115Client, 
+    client: str | PathLike | P115Client | P115OpenClient, 
     pairs: Iterable[str | tuple[int | str, str]], 
     /, 
     pid: int | str = 0, 
     contain_dir: bool = False, 
     mapping: None | MutableMapping[tuple[int, str], dict] = None, 
     max_workers: None | int = 0, 
+    app: str = "android", 
     *, 
     async_: Literal[False, True] = False, 
     **request_kwargs, 
@@ -848,9 +936,10 @@ def iter_batch_makedir(
     :param client: 115 客户端或 cookies
     :param pairs: 一系列的 **名字或相对路径** 或者 (**目录的 id 或 pickcode**, **名字或相对路径**) 的 2 元组
     :param pid: 目录的 id 或 pickcode，如果输入的是 **名字或相对路径**，则创建在此目录下
-    :param contain_dir: 如果为 True，则要创建的是相对路径，否则就是一个文件（即使其中包含 "/"）
+    :param contain_dir: 如果为 True，则要创建的是相对路径（文件存在也能正确返回），否则就是一个文件（即使其中包含 "/"，但文件存在时会报错）
     :param mapping: 结果缓存，如果要创建的对象在此中，则会被跳过
     :param max_workers: 并发工作数，如果为 None 或者 <= 0，则自动确定
+    :param app: 使用此设备的接口
     :param async_: 是否异步
     :param request_kwargs: 其它请求参数
 
@@ -859,10 +948,21 @@ def iter_batch_makedir(
     if isinstance(client, (str, PathLike)):
         client = P115Client(client, check_for_relogin=True)
     pid = to_id(pid)
-    if contain_dir:
-        makedir = client.fs_makedirs_app
+    if app == "open" or not isinstance(client, P115Client):
+        if contain_dir:
+            raise ValueError("115 Open does not support one-shot multiple-level directories creation")
+        makedir: Callable = client.fs_mkdir_open
+    elif app in ("", "web", "desktop", "aps"):
+        if contain_dir:
+            makedir = client.fs_makedirs
+        else:
+            makedir = client.fs_mkdir
     else:
-        makedir = client.fs_mkdir_app
+        request_kwargs["app"] = app
+        if contain_dir:
+            makedir = client.fs_makedirs_app
+        else:
+            makedir = client.fs_mkdir_app
     @as_gen_step
     def call[T: (str, tuple[int | str, str])](pair: T, /):
         if isinstance(pair, tuple):
@@ -888,13 +988,14 @@ def iter_batch_makedir(
 
 @overload
 def batch_makedir(
-    client: str | PathLike | P115Client, 
+    client: str | PathLike | P115Client | P115OpenClient, 
     pairs: str | tuple[int, str] | Iterable[str | tuple[int | str, str]], 
     /, 
     pid: int | str = 0, 
     contain_dir: bool = False, 
     mapping: None | MutableMapping[tuple[int, str], dict] = None, 
     max_workers: None | int = 0, 
+    app: str = "android", 
     *, 
     async_: Literal[False] = False, 
     **request_kwargs, 
@@ -902,38 +1003,41 @@ def batch_makedir(
     ...
 @overload
 def batch_makedir(
-    client: str | PathLike | P115Client, 
+    client: str | PathLike | P115Client | P115OpenClient, 
     pairs: str | tuple[int, str] | Iterable[str | tuple[int | str, str]], 
     /, 
     pid: int | str = 0, 
     contain_dir: bool = False, 
     mapping: None | MutableMapping[tuple[int, str], dict] = None, 
     max_workers: None | int = 0, 
+    app: str = "android", 
     *, 
     async_: Literal[True], 
     **request_kwargs, 
-) -> Coroutine[None, None, MutableMapping[tuple[int, str], dict]]:
+) -> Coroutine[Any, Any, MutableMapping[tuple[int, str], dict]]:
     ...
 def batch_makedir(
-    client: str | PathLike | P115Client, 
+    client: str | PathLike | P115Client | P115OpenClient, 
     pairs: str | tuple[int, str] | Iterable[str | tuple[int | str, str]], 
     /, 
     pid: int | str = 0, 
     contain_dir: bool = False, 
     mapping: None | MutableMapping[tuple[int, str], dict] = None, 
     max_workers: None | int = 0, 
+    app: str = "android", 
     *, 
     async_: Literal[False, True] = False, 
     **request_kwargs, 
-) -> MutableMapping[tuple[int, str], dict] | Coroutine[None, None, MutableMapping[tuple[int, str], dict]]:
+) -> MutableMapping[tuple[int, str], dict] | Coroutine[Any, Any, MutableMapping[tuple[int, str], dict]]:
     """批量创建目录
 
     :param client: 115 客户端或 cookies
     :param pairs: 一系列的 **名字或相对路径** 或者 (**目录的 id 或 pickcode**, **名字或相对路径**) 的 2 元组
     :param pid: 目录的 id 或 pickcode 或 path，如果输入的是 **名字或相对路径**，则创建在此目录下
-    :param contain_dir: 如果为 True，则要创建的是相对路径，否则就是一个文件（即使其中包含 "/"）
+    :param contain_dir: 如果为 True，则要创建的是相对路径（文件存在也能正确返回），否则就是一个文件（即使其中包含 "/"，但文件存在时会报错）
     :param mapping: 结果缓存，如果要创建的对象在此中，则会被跳过
     :param max_workers: 并发工作数，如果为 None 或者 <= 0，则自动确定
+    :param app: 使用此设备的接口
     :param async_: 是否异步
     :param request_kwargs: 其它请求参数
 
@@ -963,13 +1067,19 @@ def batch_makedir(
                     client, 
                     value=pid, 
                     files=False, 
+                    app=app, 
                     async_=async_, 
                     **request_kwargs, 
                 )
             except FileNotFoundError:
-                resp = yield client.fs_makedirs_app(cast(str, pid), async_=async_, **request_kwargs)
-                check_response(resp)
-                pid = int(resp["cid"])
+                pid = yield makedir(
+                    client, 
+                    cast(str, pid), 
+                    contain_dir=True, 
+                    app=app, 
+                    async_=async_, 
+                    **request_kwargs, 
+                )
         if mapping is None:
             mapping = {}
         take(iter_batch_makedir(
@@ -1353,4 +1463,4 @@ def transferfile(
         ))
     return run_gen_step(gen_step, async_)
 
-# TODO: 上面这些，有些要支持 open 接口
+# TODO: 增加批量的 复制、移动、删除、还原、改名、星标 等操作，要包括 open

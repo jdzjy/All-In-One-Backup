@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # encoding: utf-8
 
-__author__ = "ChenyangGao <https://chenyanggao.github.io>"
 __all__ = [
     "normalize_attr", "normalize_attr_simple", "normalize_attr_web", 
     "normalize_attr_app", "normalize_attr_app2", 

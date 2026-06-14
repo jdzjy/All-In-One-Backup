@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # encoding: utf-8
 
-__author__ = "ChenyangGao <https://chenyanggao.github.io>"
 __all__ = [
     "BEHAVIOR_TYPE_TO_NAME", "BEHAVIOR_NAME_TO_TYPE", "life_show", "iter_life_list", 
     "iter_life_behavior_once", "iter_life_behavior", "iter_life_behavior_list", 

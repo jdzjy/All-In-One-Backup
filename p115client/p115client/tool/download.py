@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # encoding: utf-8
 
-__author__ = "ChenyangGao <https://chenyanggao.github.io>"
 __all__ = [
     "get_pic_url", "batch_get_url", "iter_url_batches", "iter_files_with_url", 
     "iter_images_with_url", "iter_subtitles_with_url", "iter_subtitle_batches", 

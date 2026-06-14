@@ -9,6 +9,7 @@ __all__ = [
     "P115LoginError", "P115AccessTokenError", "P115OpenAppAuthLimitExceeded", 
     "error", "throw", "errno2error"
 ]
+__doc__ = "各种异常类和相关的帮助函数"
 
 import warnings
 

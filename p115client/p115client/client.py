@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 __all__ = ["check_response", "ClientRequestMixin", "P115OpenClient", "P115Client"]
+__doc__ = "115 客户端模块"
 
 from asyncio import Lock as AsyncLock
 from base64 import b64encode
@@ -253,6 +254,9 @@ def check_response(resp: dict | Awaitable[dict], /) -> dict | Coroutine[Any, Any
                     throw(errno.ENOENT, resp)
                 # {"state": false, "errno": 20001, "error": "目录名称不能为空"}
                 case 20001:
+                    throw(errno.EINVAL, resp)
+                # {"state": false, "errno": 20003, "error": "文件名不能包含以下任意字符之一 “ " < > ”。"}
+                case 20003:
                     throw(errno.EINVAL, resp)
                 # {"state": false, "errno": 20004, "error": "该目录名称已存在。"}
                 case 20004:
@@ -797,7 +801,7 @@ class ClientRequestMixin:
             可以作为 ``staticmethod`` 使用
 
         .. note::
-            最多同时有 3 个授权登录，如果有新的授权加入，会先踢掉时间较早的那一个
+            同一个开放应用 id，最多同时有 3 个登入（目前可能又被调整），如果有新的登录，则自动踢掉较早的那一个
 
         :payload:
             - client_id: int | str 💡 AppID
@@ -920,7 +924,7 @@ class ClientRequestMixin:
     ) -> bytes | Coroutine[Any, Any, bytes]:
         """下载登录二维码图片
 
-        GET https://qrcodeapi.115.com/api/1.0/web/1.0/qrcode
+        GET https://qrcodeapi.115.com/api/1.0/{app}/1.0/qrcode
 
         .. note::
             可以作为 ``staticmethod`` 使用
@@ -1295,7 +1299,7 @@ class ClientRequestMixin:
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取登录二维码，扫码可用
 
-        GET https://qrcodeapi.115.com/api/1.0/web/1.0/token/
+        GET https://qrcodeapi.115.com/api/1.0/{app}/1.0/token/
 
         .. note::
             可以作为 ``staticmethod`` 使用
@@ -1346,8 +1350,11 @@ class ClientRequestMixin:
         .. note::
             可以作为 ``staticmethod`` 使用
 
+        .. tip::
+            此接口也可用于检测 app_id 是否可用
+
         .. note::
-            最多同时有 3 个授权登录，如果有新的授权加入，会先踢掉时间较早的那一个
+            同一个开放应用 id，最多同时有 3 个登入（目前可能又被调整），如果有新的登录，则自动踢掉较早的那一个
 
         .. note::
             code_challenge 默认用的字符串为 64 个 0，hash 算法为 md5
@@ -2479,7 +2486,10 @@ class P115OpenClient(ClientRequestMixin):
             支持 GET 和 POST 方法。`file_id` 和 `path` 需必传一个
 
         .. hint::
-            部分相当于 ``P115Client.fs_category_get_app()``
+            具有 ``P115Client.fs_category_get()`` 的能力，而且更强，因为支持用 path 查询
+
+        .. caution::
+            尝试获取目录的信息时，会去计算目录中文件和目录的数量、总文件大小 等信息，可能会消耗大量时间，但短时间内再次查询同一目录，耗时可能会大大减小
 
         .. admonition:: Reference
 
@@ -2494,11 +2504,17 @@ class P115OpenClient(ClientRequestMixin):
             payload = {"file_id": payload}
         elif isinstance(payload, str):
             if payload.startswith("0") or payload.strip(digits):
-                if not payload.startswith(("/", ">")):
-                    payload = "/" + payload
                 payload = {"path": payload}
             else:
                 payload = {"file_id": payload}
+        if path := payload.get("path"):
+            if path.startswith(("/", ">")):
+                sep = path[0]
+                payload["path"] = sep + path.strip(sep)
+            elif ">" in path:
+                payload["path"] = "/" + path.rstrip("/")
+            else:
+                payload["path"] = ">" + path.rstrip(">")
         if method.upper() == "POST":
             request_kwargs["data"] = payload
         else:
@@ -4135,7 +4151,7 @@ class P115Client(P115OpenClient):
     .. note::
         目前允许 1 个用户同时登录多个开放平台应用（用 AppID 区别），也允许多次授权登录同 1 个应用
 
-        目前最多同时有 3 个授权登录，如果有新的授权加入，会先踢掉时间较早的那一个
+        同一个开放应用 id，最多同时有 3 个登入（目前可能又被调整），如果有新的登录，则自动踢掉较早的那一个
 
         目前不允许短时间内再次用 ``refresh_token`` 刷新 ``access_token``，但你可以用登录的方式再次授权登录以获取 ``access_token``，即可不受频率限制
 
@@ -4761,7 +4777,7 @@ class P115Client(P115OpenClient):
         """登录某个开放接口应用
 
         .. note::
-            同一个开放应用 id，最多同时有 2 个登入，如果有新的登录，则自动踢掉较早的那一个
+            同一个开放应用 id，最多同时有 3 个登入（目前可能又被调整），如果有新的登录，则自动踢掉较早的那一个
 
         :param app_id: AppID
         :param show_warning: 是否显示提示信息
@@ -4993,6 +5009,9 @@ class P115Client(P115OpenClient):
         **request_kwargs, 
     ) -> P115OpenClient | Coroutine[Any, Any, P115OpenClient] | Self | Coroutine[Any, Any, Self]:
         """登录某个开放接口应用
+
+        .. note::
+            同一个开放应用 id，最多同时有 3 个登入（目前可能又被调整），如果有新的登录，则自动踢掉较早的那一个
 
         :param app_id: AppID
         :param replace: 替换某个 client 对象的 `access_token` 和 `refresh_token`
@@ -5370,6 +5389,13 @@ class P115Client(P115OpenClient):
                 try:
                     if fetch_cert_headers is None:
                         if is_open_api:
+                            if "authorization" not in headers:
+                                if cookies := headers.get("cookies") or self.cookies_str:
+                                    yield self.login_another_open(replace=True, async_=async_, headers={"cookie": cookies})
+                                    headers["authorization"] = self.headers["authorization"]
+                                elif getattr(self, "refresh_token", ""):
+                                    yield self.refresh_access_token(async_=async_)
+                                    headers["authorization"] = self.headers["authorization"]
                             cert: str = headers["authorization"]
                         else:
                             cert = headers["cookie"]
@@ -5551,7 +5577,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """采纳助愿
 
-        POST https://act.115.com/api/1.0/web/1.0/act2024xys/adopt
+        POST https://act.115.com/api/1.0/{app}/1.0/act2024xys/adopt
 
         :payload:
             - did: str 💡 许愿的 id
@@ -5597,7 +5623,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """创建助愿（如果提供 file_ids，则会创建一个分享链接）
 
-        POST https://act.115.com/api/1.0/web/1.0/act2024xys/aid_desire
+        POST https://act.115.com/api/1.0/{app}/1.0/act2024xys/aid_desire
 
         :payload:
             - id: str 💡 许愿 id
@@ -5644,7 +5670,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """删除助愿
 
-        POST https://act.115.com/api/1.0/web/1.0/act2024xys/del_aid_desire
+        POST https://act.115.com/api/1.0/{app}/1.0/act2024xys/del_aid_desire
 
         :payload:
             - ids: int | str 💡 助愿的 id，多个用逗号 "," 隔开
@@ -5690,7 +5716,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取许愿的助愿列表
 
-        GET https://act.115.com/api/1.0/web/1.0/act2024xys/desire_aid_list
+        GET https://act.115.com/api/1.0/{app}/1.0/act2024xys/desire_aid_list
 
         :payload:
             - id: str         💡 许愿的 id
@@ -5738,7 +5764,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取许愿树活动的信息
 
-        GET https://act.115.com/api/1.0/web/1.0/act2024xys/get_act_info
+        GET https://act.115.com/api/1.0/{app}/1.0/act2024xys/get_act_info
         """
         api = complete_url(f"/api/1.0/{app}/1.0/act2024xys/get_act_info", base_url=base_url)
         return self.request(url=api, async_=async_, **request_kwargs)
@@ -5779,7 +5805,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取的许愿信息
 
-        GET https://act.115.com/api/1.0/web/1.0/act2024xys/get_desire_info
+        GET https://act.115.com/api/1.0/{app}/1.0/act2024xys/get_desire_info
 
         :payload:
             - id: str 💡 许愿的 id
@@ -5822,7 +5848,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """首页的许愿树（随机刷新 15 条）
 
-        GET https://act.115.com/api/1.0/web/1.0/act2024xys/home_list
+        GET https://act.115.com/api/1.0/{app}/1.0/act2024xys/home_list
         """
         api = complete_url(f"/api/1.0/{app}/1.0/act2024xys/home_list", base_url=base_url)
         return self.request(url=api, async_=async_, **request_kwargs)
@@ -5863,7 +5889,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """我的助愿列表
 
-        GET https://act.115.com/api/1.0/web/1.0/act2024xys/my_aid_desire
+        GET https://act.115.com/api/1.0/{app}/1.0/act2024xys/my_aid_desire
 
         :payload:
             - type: 0 | 1 | 2 = 0 💡 类型
@@ -5918,7 +5944,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """我的许愿列表
 
-        GET https://act.115.com/api/1.0/web/1.0/act2024xys/my_desire
+        GET https://act.115.com/api/1.0/{app}/1.0/act2024xys/my_desire
 
         :payload:
             - type: 0 | 1 | 2 = 0 💡 类型
@@ -5973,7 +5999,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """创建许愿
 
-        POST https://act.115.com/api/1.0/web/1.0/act2024xys/wish
+        POST https://act.115.com/api/1.0/{app}/1.0/act2024xys/wish
 
         :payload:
             - content: str 💡 许愿文本，不少于 5 个字，不超过 500 个字
@@ -6022,7 +6048,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """删除许愿
 
-        POST https://act.115.com/api/1.0/web/1.0/act2024xys/del_wish
+        POST https://act.115.com/api/1.0/{app}/1.0/act2024xys/del_wish
 
         :payload:
             - ids: str 💡 许愿的 id，多个用逗号 "," 隔开
@@ -6473,7 +6499,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """新建日记
 
-        POST https://life.115.com/api/1.0/web/1.0/diary/add
+        POST https://life.115.com/api/1.0/{app}/1.0/diary/add
 
         :payload:
             - form[content]: str 💡 内容
@@ -6547,7 +6573,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """删除日记
 
-        POST https://life.115.com/api/1.0/web/1.0/diary/delete
+        POST https://life.115.com/api/1.0/{app}/1.0/diary/delete
 
         :payload:
             - diary_id: int | str 💡 日记 id
@@ -6593,7 +6619,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取日记详情
 
-        GET https://life.115.com/api/1.0/web/1.0/diary/detail
+        GET https://life.115.com/api/1.0/{app}/1.0/diary/detail
 
         :payload:
             - diary_id: int | str 💡 日记 id
@@ -6640,7 +6666,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取日记详情
 
-        GET https://life.115.com/api/1.0/web/1.0/life/diarydetail
+        GET https://life.115.com/api/1.0/{app}/1.0/life/diarydetail
 
         :payload:
             - diary_id: int | str 💡 日记 id
@@ -6687,7 +6713,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """修改日记
 
-        POST https://life.115.com/api/1.0/web/1.0/diary/edit
+        POST https://life.115.com/api/1.0/{app}/1.0/diary/edit
 
         :payload:
             - form[diary_id]: str 💡 日记 id
@@ -6755,7 +6781,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取日记可选项（例如天气、心情等）的取值集合
 
-        GET https://life.115.com/api/1.0/web/1.0/diary/get_diary_config
+        GET https://life.115.com/api/1.0/{app}/1.0/diary/get_diary_config
         """
         api = complete_url(f"/api/1.0/{app}/1.0/diary/get_diary_config", base_url)
         return self.request(url=api, async_=async_, **request_kwargs)
@@ -6796,7 +6822,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取最近使用过的标签列表
 
-        GET https://life.115.com/api/1.0/web/1.0/diary/getlatesttags
+        GET https://life.115.com/api/1.0/{app}/1.0/diary/getlatesttags
 
         :payload:
             - q: str = "" 💡 筛选关键词
@@ -6846,7 +6872,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取标签的颜色
 
-        POST https://life.115.com/api/1.0/web/1.0/diary/gettagcolor
+        POST https://life.115.com/api/1.0/{app}/1.0/diary/gettagcolor
 
         :payload:
             - tags: str 💡 标签文本
@@ -6950,7 +6976,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """搜索日记
 
-        GET https://life.115.com/api/1.0/web/1.0/diary/search
+        GET https://life.115.com/api/1.0/{app}/1.0/diary/search
 
         :payload:
             - q: str 💡 关键词
@@ -6999,7 +7025,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """设置日记标签
 
-        POST https://life.115.com/api/1.0/web/1.0/diary/settag
+        POST https://life.115.com/api/1.0/{app}/1.0/diary/settag
 
         :payload:
             - diary_id: int | str 💡 日记 id
@@ -7215,7 +7241,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取待下载的文件列表
 
-        GET https://proapi.115.com/android/folder/downfolder
+        GET https://proapi.115.com/{app}/folder/downfolder
 
         .. caution::
             一次性拉完，当文件过多时，会报错
@@ -7297,7 +7323,7 @@ class P115Client(P115OpenClient):
             )
         pickcode = self.to_pickcode(pickcode)
         def gen_step():
-            if app == "web2":
+            if app in ("web2", "video"):
                 resp = yield self.download_url_web2(
                     pickcode, 
                     user_agent=user_agent, 
@@ -7341,7 +7367,7 @@ class P115Client(P115OpenClient):
                 resp = yield self.download_url_app(
                     pickcode, 
                     user_agent=user_agent, 
-                    app=app or "chrome", 
+                    app=app, 
                     async_=async_, 
                     **request_kwargs, 
                 )
@@ -7566,7 +7592,7 @@ class P115Client(P115OpenClient):
     @overload
     def download_url_web(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         user_agent: None | str = None, 
@@ -7578,7 +7604,7 @@ class P115Client(P115OpenClient):
     @overload
     def download_url_web(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         user_agent: None | str = None, 
@@ -7589,7 +7615,7 @@ class P115Client(P115OpenClient):
         ...
     def download_url_web(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         user_agent: None | str = None, 
@@ -7606,11 +7632,11 @@ class P115Client(P115OpenClient):
 
         :payload:
             - pickcode: str
-            - dl: int = <default>
+            - dl: int = 0 💡 如果不为 0，则需要从响应中提取 "file_url_302" 字段，得到一个链接（只能被访问一次，但无需 cookies），然后访问此链接，才能从中获得最终的下载链接
         """
         api = complete_url("/files/download", base_url=base_url)
-        if isinstance(payload, str):
-            payload = {"pickcode": payload}
+        if not isinstance(payload, dict):
+            payload = {"pickcode": self.to_pickcode(payload)}
         headers = request_kwargs["headers"] = dict(request_kwargs.get("headers") or ())
         if user_agent is None:
             headers.setdefault("user-agent", "")
@@ -7678,8 +7704,8 @@ class P115Client(P115OpenClient):
             - pickcode: str
         """
         api = complete_url(base_url=base_url, query={"ct": "download", "ac": "video"})
-        if isinstance(payload, str):
-            payload = {"pickcode": payload}
+        if not isinstance(payload, dict):
+            payload = {"pickcode": self.to_pickcode(payload)}
         headers = request_kwargs["headers"] = dict(request_kwargs.get("headers") or ())
         if user_agent is None:
             headers.setdefault("user-agent", "")
@@ -7791,7 +7817,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """解压缩到某个目录，推荐直接用封装函数 `extract_file`
 
-        POST https://proapi.115.com/android/2.0/ufile/add_extract_file
+        POST https://proapi.115.com/{app}/2.0/ufile/add_extract_file
 
         :payload:
             - pick_code: str
@@ -7921,7 +7947,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取压缩包中文件的下载链接
 
-        GET https://proapi.115.com/android/2.0/ufile/extract_down_file
+        GET https://proapi.115.com/{app}/2.0/ufile/extract_down_file
 
         :payload:
             - pick_code: str
@@ -8289,7 +8315,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取压缩文件的文件列表（简略信息）
 
-        GET https://proapi.115.com/android/2.0/ufile/extract_folders
+        GET https://proapi.115.com/{app}/2.0/ufile/extract_folders
 
         :payload:
             - pick_code: str 💡 压缩包文件的提取码
@@ -8378,7 +8404,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取压缩文件的文件列表是否可批量下载（最高支持1万的文件操作数量）
 
-        POST https://proapi.115.com/android/2.0/ufile/extract_folders
+        POST https://proapi.115.com/{app}/2.0/ufile/extract_folders
 
         :payload:
             - pick_code: str 💡 压缩包文件的提取码
@@ -8472,7 +8498,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取压缩文件的文件列表，推荐直接用封装函数 `extract_list_app`
 
-        GET https://proapi.115.com/android/2.0/ufile/extract_info
+        GET https://proapi.115.com/{app}/2.0/ufile/extract_info
 
         :payload:
             - pick_code: str
@@ -8706,7 +8732,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取 解压缩到目录 任务的进度
 
-        GET https://proapi.115.com/android/2.0/ufile/add_extract_file
+        GET https://proapi.115.com/{app}/2.0/ufile/add_extract_file
 
         :payload:
             - extract_id: str
@@ -8802,7 +8828,7 @@ class P115Client(P115OpenClient):
         .. warning::
             只能云解压 20GB 以内文件，不支持云解压分卷压缩包，只支持 .zip、.rar 和 .7z 等
 
-        POST https://proapi.115.com/android/2.0/ufile/push_extract
+        POST https://proapi.115.com/{app}/2.0/ufile/push_extract
 
         :payload:
             - pick_code: str
@@ -8892,7 +8918,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """查询解压缩任务的进度
 
-        GET https://proapi.115.com/android/2.0/ufile/push_extract
+        GET https://proapi.115.com/{app}/2.0/ufile/push_extract
 
         :payload:
             - pick_code: str
@@ -8981,7 +9007,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """批量设置文件或目录（显示时长等）
 
-        POST https://proapi.115.com/android/files/batch_edit
+        POST https://proapi.115.com/{app}/files/batch_edit
 
         :payload:
             - show_play_long[{fid}]: 0 | 1 = 1 💡 设置或取消显示时长
@@ -9023,6 +9049,9 @@ class P115Client(P115OpenClient):
         """显示属性，可获取文件或目录的统计信息（提示：但得不到根目录的统计信息，所以 cid 为 0 时无意义）
 
         GET https://webapi.115.com/category/get
+
+        .. caution::
+            尝试获取目录的信息时，会去计算目录中文件和目录的数量、总文件大小 等信息，可能会消耗大量时间，但短时间内再次查询同一目录，耗时可能会大大减小
 
         :payload:
             - cid: int | str
@@ -9085,7 +9114,10 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """显示属性，可获取文件或目录的统计信息（提示：但得不到根目录的统计信息，所以 cid 为 0 时无意义）
 
-        GET https://proapi.115.com/android/2.0/category/get
+        GET https://proapi.115.com/{app}/2.0/category/get
+
+        .. caution::
+            尝试获取目录的信息时，会去计算目录中文件和目录的数量、总文件大小 等信息，可能会消耗大量时间，但短时间内再次查询同一目录，耗时可能会大大减小
 
         :payload:
             - cid: int | str
@@ -9109,6 +9141,9 @@ class P115Client(P115OpenClient):
             payload = {"cid": payload}
         payload.setdefault("aid", 1)
         return self.request(url=api, params=payload, async_=async_, **request_kwargs)
+
+    fs_info = fs_category_get # type: ignore
+    fs_info_app = fs_category_get_app
 
     @overload
     def fs_category_shortcut(
@@ -9307,7 +9342,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """复制文件或目录
 
-        POST https://proapi.115.com/android/files/copy
+        POST https://proapi.115.com/{app}/files/copy
 
         .. caution::
             ⚠️ 请不要并发执行，限制在 5 万个文件和目录以内
@@ -9516,7 +9551,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """删除文件或目录
 
-        POST https://proapi.115.com/android/rb/delete
+        POST https://proapi.115.com/{app}/rb/delete
 
         .. caution::
             ⚠️ 请不要并发执行，限制在 5 万个文件和目录以内
@@ -9638,7 +9673,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取文件或目录的备注
 
-        GET https://proapi.115.com/android/files/desc
+        GET https://proapi.115.com/{app}/files/desc
 
         :payload:
             - file_id: int | str
@@ -9646,7 +9681,7 @@ class P115Client(P115OpenClient):
             - compat: 0 | 1 = 1
             - new_html: 0 | 1 = <default>
         """
-        api = complete_url("/android/files/desc", base_url=base_url, app=app)
+        api = complete_url("/files/desc", base_url=base_url, app=app)
         if isinstance(payload, (int, str)):
             payload = {"file_id": payload}
         payload = {"compat": 1, **payload}
@@ -9876,7 +9911,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """由路径获取对应的 id（但只能获取目录，不能获取文件）
 
-        GET https://proapi.115.com/android/files/getid
+        GET https://proapi.115.com/{app}/files/getid
 
         :payload:
             - path: str
@@ -9968,7 +10003,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取文档的信息和下载链接
 
-        GET https://proapi.115.com/android/files/document
+        GET https://proapi.115.com/{app}/files/document
 
         .. note::
             即使文件格式不正确或者是一个目录，也可返回一些信息（包括 parent_id）
@@ -10222,7 +10257,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """导出目录树
 
-        POST https://proapi.115.com/android/2.0/ufile/export_dir
+        POST https://proapi.115.com/{app}/2.0/ufile/export_dir
 
         :payload:
             - file_ids: int | str   💡 多个用逗号 "," 隔开
@@ -10314,7 +10349,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取导出目录树的完成情况
 
-        GET https://proapi.115.com/android/2.0/ufile/export_dir
+        GET https://proapi.115.com/{app}/2.0/ufile/export_dir
 
         :payload:
             - export_id: int | str = 0 💡 任务 id
@@ -10637,7 +10672,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取目录中的文件列表和基本信息
 
-        GET https://proapi.115.com/android/2.0/ufile/files
+        GET https://proapi.115.com/{app}/2.0/ufile/files
 
         .. hint::
             如果要遍历获取所有文件，需要指定 show_dir=0 且 cur=0（或不指定 cur），这个接口并没有 type=99 时获取所有文件的意义
@@ -10737,7 +10772,7 @@ class P115Client(P115OpenClient):
                 - 15: 图片和视频，相当于 2 和 4
                 - >= 16: 相当于 8
         """
-        api = complete_url("/2.0/ufile/files", base_url=base_url, app=app)
+        api = complete_url("/2.0/ufile/files", base_url=base_url, app=app or "android", force_app=True)
         if isinstance(payload, (int, str)):
             payload = {"cid": payload}
         payload = {
@@ -10784,7 +10819,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取目录中的文件列表和基本信息
 
-        GET https://proapi.115.com/android/files
+        GET https://proapi.115.com/{app}/files
 
         .. hint::
             如果要遍历获取所有文件，需要指定 show_dir=0 且 cur=0（或不指定 cur），这个接口并没有 type=99 时获取所有文件的意义
@@ -10876,7 +10911,7 @@ class P115Client(P115OpenClient):
                 - 15: 图片和视频，相当于 2 和 4
                 - >= 16: 相当于 8
         """
-        api = complete_url("/files", base_url=base_url, app=app)
+        api = complete_url("/files", base_url=base_url, app=app or "android", force_app=True)
         if isinstance(payload, (int, str)):
             payload = {"cid": payload}
         payload = {
@@ -11190,15 +11225,15 @@ class P115Client(P115OpenClient):
         GET https://webapi.115.com/files/imglist
 
         .. danger::
-            这个函数大概是有 bug 的，不推荐使用
+            这个函数大概是有 bug 的，不推荐使用，请用 ``fs_files_media`` 代替
 
         .. attention::
             只能获取直属于 `cid` 所在目录的图片，不会遍历整个目录树
 
         :payload:
-            - cid: int | str     💡 目录 id，对应 parent_id
-            - file_id: int | str 💡 不能是 0，可以不同于 `cid`，必须是任何一个有效的 id（单纯是被检查一下）
-            - limit: int = <default> 💡 最多返回数量
+            - cid: int | str     💡 目录 id
+            - file_id: int | str 💡 不能是 0，可以是任何一个有效的 id（必须在自己网盘中，哪怕已经被删除，此必需参数只为应付检查）
+            - limit: int = 32 💡 最多返回数量
             - offset: int = 0 💡 索引偏移，索引从 0 开始计算
             - is_asc: 0 | 1 = <default> 💡 是否升序排列
             - next: 0 | 1 = <default>
@@ -11255,7 +11290,78 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取目录中的图片列表和基本信息
 
-        GET https://proapi.115.com/android/files/imglist
+        GET https://proapi.115.com/{app}/files/imglist
+
+        :payload:
+            - cid: int | str = 0 💡 目录 id，对应 parent_id
+            - limit: int = 32    💡 一页大小，建议控制在 <= 9000，不然会报错
+            - offset: int = 0    💡 索引偏移，索引从 0 开始计算
+            - aid: int = 1 💡 area_id
+
+                - 0: 会被视为 1
+                - 1: 正常文件
+                - 2: <unknown>
+                - 3: <unknown>
+                - 4: <unknown>
+                - 5: <unknown>
+                - 7: 回收站文件
+                - 9: <unknown>
+                - 12: 瞬间文件
+                - 15: <unknown>
+                - 120: 彻底删除文件、简历附件
+                - <其它>: 会被视为 0
+
+            - asc: 0 | 1 = <default> 💡 是否升序排列
+            - cur: 0 | 1 = 1 💡 只罗列当前目录
+            - o: str = <default> 💡 用某字段排序
+
+                - 文件名："file_name"
+                - 文件大小："file_size"
+                - 文件种类："file_type"
+                - 修改时间："user_utime"
+                - 创建时间："user_ptime"
+                - 上一次打开时间："user_otime"
+        """
+        api = complete_url("/files/imglist", base_url=base_url, app=app)
+        if isinstance(payload, (int, str)):
+            payload = {"cid": payload}
+        payload = {"limit": 32, "offset": 0, "aid": 1, "cid": 0, "cur": 1, **payload}
+        return self.request(url=api, params=payload, async_=async_, **request_kwargs)
+
+    @overload
+    def fs_files_media(
+        self, 
+        payload: int | str | dict = 0, 
+        /, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def fs_files_media(
+        self, 
+        payload: int | str | dict = 0, 
+        /, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def fs_files_media(
+        self, 
+        payload: int | str | dict = 0, 
+        /, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """获取目录中的文件列表和基本信息（不含目录）
+
+        GET https://webapi.115.com/files/medialist
 
         :payload:
             - cid: int | str = 0 💡 目录 id，对应 parent_id
@@ -11278,7 +11384,7 @@ class P115Client(P115OpenClient):
                 - <其它>: 会被视为 0
 
             - asc: 0 | 1 = <default> 💡 是否升序排列
-            - cur: 0 | 1 = <default> 💡 只罗列当前目录
+            - cur: 0 | 1 = 1 💡 只罗列当前目录
             - o: str = <default> 💡 用某字段排序
 
                 - 文件名："file_name"
@@ -11287,11 +11393,24 @@ class P115Client(P115OpenClient):
                 - 修改时间："user_utime"
                 - 创建时间："user_ptime"
                 - 上一次打开时间："user_otime"
+
+            - type: int = -1 💡 文件类型（不传则视为 4）
+
+                - <0: 全部文件（不含目录），响应中的 "type" 为 0
+                - 0: 视为 4，响应中的 "type" 为 4
+                - 1: 文档
+                - 2: 图片
+                - 3: 音频
+                - 4: 视频
+                - 5: 压缩包
+                - 6: 软件/应用
+                - 7: 书籍
+                - >7: 相当于 1
         """
-        api = complete_url("/files/imglist", base_url=base_url, app=app)
+        api = complete_url("/files/medialist", base_url=base_url)
         if isinstance(payload, (int, str)):
             payload = {"cid": payload}
-        payload = {"limit": 32, "offset": 0, "aid": 1, "cid": 0, **payload}
+        payload = {"limit": 32, "offset": 0, "aid": 1, "cid": 0, "cur": 1, "type": -1, **payload}
         return self.request(url=api, params=payload, async_=async_, **request_kwargs)
 
     @overload
@@ -11328,9 +11447,9 @@ class P115Client(P115OpenClient):
         async_: Literal[False, True] = False, 
         **request_kwargs, 
     ) -> dict | Coroutine[Any, Any, dict]:
-        """获取目录中的文件列表和基本信息
+        """获取目录中的文件列表和基本信息（不含目录）
 
-        GET https://proapi.115.com/android/files/medialist
+        GET https://proapi.115.com/{app}/files/medialist
 
         :payload:
             - cid: int | str = 0 💡 目录 id，对应 parent_id
@@ -11353,7 +11472,7 @@ class P115Client(P115OpenClient):
                 - <其它>: 会被视为 0
 
             - asc: 0 | 1 = <default> 💡 是否升序排列
-            - cur: 0 | 1 = <default> 💡 只罗列当前目录
+            - cur: 0 | 1 = 1 💡 只罗列当前目录
             - o: str = <default> 💡 用某字段排序
 
                 - 文件名："file_name"
@@ -11363,9 +11482,10 @@ class P115Client(P115OpenClient):
                 - 创建时间："user_ptime"
                 - 上一次打开时间："user_otime"
 
-            - type: int = 0 💡 文件类型
+            - type: int =  💡 文件类型（不传则视为 4）
 
-                - 0: 相当于 2
+                - <0: 全部文件（不含目录），响应中的 "type" 为 0
+                - 0: 视为 2，响应中的 "type" 为 2
                 - 1: 文档
                 - 2: 图片
                 - 3: 音频
@@ -11373,12 +11493,12 @@ class P115Client(P115OpenClient):
                 - 5: 压缩包
                 - 6: 软件/应用
                 - 7: 书籍
-                - ...: > 7 则相当于 1，< 0 则是全部文件
+                - >7: 相当于 1
         """
         api = complete_url("/files/medialist", base_url=base_url, app=app)
         if isinstance(payload, (int, str)):
             payload = {"cid": payload}
-        payload = {"limit": 32, "offset": 0, "aid": 1, "type": 0, "cid": 0, **payload}
+        payload = {"limit": 32, "offset": 0, "aid": 1, "cid": 0, "cur": 1, "type": -1, **payload}
         return self.request(url=api, params=payload, async_=async_, **request_kwargs)
 
     @overload
@@ -11520,7 +11640,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取目录中某个文件类型的扩展名的（去重）列表
 
-        GET https://proapi.115.com/android/2.0/ufile/get_second_type
+        GET https://proapi.115.com/{app}/2.0/ufile/get_second_type
 
         :payload:
             - cid: int | str = 0 💡 目录 id，对应 parent_id
@@ -11578,7 +11698,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """设置（若干个）文件或目录（名字、备注、标签等）
 
-        POST https://proapi.115.com/android/files/update
+        POST https://proapi.115.com/{app}/files/update
 
         :payload:
             - file_id: int | str
@@ -11727,7 +11847,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """设置文件或目录，或者创建目录
 
-        POST https://proapi.115.com/android/folder/update
+        POST https://proapi.115.com/{app}/folder/update
 
         .. note::
             如果提供了 `cid` 和 `name`，则表示对 `cid` 对应的文件或目录进行改名，否则创建目录
@@ -11829,7 +11949,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """隐藏或者取消隐藏某些文件或目录
 
-        POST https://proapi.115.com/android/files/hiddenfiles
+        POST https://proapi.115.com/{app}/files/hiddenfiles
 
         :payload:
             - fid: int | str 💡 文件或目录的 id，多个用逗号 "," 隔开
@@ -11936,7 +12056,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """切换隐藏模式
 
-        GET https://proapi.115.com/android/files/hiddenswitch
+        GET https://proapi.115.com/{app}/files/hiddenswitch
 
         .. note::
             可以在设置中的【账号安全/安全密钥】页面下，关闭【文件(隐藏模式/清空删除回收站)】的按钮，就不需要传安全密钥了
@@ -12039,7 +12159,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取历史记录
 
-        GET https://proapi.115.com/android/history
+        GET https://proapi.115.com/{app}/history
 
         :payload:
             - pick_code: str
@@ -12192,7 +12312,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """删除历史记录
 
-        POST https://proapi.115.com/android/history/delete
+        POST https://proapi.115.com/{app}/history/delete
 
         :payload:
             - id: int | str 💡 多个用逗号 "," 隔开
@@ -12240,7 +12360,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """清空历史记录
 
-        POST https://proapi.115.com/android/history/clean
+        POST https://proapi.115.com/{app}/history/clean
 
         :payload:
             - type: int | str = 0 💡 类型（？？表示还未搞清楚），多个用逗号 "," 隔开
@@ -12356,7 +12476,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """历史记录列表
 
-        GET https://proapi.115.com/android/history/list
+        GET https://proapi.115.com/{app}/history/list
 
         :payload:
             - offset: int = 0
@@ -12553,7 +12673,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """接收列表
 
-        GET https://proapi.115.com/android/history/receive_list
+        GET https://proapi.115.com/{app}/history/receive_list
 
         :payload:
             - offset: int = 0
@@ -12654,7 +12774,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """更新文件的观看历史，主要用于视频
 
-        POST https://proapi.115.com/android/history
+        POST https://proapi.115.com/{app}/history
 
         :payload:
             - pick_code: str     💡 文件的提取码
@@ -12886,7 +13006,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """添加标签（可以接受多个）
 
-        POST https://proapi.115.com/android/label/add_multi
+        POST https://proapi.115.com/{app}/label/add_multi
 
         :payload:
             - name: str 💡 格式为 "{label_name}" 或 "{label_name}\x07{color}"，例如 "tag\x07#FF0000"（中间有个 "\\x07"）
@@ -12979,7 +13099,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """删除标签
 
-        POST https://proapi.115.com/android/label/delete
+        POST https://proapi.115.com/{app}/label/delete
 
         :payload:
             - id: int | str 💡 标签 id，多个用逗号 "," 隔开
@@ -13069,7 +13189,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """编辑标签
 
-        POST https://proapi.115.com/android/label/edit
+        POST https://proapi.115.com/{app}/label/edit
 
         :payload:
             - id: int | str 💡 标签 id
@@ -13169,7 +13289,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """罗列标签列表（如果要获取做了标签的文件列表，用 `fs_search` 接口）
 
-        GET https://proapi.115.com/android/label/list
+        GET https://proapi.115.com/{app}/label/list
 
         :payload:
             - offset: int = 0 💡 索引偏移，从 0 开始
@@ -13382,7 +13502,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """批量设置标签
 
-        POST https://proapi.115.com/android/files/batch_label
+        POST https://proapi.115.com/{app}/files/batch_label
 
         :payload:
             - action: "add" | "remove" | "reset" | "replace" 💡 操作名
@@ -13396,8 +13516,60 @@ class P115Client(P115OpenClient):
             - file_label: int | str = <default> 💡 标签 id，多个用逗号 "," 隔开
             - file_label[{file_label}]: int | str = <default> 💡 action 为 replace 时使用此参数，file_label[{原标签id}]: {目标标签id}，例如 file_label[123]: 456，就是把 id 是 123 的标签替换为 id 是 456 的标签
         """
-        api = complete_url("/android/files/batch_label", base_url=base_url, app=app)
+        api = complete_url("/files/batch_label", base_url=base_url, app=app)
         return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
+
+    @overload
+    def fs_makedirs(
+        self, 
+        payload: str | dict, 
+        /, 
+        pid: int | str = 0, 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def fs_makedirs(
+        self, 
+        payload: str | dict, 
+        /, 
+        pid: int | str = 0, 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def fs_makedirs(
+        self, 
+        payload: str | dict, 
+        /, 
+        pid: int | str = 0, 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """新建目录（会尝试创建所有的中间节点）
+
+        .. note::
+            0. 此接口是对 ``fs_dir_getid2`` 的封装
+            1. 目录层级最多 25 级（不算文件节点的话）
+            2. 名字不能包含 3 个字符之一 "<>，如果包含，则会被替换为 _
+            3. 单个目录内最多 5 万个文件（用网页上传、创建 Office 文档此限制）
+
+        .. attention::
+            这个方法并不产生 115 生活的操作事件
+
+        :payload:
+            - path: str
+            - parent_id: int | str = 0
+        """
+        if isinstance(payload, str):
+            payload = {"path": payload}
+        payload.setdefault("parent_id", pid)
+        payload["is_create"] = 1
+        return self.fs_dir_getid2(payload, async_=async_, **request_kwargs)
 
     @overload
     def fs_makedirs_app(
@@ -13673,7 +13845,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """移动文件或目录
 
-        POST https://proapi.115.com/android/files/move
+        POST https://proapi.115.com/{app}/files/move
 
         .. caution::
             ⚠️ 请不要并发执行，限制在 5 万个文件和目录以内
@@ -13872,7 +14044,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取音乐信息
 
-        GET https://proapi.115.com/android/music/musicplay
+        GET https://proapi.115.com/{app}/music/musicplay
 
         .. note::
             即使文件格式不正确或者过大（超过 200 MB），也可返回一些信息（包括 parent_id），但如果是目录则信息匮乏（但由此也可判定一个目录）
@@ -14001,7 +14173,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """罗列星标听单
 
-        GET https://proapi.115.com/android/music/music_fond_list
+        GET https://proapi.115.com/{app}/music/music_fond_list
         """
         api = complete_url("/music/music_fond_list", base_url=base_url, app=app)
         return self.request(url=api, async_=async_, **request_kwargs)
@@ -14134,7 +14306,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """包含音乐的目录列表（专属文件）
 
-        GET https://proapi.115.com/android/music/include_music_list
+        GET https://proapi.115.com/{app}/music/include_music_list
 
         :payload:
             - asc: 0 | 1 = 0
@@ -14227,7 +14399,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取音乐封面等信息
 
-        GET https://proapi.115.com/android/music/musicdetail
+        GET https://proapi.115.com/{app}/music/musicdetail
 
         :payload:
             - pickcode: str 💡 提取码
@@ -14319,7 +14491,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """罗列听单中的文件
 
-        GET https://proapi.115.com/android/music/music_list
+        GET https://proapi.115.com/{app}/music/music_list
 
         :payload:
             - topic_id: int = 1 💡 听单 id。-1:星标 1:最近听过 2:最近接收 678469:临时听单(?)
@@ -14415,7 +14587,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """罗列听单或听单中的文件
 
-        GET https://proapi.115.com/android/music/musicnew
+        GET https://proapi.115.com/{app}/music/musicnew
 
         :payload:
             - topic_id: int = 1 💡 听单 id。-1:星标 1:最近听过 2:最近接收 678469:临时听单(?)
@@ -14604,7 +14776,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """罗列听单
 
-        GET https://proapi.115.com/android/music/musiclistnew
+        GET https://proapi.115.com/{app}/music/musiclistnew
 
         .. caution::
             似乎查询参数并没有效果
@@ -14757,7 +14929,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """设置某个目录内文件的默认排序
 
-        POST https://proapi.115.com/android/2.0/ufile/order
+        POST https://proapi.115.com/{app}/2.0/ufile/order
 
         .. error::
             这个接口暂时并不能正常工作，应该是参数构造有问题，暂时请用 ``P115Client.fs_order_set()``
@@ -14907,7 +15079,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """重命名文件或目录
 
-        POST https://proapi.115.com/android/files/batch_rename
+        POST https://proapi.115.com/{app}/files/batch_rename
 
         :payload:
             - files_new_name[{file_id}]: str 💡 值为新的文件名（basename）
@@ -15078,7 +15250,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """查找重复文件（罗列除此以外的 sha1 相同的文件）
 
-        GET https://proapi.115.com/android/2.0/ufile/get_repeat_sha
+        GET https://proapi.115.com/{app}/2.0/ufile/get_repeat_sha
 
         :payload:
             - file_id: int | str
@@ -15289,7 +15461,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """搜索文件或目录
 
-        GET https://proapi.115.com/android/2.0/ufile/search
+        GET https://proapi.115.com/{app}/2.0/ufile/search
 
         .. attention::
             最多只能取回前 10,000 条数据，也就是 `limit + offset <= 10_000`，不过可以一次性取完
@@ -15397,7 +15569,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """搜索文件或目录
 
-        GET https://proapi.115.com/android/files/search
+        GET https://proapi.115.com/{app}/files/search
 
         .. attention::
             最多只能取回前 10,000 条数据，也就是 `limit + offset <= 10_000`，不过可以一次性取完
@@ -15788,7 +15960,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """为文件或目录设置或取消星标
 
-        POST https://proapi.115.com/android/files/star
+        POST https://proapi.115.com/{app}/files/star
 
         .. note::
             如果其中任何一个 id 目前已经被删除，则会直接返回错误信息
@@ -15925,7 +16097,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """通过 pickcode 获取文件信息
 
-        POST https://proapi.115.com/android/files/supervision
+        POST https://proapi.115.com/{app}/files/supervision
 
         :payload:
             - pickcode: str
@@ -15974,7 +16146,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取系统目录（在根目录下，使用 `fs_files` 接口罗列时，数目体现在返回值的 `sys_count` 字段）
 
-        GET https://proapi.115.com/android/files/getpackage
+        GET https://proapi.115.com/{app}/files/getpackage
 
         :payload:
             - sys_dir: int 💡 0:最近接收 1:手机相册 2:云下载 3:我的时光记录 4,10,20,21,22,30,40,50,60,70:(未知)
@@ -16075,11 +16247,6 @@ class P115Client(P115OpenClient):
 
             但如果 `local=1` 有效，则返回仅可得到下载链接，key 为 "download_url"
 
-        .. important::
-            仅这几种设备可用：`harmony`, `web`, `desktop`, **wechatmini**, **alipaymini**, **tv**
-
-            但是如果要获取 m3u8 文件，则要提供 web 设备的 cookies，否则返回空数据
-
         .. note::
             如果返回信息中有 "queue_url"，则可用于查询转码状态
 
@@ -16131,15 +16298,12 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取视频信息和 m3u8 链接列表
 
-        POST https://proapi.115.com/android/2.0/video/play
-
-        .. important::
-            仅这几种设备可用：`115android`, `115ios`, `115ipad`, `android`, `ios`, `qandroid`, `qios`, **wechatmini**, **alipaymini**, **tv**
+        POST https://proapi.115.com/{app}/2.0/video/play
 
         :payload:
             - pickcode: str 💡 提取码
             - share_id: int | str = <default> 💡 分享 id
-            - local: 0 | 1 = <default> 💡 是否本地，如果为 1，则不包括 m3u8
+            - local: 0 | 1 = 0 💡 是否本地，如果为 1，则不包括 m3u8
             - user_id: int | str = <default> 💡 用户 id
         """
         api = complete_url("/2.0/video/play", base_url=base_url, app=app)
@@ -16344,7 +16508,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取视频字幕
 
-        GET https://proapi.115.com/android/2.0/video/subtitle
+        GET https://proapi.115.com/{app}/2.0/video/subtitle
 
         :payload:
             - pickcode: str
@@ -16390,7 +16554,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取视频的转码进度
 
-        GET https://transcode.115.com/api/1.0/android/1.0/trans_code/check_transcode_job
+        GET https://transcode.115.com/api/1.0/{app}/1.0/trans_code/check_transcode_job
 
         :payload:
             - sha1: str
@@ -16440,7 +16604,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """批量删除操作历史：批量删除 115 生活事件列表
 
-        POST https://life.115.com/api/1.0/web/1.0/life/life_batch_delete
+        POST https://life.115.com/api/1.0/{app}/1.0/life/life_batch_delete
 
         :payload:
             - delete_data: str 💡 JSON array，每条数据格式为 {"relation_id": str, "behavior_type": str}
@@ -16567,7 +16731,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取 `P115Client.life_list` 操作记录明细
 
-        GET https://proapi.115.com/android/behavior/detail
+        GET https://proapi.115.com/{app}/behavior/detail
 
         .. caution::
             缺乏下面这些事件：
@@ -16642,7 +16806,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """推送事件：浏览文档 "browse_document"
 
-        POST https://proapi.115.com/android/files/doc_behavior
+        POST https://proapi.115.com/{app}/files/doc_behavior
 
         :payload:
             - file_id: int | str
@@ -16693,7 +16857,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """推送事件：浏览图片 "browse_image"
 
-        POST https://proapi.115.com/android/files/img_behavior
+        POST https://proapi.115.com/{app}/files/img_behavior
 
         :payload:
             - file_id: int | str
@@ -16741,7 +16905,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取 115 生活的开关设置
 
-        GET https://life.115.com/api/1.0/web/1.0/calendar/getoption
+        GET https://life.115.com/api/1.0/{app}/1.0/calendar/getoption
 
         .. hint::
             app 可以是任意字符串，服务器并不做检查。其他可用 app="web" 的接口可能皆是如此
@@ -16782,7 +16946,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取 115 生活的开关设置
 
-        GET https://life.115.com/api/1.0/web/1.0/calendar/recent_operations_getoption
+        GET https://life.115.com/api/1.0/{app}/1.0/calendar/recent_operations_getoption
         """
         api = complete_url(f"/api/1.0/{app}/1.0/calendar/recent_operations_getoption", base_url=base_url)
         return self.request(url=api, async_=async_, **request_kwargs)
@@ -16823,7 +16987,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """设置 115 生活的开关选项
 
-        POST https://life.115.com/api/1.0/web/1.0/calendar/setoption
+        POST https://life.115.com/api/1.0/{app}/1.0/calendar/setoption
 
         :payload:
             - locus: 0 | 1 = 1     💡 开启或关闭最近记录
@@ -16879,7 +17043,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """设置 115 生活的开关选项
 
-        POST https://life.115.com/api/1.0/web/1.0/calendar/recent_operations_setoption
+        POST https://life.115.com/api/1.0/{app}/1.0/calendar/recent_operations_setoption
 
         :payload:
             - locus: 0 | 1 = 1     💡 开启或关闭最近记录
@@ -16935,7 +17099,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取节假日等
 
-        GET https://life.115.com/api/1.0/web/1.0/life/cdlist
+        GET https://life.115.com/api/1.0/{app}/1.0/life/cdlist
 
         :payload:
             - start_time: int = <default>    💡 开始时间戳，单位是秒，默认为当年第一天零点
@@ -16992,7 +17156,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """批量获取图片的预览图链接
 
-        POST https://life.115.com/api/1.0/web/1.0/imgload/get_pic_url
+        POST https://life.115.com/api/1.0/{app}/1.0/imgload/get_pic_url
 
         .. hint::
             这个接口获取的链接似乎长久有效，而且支持任何文件（只要有人上传过），但限制文件大小在 50 MB 以内
@@ -17062,7 +17226,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """清空操作历史：清空 115 生活事件列表
 
-        POST https://life.115.com/api/1.0/web/1.0/life/life_clear_history
+        POST https://life.115.com/api/1.0/{app}/1.0/life/life_clear_history
 
         :payload:
             - tab_type: 0 | 1 = <default>
@@ -17108,7 +17272,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取备忘（记录/笔记/记事）、日记或日程的列表
 
-        GET https://life.115.com/api/1.0/web/1.0/life/glist
+        GET https://life.115.com/api/1.0/{app}/1.0/life/glist
 
         .. note::
             返回数据列表中，每一条都有个 `"type"` 字段，这个和请求参数里面的 `"type"` 含义并不同
@@ -17170,7 +17334,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取有数据的那几天零点的时间戳
 
-        GET https://life.115.com/api/1.0/web/1.0/life/life_has_data
+        GET https://life.115.com/api/1.0/{app}/1.0/life/life_has_data
 
         :payload:
             - end_time: int = <default>
@@ -17218,7 +17382,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """罗列登录和增删改操作记录（最新几条）
 
-        GET https://life.115.com/api/1.0/web/1.0/life/life_list
+        GET https://life.115.com/api/1.0/{app}/1.0/life/life_list
 
         .. note::
             为了实现分页拉取，需要指定 last_data 参数。只要上次返回的数据不为空，就会有这个值，直接使用即可
@@ -17362,7 +17526,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取最近浏览记录
 
-        GET https://life.115.com/api/1.0/web/1.0/life/recent_browse
+        GET https://life.115.com/api/1.0/{app}/1.0/life/recent_browse
 
         :payload:
             - start: int = 0
@@ -17410,7 +17574,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取最近操作记录详细
 
-        GET https://life.115.com/api/1.0/web/1.0/life/recent_operation_items
+        GET https://life.115.com/api/1.0/{app}/1.0/life/recent_operation_items
 
         .. caution::
             这个接口可能需要传 `behavior_type` 和 `date`，能力远弱于 `P115Client.life_behavior_detail_app`
@@ -17488,7 +17652,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取最近操作记录
 
-        GET https://life.115.com/api/1.0/web/1.0/life/recent_operations
+        GET https://life.115.com/api/1.0/{app}/1.0/life/recent_operations
 
         :payload:
             - start: int = 0
@@ -17545,7 +17709,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """清空最近操作记录
 
-        GET https://life.115.com/api/1.0/web/1.0/life/recent_operations_clear
+        GET https://life.115.com/api/1.0/{app}/1.0/life/recent_operations_clear
 
         :payload:
             - tab_type: int = 0
@@ -17591,7 +17755,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """批量删除最近操作记录
 
-        GET https://life.115.com/api/1.0/web/1.0/life/recent_operations_del
+        GET https://life.115.com/api/1.0/{app}/1.0/life/recent_operations_del
 
         :payload:
             - delete_data: str 💡 JSON array，每条数据格式为 {"relation_id": str, "behavior_type": str}
@@ -17637,7 +17801,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """切换备忘（记录/笔记/记事）、日记或日程的置顶状态
 
-        GET https://life.115.com/api/1.0/web/1.0/life/set_top
+        GET https://life.115.com/api/1.0/{app}/1.0/life/set_top
 
         .. attention::
             这个接口会自动切换记录的置顶状态，但不支持手动指定是否置顶，只是在置顶和不置顶间来回切换。
@@ -17958,7 +18122,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取登录信息
 
-        GET https://proapi.115.com/android/2.0/login_info
+        GET https://proapi.115.com/{app}/2.0/login_info
         """
         api = complete_url("/2.0/login_info", base_url=base_url, app=app)
         return self.request(url=api, async_=async_, **request_kwargs)
@@ -21810,7 +21974,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取 sign 和 time 字段（各个添加任务的接口需要）
 
-        GET https://proapi.115.com/android/files/offlinesign
+        GET https://proapi.115.com/{app}/files/offlinesign
         """
         api = complete_url("/files/offlinesign", base_url=base_url, app=app)
         return self.request(url=api, async_=async_, **request_kwargs)
@@ -23061,7 +23225,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """回收站：删除或清空
 
-        POST https://proapi.115.com/android/rb/secret_del
+        POST https://proapi.115.com/{app}/rb/secret_del
 
         .. note::
             只要不指定 `tid`，就会清空回收站，如果有目录正在删除中也可以操作
@@ -23229,7 +23393,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """回收站：列表
 
-        GET https://proapi.115.com/android/rb
+        GET https://proapi.115.com/{app}/rb
 
         :payload:
             - aid: int = 7 💡 area_id
@@ -23344,7 +23508,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """回收站：还原
 
-        POST https://proapi.115.com/android/rb/revert
+        POST https://proapi.115.com/{app}/rb/revert
 
         .. caution::
             ⚠️ 请不要并发执行，限制在 5 万个文件和目录以内
@@ -23865,7 +24029,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取（自己的）分享信息
 
-        GET https://proapi.115.com/android/2.0/share/shareinfo
+        GET https://proapi.115.com/{app}/2.0/share/shareinfo
 
         :payload:
             - share_code: str
@@ -23962,7 +24126,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """罗列（自己的）分享信息列表
 
-        GET https://proapi.115.com/android/2.0/share/slist
+        GET https://proapi.115.com/{app}/2.0/share/slist
 
         :payload:
             - limit: int = 32
@@ -24042,7 +24206,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """免登录下载流量配额
 
-        GET https://proapi.115.com/android/2.0/user/notlogin_dl_quota
+        GET https://proapi.115.com/{app}/2.0/user/notlogin_dl_quota
         """
         api = complete_url("/2.0/user/notlogin_dl_quota", base_url=base_url, app=app)
         return self.request(url=api, async_=async_, **request_kwargs)
@@ -24128,7 +24292,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """接收分享链接的某些文件或目录
 
-        POST https://proapi.115.com/android/2.0/share/receive
+        POST https://proapi.115.com/{app}/2.0/share/receive
 
         :payload:
             - share_code: str
@@ -24221,7 +24385,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """取消访问码
 
-        GET https://proapi.115.com/android/2.0/share/recvcode
+        GET https://proapi.115.com/{app}/2.0/share/recvcode
 
         :payload:
             - share_code: str
@@ -24324,7 +24488,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """创建（自己的）分享
 
-        POST https://proapi.115.com/android/2.0/share/send
+        POST https://proapi.115.com/{app}/2.0/share/send
 
         :payload:
             - file_ids: int | str 💡 文件列表，有多个用逗号 "," 隔开
@@ -24906,7 +25070,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取分享链接的某个目录中的文件和子目录的列表（包含详细信息）
 
-        GET https://proapi.115.com/android/2.0/share/snap
+        GET https://proapi.115.com/{app}/2.0/share/snap
 
         .. caution::
             这个接口必须登录使用，并且对于其它人的网盘文件，每个目录中最多获取前 1000 条（但获取自己的资源正常）
@@ -25016,7 +25180,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """变更（自己的）分享的配置（例如改访问密码，取消分享）
 
-        POST https://proapi.115.com/android/2.0/share/updateshare
+        POST https://proapi.115.com/{app}/2.0/share/updateshare
 
         :payload:
             - share_code: str
@@ -25472,7 +25636,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取 user_key
 
-        GET https://proapi.115.com/android/2.0/user/upload_key
+        GET https://proapi.115.com/{app}/2.0/user/upload_key
         """
         api = complete_url("/2.0/user/upload_key", base_url=base_url, app=app)
         def gen_step():
@@ -25648,7 +25812,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """上传一张图片，可用于作为证件照
 
-        POST https://credentials.115.com/api/1.0/web/1.0/credentials/upload_images
+        POST https://credentials.115.com/api/1.0/{app}/1.0/credentials/upload_images
 
         .. attention::
             此接口采用 multi-part 上传，其实是可以一次传多个文件的，但我做的封装只允许传一张图片，最大允许传 10 MB
@@ -26530,7 +26694,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取用户信息
 
-        GET https://proapi.115.com/android/user/card
+        GET https://proapi.115.com/{app}/user/card
         """
         api = complete_url("/user/card", base_url=base_url, app=app)
         return self.request(url=api, async_=async_, **request_kwargs)
@@ -26568,7 +26732,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取当前已用空间、可用空间、登录设备等信息
 
-        GET https://proapi.115.com/android/2.0/user/count_space_nums
+        GET https://proapi.115.com/{app}/2.0/user/count_space_nums
         """
         api = complete_url("/2.0/user/count_space_nums", base_url=base_url, app=app)
         return self.request(url=api, async_=async_, **request_kwargs)
@@ -26606,7 +26770,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """账号信息 VIP 相关信息
 
-        GET https://passportapi.115.com/app/1.0/android/1.0/user/display_uid_list
+        GET https://passportapi.115.com/app/1.0/{app}/1.0/user/display_uid_list
         """
         api = complete_url(f"/app/1.0/{app}/1.0/user/display_uid_list", base_url=base_url)
         return self.request(url=api, async_=async_, **request_kwargs)
@@ -26786,7 +26950,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取用户信息
 
-        GET https://home.115.com/api/1.0/android/1.0/user/user_info
+        GET https://home.115.com/api/1.0/{app}/1.0/user/user_info
 
         :payload:
             - uid: int | str
@@ -27088,7 +27252,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """剩余的签到积分
 
-        GET https://points.115.com/api/1.0/web/1.0/user/balance
+        GET https://points.115.com/api/1.0/{app}/1.0/user/balance
         """
         api = complete_url(f"/api/1.0/{app}/1.0/user/balance", base_url=base_url)
         return self.request(url=api, async_=async_, **request_kwargs)
@@ -27126,7 +27290,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取签到信息
 
-        GET https://proapi.115.com/android/2.0/user/points_sign
+        GET https://proapi.115.com/{app}/2.0/user/points_sign
         """
         api = complete_url("/2.0/user/points_sign", base_url=base_url, app=app)
         return self.request(url=api, async_=async_, **request_kwargs)
@@ -27164,7 +27328,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """每日签到（注意：不要用 web，即浏览器，的 cookies，会失败）
 
-        POST https://proapi.115.com/android/2.0/user/points_sign
+        POST https://proapi.115.com/{app}/2.0/user/points_sign
         """
         api = complete_url("/2.0/user/points_sign", base_url=base_url, app=app)
         t = int(time())
@@ -27210,7 +27374,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """签到记录
 
-        GET https://points.115.com/api/1.0/web/1.0/user/transaction
+        GET https://points.115.com/api/1.0/{app}/1.0/user/transaction
 
         payload:
             - start: int = 0
@@ -27304,6 +27468,44 @@ class P115Client(P115OpenClient):
         return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
 
     @overload
+    def user_relation_info(
+        self, 
+        /, 
+        app: str = "web", 
+        base_url: str | Callable[[], str] = "https://home.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def user_relation_info(
+        self, 
+        /, 
+        app: str = "web", 
+        base_url: str | Callable[[], str] = "https://home.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def user_relation_info(
+        self, 
+        /, 
+        app: str = "web", 
+        base_url: str | Callable[[], str] = "https://home.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """获取用户的关系信息
+
+        GET https://home.115.com/api/1.0/{app}/1.0/my_star/relation_info
+        """
+        api = complete_url(f"api/1.0/{app}/1.0/my_star/relation_info", base_url=base_url)
+        return self.request(url=api, async_=async_, **request_kwargs)
+
+    @overload
     def user_security_key_check(
         self, 
         payload: int | str | dict = "", 
@@ -27339,7 +27541,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取安全密钥对应的 token，可以提供给某些接口，作为通过安全密钥验证的凭证
 
-        POST https://passportapi.115.com/app/1.0/android/1.0/user/security_key_check
+        POST https://passportapi.115.com/app/1.0/{app}/1.0/user/security_key_check
 
         :payload:
             - passwd: int | str = "000000" 💡 安全密钥，值为实际安全密钥的 md5 哈希值
@@ -27570,7 +27772,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取此账户的 app 版设置（提示：较为复杂，自己抓包研究）
 
-        GET https://proapi.115.com/android/1.0/user/setting
+        GET https://proapi.115.com/{app}/1.0/user/setting
         """
         api = complete_url("/1.0/user/setting", base_url=base_url, app=app)
         return self.request(url=api, async_=async_, **request_kwargs)
@@ -27611,7 +27813,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取（并可修改）此账户的网页版设置（提示：较为复杂，自己抓包研究）
 
-        POST https://proapi.115.com/android/1.0/user/setting
+        POST https://proapi.115.com/{app}/1.0/user/setting
         """
         api = complete_url("/1.0/user/setting", base_url=base_url, app=app)
         return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
@@ -27727,7 +27929,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取使用空间的统计数据（较为简略，如需更详细，请用 ``P115Client.fs_index_info()``）
 
-        GET https://proapi.115.com/android/user/space_info
+        GET https://proapi.115.com/{app}/user/space_info
         """
         api = complete_url("/user/space_info", base_url=base_url, app=app)
         return self.request(url=api, async_=async_, **request_kwargs)
@@ -27806,7 +28008,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """开关青少年（未成年）模式状态
 
-        POST https://passportapi.115.com/app/1.0/android/1.0/user/teen_mode_set_state
+        POST https://passportapi.115.com/app/1.0/{app}/1.0/user/teen_mode_set_state
 
         :payload:
             - state: 0 | 1 💡 是否开启
@@ -27854,7 +28056,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取用户积分、余额等信息
 
-        GET https://proapi.115.com/android/vip/check_spw
+        GET https://proapi.115.com/{app}/vip/check_spw
         """
         api = complete_url("/vip/check_spw", base_url=base_url, app=app)
         return self.request(url=api, async_=async_, **request_kwargs)
@@ -28075,7 +28277,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """共享列表
 
-        GET https://proapi.115.com/android/2.0/usershare/list
+        GET https://proapi.115.com/{app}/2.0/usershare/list
 
         :payload:
             - offset: int = 0
@@ -28226,13 +28428,12 @@ class P115Client(P115OpenClient):
 
 
 with temp_globals():
-    CRE_CLIENT_API_search: Final = re_compile(r"^ +((?:GET|POST|PUT|DELETE|PATCH) .*)", MULTILINE).search
+    CRE_CLIENT_API_search: Final = re_compile(r"^ *((?:GET|POST|PUT|DELETE|PATCH) +.+)", MULTILINE).search
     for name in dir(P115Client):
         method = getattr(P115Client, name)
         if not (callable(method) and method.__doc__):
             continue
-        match = CRE_CLIENT_API_search(method.__doc__)
-        if match is not None:
+        if match := CRE_CLIENT_API_search(method.__doc__):
             api = match[1]
             name = "P115Client." + name
             CLIENT_METHOD_API_MAP[name] = api
@@ -28248,3 +28449,6 @@ from .fs import P115FileSystemBase, P115FileSystem, P115ShareFileSystem, P115Zip
 # TODO: 有些方法需要被移走，例如 open, hash, ed2k 等，这些方法完全可以单独使用，没必要专门给 client 提供，client 类必须是必要的，非必要的方法一律移除
 # TODO: 增加一个 __eq__ 方法，只要 user_id 相等即可
 # TODO: 删除、复制、移动、还原似乎是不可同时进行的？
+# TODO: 把 refresh_token 保存到 cookies 里面，读取时候，也要设置 refresh_token，如果有 refresh_token，保存 cookies 时也要保存它
+# TODO: 执行请求时，不要携带无关的 cookies，必须根据 url 认真确定，且对于会过期的 cookie 真正移除
+# TODO: cookies.txt 支持多种格式，不仅仅 "key=val;"，还支持 json 等等

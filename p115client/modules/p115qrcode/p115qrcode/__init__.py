@@ -41,35 +41,53 @@ AVAILABLE_ORIGINS: Final[list[str]] = [
     "https://hnpassportapi.115.com", 
 ]
 #: 目前可用的登录设备
-AVAILABLE_APPS: Final[tuple[str, ...]] = (
-    "android", "115android", "qandroid", "ios", "115ios", "qios", 
-    "ipad", "115ipad", "qipad", "tv", "apple_tv", "wechatmini", 
-    "alipaymini", "harmony", "web", "windows", "mac", "linux", 
-)
+AVAILABLE_APPS: Final[dict[str, str]] = {
+    "web": "115生活_网页端", 
+    "ios": "115生活_苹果端", 
+    "115ios": "115_苹果端", 
+    "android": "115生活_安卓端", 
+    "115android": "115_安卓端", 
+    "ipad": "115生活_苹果平板端", 
+    "115ipad": "115_苹果平板端", 
+    "tv": "115生活_安卓电视端", 
+    "apple_tv": "115生活_苹果电视端", 
+    "qandroid": "115管理_安卓端", 
+    "qios": "115管理_苹果端", 
+    "qipad": "115管理_苹果平板端", 
+    "os_windows": "115生活_Windows端", 
+    "os_mac": "115生活_macOS端", 
+    "os_linux": "115生活_Linux端", 
+    "wechatmini": "115生活_微信小程序端", 
+    "alipaymini": "115生活_支付宝小程序", 
+    "harmony": "115_鸿蒙端", 
+}
 #: 目前已知的登录设备和对应的 ssoent
 APP_TO_SSOENT: Final[dict[str, str]] = {
-    "web": "A1",        # 115生活_网页端
+    "web": "A1", 
     "desktop": "A1", 
-    "ios": "D1",        # 115生活_苹果端
+    "ios": "D1", 
     "bios": "D2", 
-    "115ios": "D3",     # 115_苹果端
-    "android": "F1",    # 115生活_安卓端
+    "115ios": "D3", 
+    "android": "F1", 
     "bandroid": "F2", 
-    "115android": "F3", # 115_安卓端
-    "ipad": "H1",       # 115生活_苹果平板端
+    "115android": "F3", 
+    "ipad": "H1", 
     "bipad": "H2", 
-    "115ipad": "H3",    # 115_苹果平板端
-    "tv": "I1",         # 115生活_安卓电视端
-    "apple_tv": "I2",   # 115生活_苹果电视端
-    "qandroid": "M1",   # 115管理_安卓端
-    "qios": "N1",       # 115管理_苹果端
-    "qipad": "O1",      # 115管理_苹果平板端
-    "windows": "P1",    # 115生活_Windows端
-    "mac": "P2",        # 115生活_macOS端
-    "linux": "P3",      # 115生活_Linux端
-    "wechatmini": "R1", # 115生活_微信小程序端
-    "alipaymini": "R2", # 115生活_支付宝小程序
-    "harmony": "S1",    # 115_鸿蒙端
+    "115ipad": "H3", 
+    "tv": "I1", 
+    "apple_tv": "I2", 
+    "qandroid": "M1", 
+    "qios": "N1", 
+    "qipad": "O1", 
+    "os_windows": "P1", 
+    "os_mac": "P2", 
+    "os_linux": "P3", 
+    "windows": "P1", 
+    "mac": "P2", 
+    "linux": "P3", 
+    "wechatmini": "R1", 
+    "alipaymini": "R2", 
+    "harmony": "S1", 
 }
 #: 目前已知的 ssoent 和对应的登录设备，一部分因为不知道具体的设备名，所以使用目前可用的设备名，作为临时代替
 SSOENT_TO_APP: Final[dict[str, str]] = {v: k for k, v in reversed(APP_TO_SSOENT.items())}
