@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "p115qrcode"
-version = "0.0.5.1"
+version = "0.0.5.2"
 description = "115 网盘二维码扫码登录"
 authors = ["ChenyangGao <wosiwujm@gmail.com>"]
 license = "MIT"
