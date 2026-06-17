@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 # encoding: utf-8
 
+from __future__ import annotations
+
 __all__ = [
     "DirNode", "P115UID", "P115Cookies", "P115DictAttrLikeMixin", 
     "P115DictAttrLike", "P115ID", "P115StrID", "P115URL", 
@@ -62,7 +64,7 @@ class P115UID(str):
 class P115Cookies(str):
     """cookies 的封装
     """
-    __last_new_instance__ = None
+    __last_new_instance__: None | P115Cookies = None
 
     def __new__(cls, cookies, /):
         def predicate(_, val, /):

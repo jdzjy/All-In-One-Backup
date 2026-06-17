@@ -23,7 +23,6 @@ from itertools import count
 from operator import itemgetter
 from os import fsdecode, isatty, PathLike
 from pathlib import Path, PurePath
-from platform import system
 from re import compile as re_compile, Match, MULTILINE
 from string import digits
 from sys import _getframe
@@ -37,7 +36,9 @@ from warnings import warn
 from argtools import argcount
 from asynctools import ensure_async
 from cookietools import cookies_to_dict, update_cookies
-from dicttools import get_first, dict_update, dict_key_to_lower_merge, iter_items, KeyLowerDict
+from dicttools import (
+    get_first, dict_update, dict_key_to_lower_merge, iter_items, KeyLowerDict, 
+)
 from ensure import ensure_bytes
 from errno2 import errno
 from filewrap import SupportsRead
@@ -72,14 +73,6 @@ from .util import complete_url, share_extract_payload
 CRE_SET_COOKIE: Final = re_compile(r"[0-9a-f]{32}=[0-9a-f]{32}.*")
 CRE_COOKIES_UID_search: Final = re_compile(r"(?<=\bUID=)[^\s;]+").search
 CRE_AREA_DATA_search: Final = re_compile(r"(?<=n=)\{[\s\S]+?\}(?=;)").search
-# 替换表，用于半角转全角，包括了 Windows 中不允许出现在文件名中的字符
-match system():
-    case "Windows":
-        NAME_TANSTAB_FULLWIDH = {c: chr(c+65248) for c in b"\\/:*?|><"}
-    case "Darwin":
-        NAME_TANSTAB_FULLWIDH = {ord("/"): ":", ord(":"): "："}
-    case _:
-        NAME_TANSTAB_FULLWIDH = {ord("/"): "／"}
 
 _default_k_ec = {"k_ec": ecdh_encode_token(0).decode()}
 _default_code_verifier = "0" * 64
@@ -100,6 +93,7 @@ def expand_payload(
         if prefix and not k.startswith(prefix):
             k = f"{prefix}{k}]"
         if isinstance(v, seq_types):
+            v = cast(Sequence, v)
             if isinstance(enum_seq, bool):
                 if enum_seq:
                     enum_seq = 0
@@ -107,9 +101,11 @@ def expand_payload(
                     for v2 in v:
                         yield from expand_payload(v2, f"{k}[]")
                     continue
-                for i, v2 in enumerate(v, enum_seq):
+                for i, v2 in enumerate(v, cast(int, enum_seq)):
                     yield from expand_payload(v2, f"{k}[{i}]")
         elif isinstance(v, map_types):
+            v = cast(Mapping, v)
+            k2: Any
             for k2, v2 in iter_items(v):
                 yield from expand_payload(v2, f"{k}[{k2}]")
         else:
@@ -2659,6 +2655,9 @@ class P115OpenClient(ClientRequestMixin):
         **request_kwargs, 
     ) -> dict | Coroutine[Any, Any, dict]:
         """重命名文件或目录，此接口是对 `fs_update_open` 的封装
+
+        .. caution::
+            改名时，虽然不能修改扩展名，但是一定要带上扩展名（无论是啥），不然会把最后一个句点 . 及其之后文字截断
 
         :payload:
             - file_id: int | str 💡 文件 id
@@ -6148,7 +6147,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取 RSA 加密公钥，用于某些情况下的加密
 
-        GET https://passportapi.115.com/app/1.0/web/1.0/login/getKey
+        GET https://passportapi.115.com/app/1.0/{app}/1.0/login/getKey
 
         .. note::
             可以作为 ``staticmethod`` 使用
@@ -7134,7 +7133,7 @@ class P115Client(P115OpenClient):
             - page: int = 1 💡 第几页
             - per_page: int = 5000 💡 每页大小，目前最大为 5000
         """
-        if app in ("", "chrome"):
+        if app in ("", "web", "desktop", "chrome"):
             api = complete_url("/app/chrome/downfolders", base_url)
         else:
             if app not in ("windows", "mac", "linux", "os_windows", "os_mac", "os_linux"):
@@ -10772,7 +10771,7 @@ class P115Client(P115OpenClient):
                 - 15: 图片和视频，相当于 2 和 4
                 - >= 16: 相当于 8
         """
-        api = complete_url("/2.0/ufile/files", base_url=base_url, app=app or "android", force_app=True)
+        api = complete_url("/2.0/ufile/files", base_url=base_url, app=app or "android", force_app=("wechatmini", "alipaymini"))
         if isinstance(payload, (int, str)):
             payload = {"cid": payload}
         payload = {
@@ -10911,7 +10910,7 @@ class P115Client(P115OpenClient):
                 - 15: 图片和视频，相当于 2 和 4
                 - >= 16: 相当于 8
         """
-        api = complete_url("/files", base_url=base_url, app=app or "android", force_app=True)
+        api = complete_url("/files", base_url=base_url, app=app or "android", force_app=("wechatmini", "alipaymini"))
         if isinstance(payload, (int, str)):
             payload = {"cid": payload}
         payload = {
@@ -12684,6 +12683,111 @@ class P115Client(P115OpenClient):
             payload = {"offset": payload}
         payload = {"limit": 1150, "offset": 0, **payload}
         return self.request(url=api, params=payload, async_=async_, **request_kwargs)
+
+    @overload
+    def fs_history_rename_list(
+        self, 
+        payload: int | str | Iterable[int | str] | dict, 
+        /, 
+        method: str = "POST", 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def fs_history_rename_list(
+        self, 
+        payload: int | str | Iterable[int | str] | dict, 
+        /, 
+        method: str = "POST", 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def fs_history_rename_list(
+        self, 
+        payload: int | str | Iterable[int | str] | dict, 
+        /, 
+        method: str = "POST", 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """重命名历史记录
+
+        POST https://webapi.115.com/history/renamelist
+
+        :payload:
+            - file_ids: int | str 💡 文件 id，多个用逗号 "," 隔开
+            - offset: int = 0
+            - limit: int = <default>
+            - type: int = <default>
+        """
+        api = complete_url("/history/renamelist", base_url=base_url)
+        if isinstance(payload, (int, str)):
+            payload = {"file_ids": str(payload)}
+        elif not isinstance(payload, dict):
+            payload = {"file_ids": ",".join(map(str, payload))}
+        return self.request(url=api, method=method, payload=payload, async_=async_, **request_kwargs)
+
+    @overload
+    def fs_history_rename_list_app(
+        self, 
+        payload: int | str | Iterable[int | str] | dict, 
+        /, 
+        method: str = "POST", 
+        app: str = "android", 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def fs_history_rename_list_app(
+        self, 
+        payload: int | str | Iterable[int | str] | dict, 
+        /, 
+        method: str = "POST", 
+        app: str = "android", 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def fs_history_rename_list_app(
+        self, 
+        payload: int | str | Iterable[int | str] | dict, 
+        /, 
+        method: str = "POST", 
+        app: str = "android", 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """重命名历史记录
+
+        POST https://proapi.115.com/files/history/renamelist
+
+        :payload:
+            - file_ids: int | str 💡 文件 id，多个用逗号 "," 隔开
+            - offset: int = 0
+            - limit: int = <default>
+            - type: int = <default>
+        """
+        api = complete_url("/files/history/renamelist", base_url=base_url, app=app)
+        if isinstance(payload, (int, )):
+            payload = {"file_ids": payload}
+        elif not isinstance(payload, dict):
+            payload = {"file_ids": ",".join(map(str, payload))}
+        return self.request(url=api, method=method, payload=payload, async_=async_, **request_kwargs)
 
     @overload
     def fs_history_set(
@@ -15033,6 +15137,9 @@ class P115Client(P115OpenClient):
 
         POST https://webapi.115.com/files/batch_rename
 
+        .. caution::
+            改名时，虽然不能修改扩展名，但是一定要带上扩展名（无论是啥），不然会把最后一个句点 . 及其之后文字截断
+
         :payload:
             - files_new_name[{file_id}]: str 💡 值为新的文件名（basename）
         """
@@ -15041,6 +15148,7 @@ class P115Client(P115OpenClient):
             payload = {f"files_new_name[{payload[0]}]": payload[1]}
         elif not isinstance(payload, dict):
             payload = {f"files_new_name[{fid}]": name for fid, name in payload}
+        print(payload)
         return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
 
     @overload
@@ -15080,6 +15188,9 @@ class P115Client(P115OpenClient):
         """重命名文件或目录
 
         POST https://proapi.115.com/{app}/files/batch_rename
+
+        .. caution::
+            改名时，虽然不能修改扩展名，但是一定要带上扩展名（无论是啥），不然会把最后一个句点 . 及其之后文字截断
 
         :payload:
             - files_new_name[{file_id}]: str 💡 值为新的文件名（basename）
@@ -17887,7 +17998,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取某个开放应用的授权信息
 
-        GET https://qrcodeapi.115.com/app/1.0/web/1.0/user/getAppAuthDetail
+        GET https://qrcodeapi.115.com/app/1.0/{app}/1.0/user/getAppAuthDetail
 
         :payload:
             - auth_id: int | str 💡 授权 id
@@ -17930,7 +18041,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取所有授权的开放应用的列表
 
-        GET https://qrcodeapi.115.com/app/1.0/web/1.0/user/getAppAuthList
+        GET https://qrcodeapi.115.com/app/1.0/{app}/1.0/user/getAppAuthList
         """
         api = complete_url(f"/app/1.0/{app}/1.0/user/getAppAuthList", base_url=base_url)
         return self.request(url=api, async_=async_, **request_kwargs)
@@ -17971,7 +18082,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """取消某个开放应用的授权
 
-        GET https://qrcodeapi.115.com/app/1.0/web/1.0/user/deauthApp
+        GET https://qrcodeapi.115.com/app/1.0/{app}/1.0/user/deauthApp
 
         :payload:
             - auth_id: int | str 💡 授权 id
@@ -18014,7 +18125,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """检查当前 cookies 的登录状态信息，并且自最近一次登录的 60 秒后，使当前设备下除最近一次登录外的所有 cookies 失效
 
-        GET https://qrcodeapi.115.com/app/1.0/web/1.0/check/sso
+        GET https://qrcodeapi.115.com/app/1.0/{app}/1.0/check/sso
         """
         api = complete_url(f"/app/1.0/{app}/1.0/check/sso", base_url=base_url)
         return self.request(url=api, async_=async_, **request_kwargs)
@@ -18084,7 +18195,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取所有的已登录设备的信息，不过当前的 cookies 必须是登录状态（未退出或未失效）
 
-        GET https://qrcodeapi.115.com/app/1.0/web/1.0/login_log/login_devices
+        GET https://qrcodeapi.115.com/app/1.0/{app}/1.0/login_log/login_devices
         """
         api = complete_url(f"/app/1.0/{app}/1.0/login_log/login_devices", base_url=base_url)
         return self.request(url=api, async_=async_, **request_kwargs)
@@ -18163,7 +18274,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取登录信息日志列表
 
-        GET https://qrcodeapi.115.com/app/1.0/web/1.0/login_log/log
+        GET https://qrcodeapi.115.com/app/1.0/{app}/1.0/login_log/log
 
         :payload:
             - start: int = 0
@@ -18206,7 +18317,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """当前登录的设备总数和最近登录的设备
 
-        GET https://qrcodeapi.115.com/app/1.0/web/1.0/login_log/login_online
+        GET https://qrcodeapi.115.com/app/1.0/{app}/1.0/login_log/login_online
         """
         api = complete_url(f"/app/1.0/{app}/1.0/login_log/login_online", base_url=base_url)
         return self.request(url=api, async_=async_, **request_kwargs)
@@ -18448,7 +18559,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """退出登录状态（可以把某个客户端下线，所有已登录设备可从 `login_devices` 获取）
 
-        POST https://qrcodeapi.115.com/app/1.0/web/1.0/logout/mange
+        POST https://qrcodeapi.115.com/app/1.0/{app}/1.0/logout/mange
 
         :payload:
             - ssoent: str
@@ -20443,7 +20554,7 @@ class P115Client(P115OpenClient):
         GET https://note.115.com/api/2.0/api.php?ac=is_fav
 
         :payload:
-            - note_id: int | str 💡 多个用逗号隔开
+            - note_id: int | str 💡 多个用逗号 "," 隔开
         """
         api = complete_url("/api/2.0/api.php", base_url=base_url, query={"ac": "is_fav"})
         if isinstance(payload, (int, str)):
@@ -23660,6 +23771,60 @@ class P115Client(P115OpenClient):
         return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
 
     @overload
+    def share_batch_skip_login_down(
+        self, 
+        payload: str | Iterable[str] | dict, 
+        /, 
+        skip_login: bool = True, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def share_batch_skip_login_down(
+        self, 
+        payload: str | Iterable[str] | dict, 
+        /, 
+        skip_login: bool = True, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def share_batch_skip_login_down(
+        self, 
+        payload: str | Iterable[str] | dict, 
+        /, 
+        skip_login: bool = True, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """批量开启或关闭免登录下载
+
+        POST https://webapi.115.com/share/batch_skip_login_down
+
+        .. attention::
+            链接必须开启免登录下载，并且需年费及以上 VIP 会员
+
+        :payload:
+            - share_code: str       💡 分享码，多个用逗号 "," 隔开
+            - skip_login: 0 | 1 = 1 💡 是否允许免登录下载 
+        """
+        api = complete_url("/share/batch_skip_login_down", base_url=base_url)
+        if isinstance(payload, str):
+            payload = {"share_code": payload}
+        elif not isinstance(payload, dict):
+            payload = {"share_code": ",".join(payload)}
+        payload = cast(dict[str, Any], payload)
+        payload.setdefault("skip_login", int(skip_login))
+        return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
+
+    @overload
     def share_downlist(
         self, 
         payload: dict, 
@@ -25128,7 +25293,7 @@ class P115Client(P115OpenClient):
         POST https://webapi.115.com/share/updateshare
 
         :payload:
-            - share_code: str
+            - share_code: str                       💡 分享码，多个用逗号 "," 隔开
             - receive_code: str = <default>         💡 接收码（访问密码）
             - share_duration: int = <default>       💡 分享天数: n（填入指定天数），-1(长期)
             - is_custom_code: 0 | 1 = <default>     💡 用户自定义口令（不用管）
@@ -25183,7 +25348,7 @@ class P115Client(P115OpenClient):
         POST https://proapi.115.com/{app}/2.0/share/updateshare
 
         :payload:
-            - share_code: str
+            - share_code: str                       💡 分享码，多个用逗号 "," 隔开
             - receive_code: str = <default>         💡 接收码（访问密码）
             - share_duration: int = <default>       💡 分享天数: n（填入指定天数），-1(长期)
             - is_custom_code: 0 | 1 = <default>     💡 用户自定义口令（不用管）
@@ -26656,7 +26821,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取用户的基本信息
 
-        GET https://qrcodeapi.115.com/app/1.0/web/1.0/user/base_info
+        GET https://qrcodeapi.115.com/app/1.0/{app}/1.0/user/base_info
         """
         api = complete_url(f"/app/1.0/{app}/1.0/user/base_info", base_url=base_url)
         return self.request(url=api, async_=async_, **request_kwargs)
@@ -27967,7 +28132,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """获取青少年（未成年）模式状态
 
-        GET https://passportapi.115.com/app/1.0/web/1.0/user/teen_mode_state
+        GET https://passportapi.115.com/app/1.0/{app}/1.0/user/teen_mode_state
         """
         api = complete_url(f"/app/1.0/{app}/1.0/user/teen_mode_state", base_url=base_url)
         return self.request(url=api, async_=async_, **request_kwargs)

@@ -760,8 +760,7 @@ def export_dir(
         - Callable: 自定义解析函数
 
     :param delete: 是否在完成后删除文件
-
-        - None: 自动确定，如果提供有效的 `export_id`，则为 True，否则为 False
+ 
         - True: 删除
         - False: 保留
 

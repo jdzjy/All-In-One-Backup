@@ -11,7 +11,7 @@ __all__ = [
 __doc__ = "这个模块提供了一些工具函数，且不依赖于 p115client.client 中的实现"
 
 from asyncio import sleep as async_sleep
-from collections.abc import Callable, Coroutine, Mapping, Sequence
+from collections.abc import Callable, Container, Coroutine, Mapping, Sequence
 from contextlib import asynccontextmanager, AbstractAsyncContextManager
 from http import HTTPStatus
 from inspect import isawaitable, iscoroutinefunction
@@ -45,7 +45,7 @@ def complete_url(
     /, 
     base_url: str | Callable[[], str] = "", 
     app: str | Callable[[], str] = "", 
-    force_app: bool = False, 
+    force_app: bool | Container[str] = False, 
     domain: str | Callable[[], str] = "", 
     as_query: bool = False, 
     query: Mapping[str, Any] | Sequence[tuple[str, Any]] = (), 
@@ -92,6 +92,8 @@ def complete_url(
     if app.startswith("="):
         force_app = True
         app = app[1:]
+    elif isinstance(force_app, Container):
+        force_app = app in force_app
     if callable(domain):
         domain = domain()
     if path and not path.startswith("/"):

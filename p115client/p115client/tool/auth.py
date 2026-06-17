@@ -150,6 +150,8 @@ def open_app_name(
     if isinstance(client, (str, PathLike)):
         client = P115Client(client, check_for_relogin=True)
     def gen_step():
+        if app_id < 0 or app_id % 2 == 0:
+            return None
         resp = yield P115OpenClient.login_qrcode_token_open(
             app_id, 
             base_url=base_url, 
