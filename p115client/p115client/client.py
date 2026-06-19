@@ -273,6 +273,9 @@ def check_response(resp: dict | Awaitable[dict], /) -> dict | Coroutine[Any, Any
                 # {"state": false, "errno": 31001, "error": "所预览的文件不存在。"}
                 case 31001:
                     throw(errno.ENOENT, resp)
+                # {"state": false, "errno": 31003, "error": "文件不存在或已删除。"}
+                case 31003:
+                    throw(errno.ENOENT, resp)
                 # {"state": false, "errno": 31004, "error": "文档未上传完整，请上传完成后再进行查看。"}
                 case 31004:
                     throw(errno.ENOENT, resp)
@@ -296,6 +299,9 @@ def check_response(resp: dict | Awaitable[dict], /) -> dict | Coroutine[Any, Any
                     throw(errno.ENOENT, resp)
                 # {"state": false, "errno": 300104, "error": "文件超过200MB，暂不支持播放"}
                 case 300104:
+                    throw(errno.EFBIG, resp)
+                # {"state": false, "errno": 300105, "error": "文件超过500MB，暂不支持添加到我听"}
+                case 300105:
                     throw(errno.EFBIG, resp)
                 # {"state": false, "errno": 320001, "error": "很抱歉,安全密钥不正确"}
                 case 320001:
@@ -2250,7 +2256,7 @@ class P115OpenClient(ClientRequestMixin):
             payload = {"file_id": payload}
         elif not isinstance(payload, dict):
             payload = {"file_id": ",".join(map(str, payload))}
-        payload.setdefault("pid", pid) # type: ignore
+        cast(dict, payload).setdefault("pid", pid)
         return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
 
     @overload
@@ -2623,7 +2629,7 @@ class P115OpenClient(ClientRequestMixin):
             payload = {"file_ids": payload}
         elif not isinstance(payload, dict):
             payload = {"file_ids": ",".join(map(str, payload))}
-        payload.setdefault("to_cid", pid) # type: ignore
+        cast(dict, payload).setdefault("to_cid", pid)
         return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
 
     @overload
@@ -3475,6 +3481,7 @@ class P115OpenClient(ClientRequestMixin):
         self, 
         payload: int | str | Iterable[int | str] | dict = {}, 
         /, 
+        password: str = "000000", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
         *, 
         async_: Literal[False] = False, 
@@ -3486,6 +3493,7 @@ class P115OpenClient(ClientRequestMixin):
         self, 
         payload: int | str | Iterable[int | str] | dict = {}, 
         /, 
+        password: str = "000000", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
         *, 
         async_: Literal[True], 
@@ -3496,6 +3504,7 @@ class P115OpenClient(ClientRequestMixin):
         self, 
         payload: int | str | Iterable[int | str] | dict = {}, 
         /, 
+        password: str = "000000", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
         *, 
         async_: Literal[False, True] = False, 
@@ -3509,8 +3518,11 @@ class P115OpenClient(ClientRequestMixin):
 
             https://www.yuque.com/115yun/open/gwtof85nmboulrce
 
+        .. note::
+            ``password`` 参数是不用传的
+
         :payload:
-            - tid: int | str 💡 多个用逗号 "," 隔开
+            - tid: int | str 💡 不传就是清空，多个用逗号 "," 隔开
         """
         api = complete_url("/open/rb/del", base_url)
         if isinstance(payload, (int, str)):
@@ -3852,7 +3864,7 @@ class P115OpenClient(ClientRequestMixin):
         :return: 接口响应
         """
         def gen_step():
-            if isinstance(pid, str) and pid.startswith("U_"):
+            if isinstance(pid, str) and pid.startswith(("U_", "S_")):
                 target = pid
             else:
                 target = f"U_1_{pid}"
@@ -3974,7 +3986,7 @@ class P115OpenClient(ClientRequestMixin):
             request_kwargs.get("headers") or (), 
             authorization=self.headers["authorization"], 
         )
-        if isinstance(pid, str) and not pid.startswith("U_"):
+        if isinstance(pid, str) and not pid.startswith(("U_", "S_")):
             pid = self.to_id(pid)
         return upload_file(
             file=file, 
@@ -4130,6 +4142,7 @@ class P115OpenClient(ClientRequestMixin):
         id: int | str, 
         /, 
         prefix: Literal["a", "b", "c", "d", "e", "fa", "fb", "fc", "fd", "fe"] = "a", 
+        stable_point: str = "", 
     ) -> str:
         """把可能是 id 或 pickcode 的一律转换成 pickcode
 
@@ -4141,7 +4154,11 @@ class P115OpenClient(ClientRequestMixin):
 
         :return: pickcode
         """
-        return to_pickcode(id, self.pickcode_stable_point, prefix=prefix)
+        return to_pickcode(
+            id, 
+            stable_point=stable_point or self.pickcode_stable_point, 
+            prefix=prefix, 
+        )
 
 
 class P115Client(P115OpenClient):
@@ -5344,6 +5361,8 @@ class P115Client(P115OpenClient):
             headers["cookie"] = ""
         else:
             request_kwargs.setdefault("cookies", self.cookies)
+        if url.startswith(("http://f.115.com", "https://f.115.com", "http://n.115.com", "https://n.115.com")):
+            headers["origin"] = url[:(url+"/").find("/", 8)]
         if ecdh_encrypt:
             url = make_url(url, params=_default_k_ec)
             if data := request_kwargs.get("data"):
@@ -8039,8 +8058,9 @@ class P115Client(P115OpenClient):
         files: str | Iterable[str] = "", 
         dirs: str | Iterable[str] = "", 
         dirname: str = "", 
-        *, 
         to_pid: int | str = 0, 
+        app: str = "web", 
+        *, 
         async_: Literal[False] = False, 
         **request_kwargs, 
     ) -> dict:
@@ -8054,6 +8074,7 @@ class P115Client(P115OpenClient):
         dirs: str | Iterable[str] = "", 
         dirname: str = "", 
         to_pid: int | str = 0, 
+        app: str = "web", 
         *, 
         async_: Literal[True], 
         **request_kwargs, 
@@ -8067,51 +8088,59 @@ class P115Client(P115OpenClient):
         dirs: str | Iterable[str] = "", 
         dirname: str = "", 
         to_pid: int | str = 0, 
+        app: str = "web", 
         *, 
         async_: Literal[False, True] = False, 
         **request_kwargs, 
     ) -> dict | Coroutine[Any, Any, dict]:
-        """解压缩到某个目录，是对 `extract_add_file` 的封装，推荐使用
+        """解压缩到某个目录，此方法是对 `extract_add_file` 的封装，推荐使用
 
         :param pickcode: 压缩文件的提取码
         :param files:    待解压缩的文件路径（相对于 ``dirname``），如果以 "/" 结尾，则视为目录
         :param dirs:     待解压缩的文件路径（相对于 ``dirname``）
         :param dirname:  压缩包内路径，为空则是压缩包的根目录
         :param to_pid:   解压到网盘的目录 id
+        :param app:      使用此设备的接口
         :param async_:   是否异步
         :param request_kwargs: 其它请求参数
 
         :return: 接口响应，会返回一个 "extract_id"，需要你去轮询获取进度
         """
+        if app in ("", "web", "desktop", "aps"):
+            extract_add_file: Callable = self.extract_add_file
+        else:
+            extract_add_file = self.extract_add_file_app
+            request_kwargs["app"] = app
         dirname = dirname.strip("/")
-        data = [
-            ("pick_code", pickcode), 
-            ("paths", "文件/" + dirname if dirname else "文件"), 
-            ("to_pid", to_pid), 
-        ]
-        paths: list[str] = []
-        add_path = paths.append
-        if files:
-            if isinstance(files, str):
-                if files.strip("/"):
-                    add_path(files)
-            else:
-                for p in files:
-                    if p.strip("/"):
-                        add_path(p)
-        if dirs:
-            if isinstance(dirs, str):
-                if dirs.strip("/"):
-                    add_path(dirs + "/")
-            else:
-                for p in dirs:
-                    if p.strip("/"):
-                        add_path(p + "/")
         def gen_step():
+            data = [
+                ("pick_code", pickcode), 
+                ("paths", "文件/" + dirname if dirname else "文件"), 
+                ("to_pid", to_pid), 
+            ]
+            paths: list[str] = []
+            add_path = paths.append
+            if files:
+                if isinstance(files, str):
+                    if files.strip("/"):
+                        add_path(files)
+                else:
+                    for p in files:
+                        if p.strip("/"):
+                            add_path(p)
+            if dirs:
+                if isinstance(dirs, str):
+                    if dirs.strip("/"):
+                        add_path(dirs + "/")
+                else:
+                    for p in dirs:
+                        if p.strip("/"):
+                            add_path(p + "/")
             if not paths:
                 next_marker = ""
+                extract_list = self.extract_list
                 while True:
-                    resp = yield self.extract_list(
+                    resp = yield extract_list(
                         pickcode=pickcode, 
                         path=dirname, 
                         next_marker=next_marker, 
@@ -8130,109 +8159,7 @@ class P115Client(P115OpenClient):
                 ("extract_dir[]" if path.endswith("/") else "extract_file[]", path.strip("/")) 
                 for path in paths
             )
-            return self.extract_add_file(data, async_=async_, **request_kwargs)
-        return run_gen_step(gen_step, async_)
-
-    @overload
-    def extract_file_app(
-        self, 
-        /, 
-        pickcode: str, 
-        files: str | Iterable[str] = "", 
-        dirs: str | Iterable[str] = "", 
-        dirname: str = "", 
-        *, 
-        to_pid: int | str = 0, 
-        async_: Literal[False] = False, 
-        **request_kwargs, 
-    ) -> dict:
-        ...
-    @overload
-    def extract_file_app(
-        self, 
-        /, 
-        pickcode: str, 
-        files: str | Iterable[str] = "", 
-        dirs: str | Iterable[str] = "", 
-        dirname: str = "", 
-        to_pid: int | str = 0, 
-        *, 
-        async_: Literal[True], 
-        **request_kwargs, 
-    ) -> Coroutine[Any, Any, dict]:
-        ...
-    def extract_file_app(
-        self, 
-        /, 
-        pickcode: str, 
-        files: str | Iterable[str] = "", 
-        dirs: str | Iterable[str] = "", 
-        dirname: str = "", 
-        to_pid: int | str = 0, 
-        *, 
-        async_: Literal[False, True] = False, 
-        **request_kwargs, 
-    ) -> dict | Coroutine[Any, Any, dict]:
-        """解压缩到某个目录，是对 `extract_add_file_app` 的封装，推荐使用
-
-        :param pickcode: 压缩文件的提取码
-        :param files:    待解压缩的文件路径（相对于 ``dirname``），如果以 "/" 结尾，则视为目录
-        :param dirs:     待解压缩的文件路径（相对于 ``dirname``）
-        :param dirname:  压缩包内路径，为空则是压缩包的根目录
-        :param to_pid:   解压到网盘的目录 id
-        :param async_:   是否异步
-        :param request_kwargs: 其它请求参数
-
-        :return: 接口响应，会返回一个 "extract_id"，需要你去轮询获取进度
-        """
-        dirname = dirname.strip("/")
-        data = [
-            ("pick_code", pickcode), 
-            ("paths", "文件/" + dirname if dirname else "文件"), 
-            ("to_pid", to_pid), 
-        ]
-        paths: list[str] = []
-        add_path = paths.append
-        if files:
-            if isinstance(files, str):
-                if files.strip("/"):
-                    add_path(files)
-            else:
-                for p in files:
-                    if p.strip("/"):
-                        add_path(p)
-        if dirs:
-            if isinstance(dirs, str):
-                if dirs.strip("/"):
-                    add_path(dirs + "/")
-            else:
-                for p in dirs:
-                    if p.strip("/"):
-                        add_path(p + "/")
-        def gen_step():
-            if not paths:
-                next_marker = ""
-                while True:
-                    resp = yield self.extract_list_app(
-                        pickcode=pickcode, 
-                        path=dirname, 
-                        next_marker=next_marker, 
-                        async_=async_, 
-                        **request_kwargs, 
-                    )
-                    check_response(resp)
-                    for p in resp["data"]["list"]:
-                        if p["file_category"]:
-                            add_path(p["file_name"])
-                        else:
-                            add_path(p["file_name"] + "/")
-                    if not (next_marker := resp["data"].get("next_marker")):
-                        break
-            data.extend(
-                ("extract_dir[]" if path.endswith("/") else "extract_file[]", path.strip("/")) 
-                for path in paths
-            )
-            return self.extract_add_file_app(data, async_=async_, **request_kwargs)
+            return extract_add_file(data, async_=async_, **request_kwargs)
         return run_gen_step(gen_step, async_)
 
     @overload
@@ -8520,7 +8447,7 @@ class P115Client(P115OpenClient):
         path: str = "", 
         next_marker: str = "", 
         page_count: int = 999, 
-        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        app: str = "web", 
         *, 
         async_: Literal[False] = False, 
         **request_kwargs, 
@@ -8534,7 +8461,7 @@ class P115Client(P115OpenClient):
         path: str = "", 
         next_marker: str = "", 
         page_count: int = 999, 
-        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        app: str = "web", 
         *, 
         async_: Literal[True], 
         **request_kwargs, 
@@ -8547,7 +8474,7 @@ class P115Client(P115OpenClient):
         path: str = "", 
         next_marker: str = "", 
         page_count: int = 999, 
-        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        app: str = "web", 
         *, 
         async_: Literal[False, True] = False, 
         **request_kwargs, 
@@ -8558,7 +8485,7 @@ class P115Client(P115OpenClient):
         :param path: 压缩包内（目录）路径，为空则是压缩包的根目录
         :param next_marker: 翻页标记，用来获取下一页
         :param page_count: 这一页有多少条数据，范围在 ``[1, 999]``
-        :param base_url: 接口的基地址
+        :param app: 使用此设备的接口
         :param async_: 是否异步
         :param request_kwargs: 其它请求参数
 
@@ -8573,81 +8500,13 @@ class P115Client(P115OpenClient):
             "next_marker": next_marker, 
             "page_count": page_count, 
         }
-        return self.extract_info(
-            payload, 
-            base_url=base_url, 
-            async_=async_, 
-            **request_kwargs, 
-        )
-
-    @overload
-    def extract_list_app(
-        self, 
-        /, 
-        pickcode: str, 
-        path: str, 
-        next_marker: str, 
-        page_count: int, 
-        app: str = "android", 
-        base_url: str | Callable[[], str] = "https://proapi.115.com", 
-        *, 
-        async_: Literal[False] = False, 
-        **request_kwargs, 
-    ) -> dict:
-        ...
-    @overload
-    def extract_list_app(
-        self, 
-        /, 
-        pickcode: str, 
-        path: str, 
-        next_marker: str, 
-        page_count: int, 
-        app: str = "android", 
-        base_url: str | Callable[[], str] = "https://proapi.115.com", 
-        *, 
-        async_: Literal[True], 
-        **request_kwargs, 
-    ) -> Coroutine[Any, Any, dict]:
-        ...
-    def extract_list_app(
-        self, 
-        /, 
-        pickcode: str, 
-        path: str = "", 
-        next_marker: str = "", 
-        page_count: int = 999, 
-        app: str = "android", 
-        base_url: str | Callable[[], str] = "https://proapi.115.com", 
-        *, 
-        async_: Literal[False, True] = False, 
-        **request_kwargs, 
-    ) -> dict | Coroutine[Any, Any, dict]:
-        """获取压缩文件的文件列表，此方法是对 `extract_info_app` 的封装，推荐使用
-
-        :param pickcode: 压缩文件的提取码
-        :param path: 压缩包内（目录）路径，为空则是压缩包的根目录
-        :param next_marker: 翻页标记，用来获取下一页
-        :param page_count: 这一页有多少条数据，范围在 ``[1, 999]``
-        :param base_url: 接口的基地址
-        :param async_: 是否异步
-        :param request_kwargs: 其它请求参数
-
-        :return: 接口响应
-        """
-        if not 1 <= page_count <= 999:
-            page_count = 999
-        payload = {
-            "pick_code": pickcode, 
-            "file_name": path.strip("/"), 
-            "paths": "文件", 
-            "next_marker": next_marker, 
-            "page_count": page_count, 
-        }
-        return self.extract_info_app(
+        if app in ("", "web", "desktop", "aps"):
+            extract_info: Callable = self.extract_info
+        else:
+            extract_info = self.extract_info_app
+        return extract_info(
             payload, 
             app=app, 
-            base_url=base_url, 
             async_=async_, 
             **request_kwargs, 
         )
@@ -9355,7 +9214,7 @@ class P115Client(P115OpenClient):
             payload = {"fid": payload}
         elif not isinstance(payload, dict):
             payload = {"fid": ",".join(map(str, payload))}
-        payload.setdefault("pid", pid) # type: ignore
+        cast(dict, payload).setdefault("pid", pid)
         return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
 
     @overload
@@ -10542,7 +10401,6 @@ class P115Client(P115OpenClient):
             - cid: int | str = 0 💡 目录 id，对应 parent_id
             - limit: int = 32 💡 分页大小，目前最大值是 1,150，以前是没限制的
             - offset: int = 0 💡 分页开始的索引，索引从 0 开始计算
-
             - aid: int = 1 💡 area_id
 
                 - 0: 会被视为 1
@@ -11549,6 +11407,101 @@ class P115Client(P115OpenClient):
         return self.request(url=api, params=payload, async_=async_, **request_kwargs)
 
     @overload
+    def fs_files_recent_docs(
+        self, 
+        payload: int | dict = 1000, 
+        /, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def fs_files_recent_docs(
+        self, 
+        payload: int | dict = 1000, 
+        /, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def fs_files_recent_docs(
+        self, 
+        payload: int | dict = 1000, 
+        /, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """获取最近上传的文档
+
+        POST https://webapi.115.com/files/recent
+
+        .. todo::
+            这个接口可能支持其它参数，但目前暂未搞清楚
+
+        :payload:
+            - limit: int
+        """
+        api = complete_url("/files/recent", base_url=base_url)
+        if isinstance(payload, int):
+            payload = {"limit": payload}
+        return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
+
+    @overload
+    def fs_files_recent_docs_app(
+        self, 
+        payload: int | dict = 1000, 
+        /, 
+        app: str = "android", 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def fs_files_recent_docs_app(
+        self, 
+        payload: int | dict = 1000, 
+        /, 
+        app: str = "android", 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def fs_files_recent_docs_app(
+        self, 
+        payload: int | dict = 1000, 
+        /, 
+        app: str = "android", 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """获取最近上传的文档
+
+        POST https://proapi.115.com/{app}/2.0/ufile/recent
+
+        .. todo::
+            这个接口可能支持其它参数，但目前暂未搞清楚
+
+        :payload:
+            - limit: int
+        """
+        api = complete_url("/2.0/ufile/recent", base_url=base_url, app=app)
+        if isinstance(payload, int):
+            payload = {"limit": payload}
+        return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
+
+    @overload
     def fs_files_second_type(
         self, 
         payload: Literal[1, 2, 3, 4, 5, 6, 7] | dict = 1, 
@@ -11868,6 +11821,7 @@ class P115Client(P115OpenClient):
         self, 
         payload: int | str | Iterable[int | str] | dict, 
         /, 
+        hidden: bool = True, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
         async_: Literal[False] = False, 
@@ -11879,6 +11833,7 @@ class P115Client(P115OpenClient):
         self, 
         payload: int | str | Iterable[int | str] | dict, 
         /, 
+        hidden: bool = True, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
         async_: Literal[True], 
@@ -11889,6 +11844,7 @@ class P115Client(P115OpenClient):
         self, 
         payload: int | str | Iterable[int | str] | dict, 
         /, 
+        hidden: bool = True, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
         async_: Literal[False, True] = False, 
@@ -11909,7 +11865,7 @@ class P115Client(P115OpenClient):
             payload = {"fid[0]": payload}
         elif not isinstance(payload, dict):
             payload = {f"fid[{i}]": f for i, f in enumerate(payload)}
-        payload.setdefault("hidden", 1)
+        payload.setdefault("hidden", int(hidden))
         return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
 
     @overload
@@ -11917,6 +11873,7 @@ class P115Client(P115OpenClient):
         self, 
         payload: int | str | Iterable[int | str] | dict, 
         /, 
+        hidden: bool = True, 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
         *, 
@@ -11929,6 +11886,7 @@ class P115Client(P115OpenClient):
         self, 
         payload: int | str | Iterable[int | str] | dict, 
         /, 
+        hidden: bool = True, 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
         *, 
@@ -11940,6 +11898,7 @@ class P115Client(P115OpenClient):
         self, 
         payload: int | str | Iterable[int | str] | dict, 
         /, 
+        hidden: bool = True, 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
         *, 
@@ -11956,10 +11915,10 @@ class P115Client(P115OpenClient):
         """
         api = complete_url("/files/hiddenfiles", base_url=base_url, app=app)
         if isinstance(payload, (int, str)):
-            payload = {"fid[0]": payload}
+            payload = {"fid": payload}
         elif not isinstance(payload, dict):
             payload = {"fid": ",".join(map(str, payload))}
-        payload.setdefault("hidden", 1) # type: ignore
+        cast(dict, payload).setdefault("hidden", int(hidden))
         return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
 
     @overload
@@ -14105,6 +14064,8 @@ class P115Client(P115OpenClient):
             - topic_id: int = <default>
             - music_id: int = <default>
             - download: int = <default>
+            - platform: str = <default> 💡 如果取值为 "weixin"，则会多一个字段 "audio_url"
+            - share_id: int = 0
         """
         api = complete_url("/files/music", base_url=base_url)
         if isinstance(payload, str):
@@ -14549,7 +14510,7 @@ class P115Client(P115OpenClient):
         GET https://webapi.115.com/files/music_list
 
         :payload:
-            - topic_id: int = 1 💡 听单 id。-1:星标 1:最近听过 2:最近接收 678469:临时听单(?)
+            - topic_id: int = 1 💡 听单 id。-1:星标 1:最近听过 2:最近接收
             - start: int = 0
             - limit: int = 1150
         """
@@ -14598,7 +14559,7 @@ class P115Client(P115OpenClient):
         GET https://proapi.115.com/{app}/music/music_list
 
         :payload:
-            - topic_id: int = 1 💡 听单 id。-1:星标 1:最近听过 2:最近接收 678469:临时听单(?)
+            - topic_id: int = 1 💡 听单 id。-1:星标 1:最近听过 2:最近接收
             - start: int = 0
             - limit: int = 1150
         """
@@ -14644,7 +14605,7 @@ class P115Client(P115OpenClient):
         GET https://webapi.115.com/files/musicnew
 
         :payload:
-            - topic_id: int = 1 💡 听单 id。-1:星标 1:最近听过 2:最近接收 678469:临时听单(?)
+            - topic_id: int = 1 💡 听单 id。-1:星标 1:最近听过 2:最近接收
             - type: 0 | 1 = 0   💡 类型：0:文件 1:目录
             - start: int = 0
             - limit: int = 1150
@@ -14694,7 +14655,7 @@ class P115Client(P115OpenClient):
         GET https://proapi.115.com/{app}/music/musicnew
 
         :payload:
-            - topic_id: int = 1 💡 听单 id。-1:星标 1:最近听过 2:最近接收 678469:临时听单(?)
+            - topic_id: int = 1 💡 听单 id。-1:星标 1:最近听过 2:最近接收
             - type: 0 | 1 = 0   💡 类型：0:文件 1:目录
         """
         api = complete_url("/music/musicnew", base_url=base_url, app=app)
@@ -14706,7 +14667,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_music_set(
         self, 
-        payload: int | dict, 
+        payload: int | str | Iterable[int | str] | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -14717,7 +14678,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_music_set(
         self, 
-        payload: int | dict, 
+        payload: int | str | Iterable[int | str] | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -14727,7 +14688,7 @@ class P115Client(P115OpenClient):
         ...
     def fs_music_set(
         self, 
-        payload: int | dict, 
+        payload: int | str | Iterable[int | str] | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -14738,16 +14699,21 @@ class P115Client(P115OpenClient):
 
         POST https://webapi.115.com/files/music
 
+        .. caution::
+            文件超过500MB，暂不支持添加到我听
+
         :payload:
             - file_id: int      💡 文件 id，多个用逗号 "," 隔开（op 为 "add" 和 "delete" 时需要）
             - music_id: int = 1 💡 音乐 id（op 为 "fond" 时需要）
-            - topic_id: int = 1 💡 听单 id
+            - topic_id: int = 1 💡 听单 id，默认为【最近听过】
             - op: str = "add"   💡 操作类型："add": 添加到听单, "delete": 从听单删除, "fond": 设置星标
             - fond: 0 | 1 = 1   💡 是否星标（op 为 "fond" 时需要），这个星标和 music_id 有关，和 file_id 无关
         """
         api = complete_url("/files/music", base_url=base_url)
-        if isinstance(payload, int):
+        if isinstance(payload, (int, str)):
             payload = {"file_id": payload}
+        elif not isinstance(payload, dict):
+            payload = {"file_id": ",".join(map(str, payload))}
         payload = {"op": "add", "fond": 1, "music_id": 1, "topic_id": 1, **payload}
         return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
 
@@ -15514,6 +15480,7 @@ class P115Client(P115OpenClient):
             - search_value: str = "." 💡 搜索文本，可以是 sha1
             - source: str = <default> 💡 来源
             - star: 0 | 1 = <default> 💡 是否打星标
+            - stdir: 0 | 1 = <default> 💡 筛选文件时，是否显示目录：1:展示 0:不展示
             - suffix: str = <default> 💡 文件后缀（扩展名），优先级高于 `type`
             - type: int = <default>   💡 文件类型
 
@@ -16165,6 +16132,7 @@ class P115Client(P115OpenClient):
             - pickcode: str
             - preview_type: str = "file" 💡 file:文件 doc:文档 video:视频 music:音乐 pic:图片
             - module: int = 10
+            - share_id: int = <default>
         """
         api = complete_url("/files/supervision", base_url=base_url)
         if isinstance(payload, str):
@@ -16214,6 +16182,7 @@ class P115Client(P115OpenClient):
             - pickcode: str
             - preview_type: str = "file" 💡 file:文件 doc:文档 video:视频 music:音乐 pic:图片
             - module: int = 10
+            - share_id: int = <default>
         """
         api = complete_url("/files/supervision", base_url=base_url, app=app)
         if isinstance(payload, str):
@@ -16628,6 +16597,50 @@ class P115Client(P115OpenClient):
         if isinstance(payload, str):
             payload = {"pickcode": payload}
         return self.request(url=api, params=payload, async_=async_, **request_kwargs)
+
+    @overload
+    def fs_video_subtitle_set(
+        self, 
+        payload: dict, 
+        /, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def fs_video_subtitle_set(
+        self, 
+        payload: dict, 
+        /, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def fs_video_subtitle_set(
+        self, 
+        payload: dict, 
+        /, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """设置视频字幕
+
+        POST https://webapi.115.com/movies/user_subtitle
+
+        :payload:
+            - pick_code: str
+            - sid: str 💡 字幕的 id，通过 ``P115Client.fs_video_subtitle()`` 接口获得
+            - action: str = "set"
+        """
+        api = complete_url("/movies/user_subtitle", base_url=base_url)
+        payload.setdefault("action", "set")
+        return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
 
     @overload
     def fs_video_transcode(
@@ -17289,6 +17302,73 @@ class P115Client(P115OpenClient):
             - ...
         """
         api = complete_url(f"/api/1.0/{app}/1.0/imgload/get_pic_url", base_url=base_url)
+        if isinstance(payload, str):
+            payload = {"rs": payload}
+        elif isinstance(payload, tuple):
+            payload = [("rs[]", s) for s in payload]
+        return self.request(
+            url=api, 
+            method="POST", 
+            data=payload, 
+            async_=async_, 
+            **request_kwargs, 
+        )
+
+    @overload
+    def life_get_pic_url2(
+        self, 
+        payload: str | tuple[str, ...] | dict | list, 
+        /, 
+        base_url: str | Callable[[], str] = "https://q.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def life_get_pic_url2(
+        self, 
+        payload: str | tuple[str, ...] | dict | list, 
+        /, 
+        base_url: str | Callable[[], str] = "https://q.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def life_get_pic_url2(
+        self, 
+        payload: str | tuple[str, ...] | dict | list, 
+        /, 
+        base_url: str | Callable[[], str] = "https://q.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """批量获取图片的预览图链接
+
+        POST https://q.115.com/ajax_request/get_pic_url
+
+        .. hint::
+            这个接口获取的链接似乎长久有效，而且支持任何文件（只要有人上传过），但限制文件大小在 50 MB 以内
+
+        .. tip::
+            在获得的链接最后加上一个 ``&i=1``，就可以获取原始尺寸（但不一定是原图）
+
+        :payload:
+            - rs: str 💡 图片的 sha1 （必须大写）或者 f"{oss_bucket}_{oss_object}"（由 `upload_file_image` 接口的响应获得），后者跳转次数更少、响应更快
+            - rs[]: str
+            - ...
+            - rs[0]: str
+            - rs[1]: str
+            - ...
+            - module: int = <default>
+            - file_names[]: str = <default>
+            - ...
+            - type[]: int = <default>
+            - ...
+        """
+        api = complete_url("/ajax_request/get_pic_url", base_url=base_url)
         if isinstance(payload, str):
             payload = {"rs": payload}
         elif isinstance(payload, tuple):
@@ -19556,8 +19636,9 @@ class P115Client(P115OpenClient):
     @overload
     def multimedia_relate_file_update(
         self, 
-        payload: dict, 
+        payload: int | str | Iterable[int | str] | dict, 
         /, 
+        channel_id: int | str = 1, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
         async_: Literal[False] = False, 
@@ -19567,8 +19648,9 @@ class P115Client(P115OpenClient):
     @overload
     def multimedia_relate_file_update(
         self, 
-        payload: dict, 
+        payload: int | str | Iterable[int | str] | dict, 
         /, 
+        channel_id: int | str = 1, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
         async_: Literal[True], 
@@ -19577,8 +19659,9 @@ class P115Client(P115OpenClient):
         ...
     def multimedia_relate_file_update(
         self, 
-        payload: dict, 
+        payload: int | str | Iterable[int | str] | dict, 
         /, 
+        channel_id: int | str = 1, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
         async_: Literal[False, True] = False, 
@@ -19592,7 +19675,7 @@ class P115Client(P115OpenClient):
             指定 `multimedia_id` 时，则针对相应的专辑（详情）进行文件增删；未指定时，则自动创建新的专辑（详情）
 
         :payload:
-            - file_ids: int | str 💡 文件 id，多个用逗号 "," 隔开
+            - file_ids: int | str 💡 文件或目录 id，多个用逗号 "," 隔开
             - op: str = "relate" 💡 已知："relate":添加 "delete":删除 "update":更新
             - channel_id: int = 1 💡 频道 id，已知：1:音乐 5:视频
             - multimedia_id: int = <default> 💡 专辑（详情） id
@@ -19601,7 +19684,11 @@ class P115Client(P115OpenClient):
             - visited: 0 | 1 = <default> 💡 是否标记为访问过
         """
         api = complete_url("/multimedia/relate_file", base_url=base_url)
-        payload = {"channel_id": 1, "action": "clear", **payload}
+        if isinstance(payload, (int, str)):
+            payload = {"file_ids": payload}
+        elif not isinstance(payload, dict):
+            payload = {"file_ids": ",".join(map(str, payload))}
+        cast(dict, payload).setdefault("channel_id", channel_id)
         return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
 
     @overload
@@ -22545,7 +22632,7 @@ class P115Client(P115OpenClient):
     @overload
     def photo_bind(
         self, 
-        payload: dict, 
+        payload: int | str | Iterable[int | str] | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -22556,7 +22643,7 @@ class P115Client(P115OpenClient):
     @overload
     def photo_bind(
         self, 
-        payload: dict, 
+        payload: int | str | Iterable[int | str] | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -22566,14 +22653,14 @@ class P115Client(P115OpenClient):
         ...
     def photo_bind(
         self, 
-        payload: dict, 
+        payload: int | str | Iterable[int | str] | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
         async_: Literal[False, True] = False, 
         **request_kwargs, 
     ) -> dict | Coroutine[Any, Any, dict]:
-        """图片到相册的关联
+        """把图片或视频转存到相册
 
         POST https://webapi.115.com/photo/photo
 
@@ -22581,15 +22668,25 @@ class P115Client(P115OpenClient):
             虽然被认为是图片的格式很多（你可以用这个方法 `client.fs_files_second_type({"type": 2})` 获得网盘中的所有图片格式），但仅支持以下格式图片添加到相册：jpg,jpeg,png,gif,svg,webp,heic,bmp,dng
 
         .. caution::
-            目前好像仅支持把图片添加到相册，却不支持从中移除
+            添加到相册，其实就是复制到 "/手机相册" 目录，如果需要删除，就直接用 ``fs_delete`` 即可
 
         :payload:
-            - to_album_id: int | str 💡 相册 id，如果为 -1，则添加到【默认加密相册】
             - file_ids: int | str 💡 文件 id，多个用逗号 "," 隔开
-            - action: str = "addtoalbum" 💡 动作。"addtoalbum":添加到相册
+            - to_album_id: int | str = 1 💡 相册 id
+
+                - -1: 添加到【默认加密相册】
+                -  1: 添加到照片
+
+            - action: str = "addtoalbum" 💡 动作
+
+                - "addtoalbum": 添加到相册
         """
         api = complete_url("/photo/photo", base_url=base_url)
-        payload.setdefault("action", "addtoalbum")
+        if isinstance(payload, (int, str)):
+            payload = {"file_ids": payload}
+        elif not isinstance(payload, dict):
+            payload = {"file_ids": ",".join(map(str, payload))}
+        payload = {"action": "addtoalbum", "to_album_id": 1, **payload}
         return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
 
     @overload
@@ -22623,7 +22720,7 @@ class P115Client(P115OpenClient):
         async_: Literal[False, True] = False, 
         **request_kwargs, 
     ) -> dict | Coroutine[Any, Any, dict]:
-        """获取图片列表
+        """获取相册的文件列表
 
         GET https://webapi.115.com/photo/photolist
 
@@ -23197,6 +23294,7 @@ class P115Client(P115OpenClient):
         self, 
         payload: int | str | Iterable[int | str] | dict = "", 
         /, 
+        password: str = "000000", 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
         async_: Literal[False] = False, 
@@ -23208,6 +23306,7 @@ class P115Client(P115OpenClient):
         self, 
         payload: int | str | Iterable[int | str] | dict = "", 
         /, 
+        password: str = "000000", 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
         async_: Literal[True], 
@@ -23218,6 +23317,7 @@ class P115Client(P115OpenClient):
         self, 
         payload: int | str | Iterable[int | str] | dict = "", 
         /, 
+        password: str = "000000", 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
         async_: Literal[False, True] = False, 
@@ -23234,7 +23334,7 @@ class P115Client(P115OpenClient):
             可以在设置中的【账号安全/安全密钥】页面下，关闭【文件(隐藏模式/清空删除回收站)】的按钮，就不需要传安全密钥了
 
         :payload:
-            - tid: int | str = "" 💡 多个用逗号 "," 隔开
+            - tid: int | str = "" 💡 不传就是清空，多个用逗号 "," 隔开
             - password: int | str = "000000" 💡 安全密钥，是 6 位数字
         """
         api = complete_url("/rb/secret_del", base_url=base_url)
@@ -23242,7 +23342,8 @@ class P115Client(P115OpenClient):
             payload = {"tid": payload}
         elif not isinstance(payload, dict):
             payload = {"tid": ",".join(map(str, payload))}
-        payload.setdefault("password", format(payload.get("password") or "", ">06"))
+        payload.setdefault("password", password)
+        payload["password"] = format(payload.get("password") or "", ">06")
         return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
 
     @overload
@@ -23250,6 +23351,7 @@ class P115Client(P115OpenClient):
         self, 
         payload: int | str | Iterable[int | str] | dict = "", 
         /, 
+        password: str = "000000", 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
         async_: Literal[False] = False, 
@@ -23261,6 +23363,7 @@ class P115Client(P115OpenClient):
         self, 
         payload: int | str | Iterable[int | str] | dict = "", 
         /, 
+        password: str = "000000", 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
         async_: Literal[True], 
@@ -23271,6 +23374,7 @@ class P115Client(P115OpenClient):
         self, 
         payload: int | str | Iterable[int | str] | dict = "", 
         /, 
+        password: str = "000000", 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
         async_: Literal[False, True] = False, 
@@ -23287,7 +23391,7 @@ class P115Client(P115OpenClient):
             这个接口必须提供安全密钥。如果不提供，则默认使用 "000000"，在不必要的情况下，完全可以把安全密钥设为这个值
 
         :payload:
-            - rid[0]: int | str
+            - rid[0]: int | str 💡 不传就是清空
             - rid[1]: int | str
             - ...
             - password: int | str = "000000" 💡 安全密钥
@@ -23297,6 +23401,7 @@ class P115Client(P115OpenClient):
             payload = {"rid[0]": payload}
         elif not isinstance(payload, dict):
             payload = {f"rid[{i}]": rid for i, rid in enumerate(payload)}
+        payload.setdefault("password", password)
         payload["password"] = format(payload.get("password") or "", ">06")
         return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
 
@@ -23305,6 +23410,7 @@ class P115Client(P115OpenClient):
         self, 
         payload: int | str | Iterable[int | str] | dict = "", 
         /, 
+        password: str = "000000", 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
         *, 
@@ -23317,6 +23423,7 @@ class P115Client(P115OpenClient):
         self, 
         payload: int | str | Iterable[int | str] | dict = "", 
         /, 
+        password: str = "000000", 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
         *, 
@@ -23328,6 +23435,7 @@ class P115Client(P115OpenClient):
         self, 
         payload: int | str | Iterable[int | str] | dict = "", 
         /, 
+        password: str = "000000", 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
         *, 
@@ -23345,7 +23453,7 @@ class P115Client(P115OpenClient):
             可以在设置中的【账号安全/安全密钥】页面下，关闭【文件(隐藏模式/清空删除回收站)】的按钮，就不需要传安全密钥了
 
         :payload:
-            - tid: int | str = "" 💡 多个用逗号 "," 隔开
+            - tid: int | str = "" 💡 不传就是清空，多个用逗号 "," 隔开
             - password: int | str = "000000" 💡 安全密钥，是 6 位数字
             - user_id: int | str = <default> 💡 用户 id
         """
@@ -23354,11 +23462,9 @@ class P115Client(P115OpenClient):
             payload = {"tid": payload}
         elif not isinstance(payload, dict):
             payload = {"tid": ",".join(map(str, payload))}
-        payload = {
-            "user_id": self.user_id, 
-            "password": format(payload.get("password") or "", ">06"), 
-            **payload, 
-        }
+        payload.setdefault("user_id", self.user_id)
+        payload.setdefault("password", password)
+        payload["password"] = format(payload.get("password") or "", ">06")
         return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
 
     @overload
@@ -24054,6 +24160,7 @@ class P115Client(P115OpenClient):
             - file_id: int | str
             - receive_code: str
             - share_code: str
+            - dl: 0 | 1 = <default>
         """
         if app in ("", "chrome"):
             api = complete_url("/2.0/share/downurl", base_url=base_url, app=app)
@@ -26092,9 +26199,12 @@ class P115Client(P115OpenClient):
         .. caution::
             此接口不支持秒传
 
+        .. note::
+            如果上传到自己的网盘，则 ``target`` 的格式是 "U_{aid}_{pid}"，如果上传到共享目录，格式为 "S_{share_id}_{pid}"
+
         :payload:
             - filename: str = <default> 💡 文件名，默认为一个新的 uuid4 对象的字符串表示
-            - target: str = "U_1_0" 💡 上传目标，格式为 f"U_{aid}_{pid}"
+            - target: str = "U_1_0" 💡 上传目标，格式为 f"U_{aid}_{pid}"（网盘）或 f"S_{share_id}_{pid}"（共享目录）
             - path: str = <default> 💡 保存目录，是在 `target` 对应目录下的相对路径，默认为 `target` 所对应目录本身
             - filesize: int | str = <default> 💡 文件大小
         """
@@ -26112,6 +26222,7 @@ class P115Client(P115OpenClient):
         /, 
         filename: str = "", 
         pid: int | str = "U_4_-1", 
+        share_id: int = 0, 
         base_url: str | Callable[[], str] = "https://uplb.115.com", 
         *, 
         async_: Literal[False] = False, 
@@ -26124,6 +26235,7 @@ class P115Client(P115OpenClient):
         /, 
         filename: str = "", 
         pid: int | str = "U_4_-1", 
+        share_id: int = 0, 
         base_url: str | Callable[[], str] = "https://uplb.115.com", 
         *, 
         async_: Literal[True], 
@@ -26135,6 +26247,7 @@ class P115Client(P115OpenClient):
         /, 
         filename: str = "", 
         pid: int | str = "U_4_-1", 
+        share_id: int = 0, 
         base_url: str | Callable[[], str] = "https://uplb.115.com", 
         *, 
         async_: Literal[False, True] = False, 
@@ -26146,13 +26259,16 @@ class P115Client(P115OpenClient):
             通过扩展名来识别，仅支持以下格式图片(jpg,jpeg,png,gif,svg,webp,heic,bmp,dng)
 
         :param filename: 文件名，默认为一个新的 uuid4 对象的字符串表示
-        :param pid: 上传文件到此目录的 id 或 pickcode，或者指定的 target（格式为 f"U_{aid}_{pid}"）
+        :param pid: 上传文件到此目录的 id 或 pickcode，或者指定的 target（格式为 f"U_{aid}_{pid}" 或 f"S_{share_id}_{pid}"）
+        :param share_id: 共享 id
         :param base_url: 接口的基地址
         :param async_: 是否异步
         :param request_kwargs: 其它请求参数
         """
-        if isinstance(pid, str) and pid.startswith("U_"):
+        if isinstance(pid, str) and pid.startswith(("U_", "S_")):
             target = pid
+        elif share_id:
+            target = f"S_{share_id}_{pid}"
         else:
             target = f"U_1_{pid}"
         payload = {"filename": filename or str(uuid4())+".jpg", "target": target}
@@ -26163,9 +26279,10 @@ class P115Client(P115OpenClient):
         self, 
         /, 
         filename: str = "", 
+        filesize: int = -1, 
         dirname: str = "", 
         pid: int | str = 0, 
-        filesize: int = -1, 
+        share_id: int = 0, 
         base_url: str | Callable[[], str] = "https://uplb.115.com", 
         *, 
         async_: Literal[False] = False, 
@@ -26177,9 +26294,10 @@ class P115Client(P115OpenClient):
         self, 
         /, 
         filename: str = "", 
+        filesize: int = -1, 
         dirname: str = "", 
         pid: int | str = 0, 
-        filesize: int = -1, 
+        share_id: int = 0, 
         base_url: str | Callable[[], str] = "https://uplb.115.com", 
         *, 
         async_: Literal[True], 
@@ -26190,9 +26308,10 @@ class P115Client(P115OpenClient):
         self, 
         /, 
         filename: str = "", 
+        filesize: int = -1, 
         dirname: str = "", 
         pid: int | str = 0, 
-        filesize: int = -1, 
+        share_id: int = 0, 
         base_url: str | Callable[[], str] = "https://uplb.115.com", 
         *, 
         async_: Literal[False, True] = False, 
@@ -26202,14 +26321,17 @@ class P115Client(P115OpenClient):
 
         :param filename: 文件名，默认为一个新的 uuid4 对象的字符串表示
         :param dirname: 保存目录，是在 `pid` 对应目录下的相对路径，默认为 `pid` 所对应目录本身
-        :param pid: 上传文件到此目录的 id 或 pickcode，或者指定的 target（格式为 f"U_{aid}_{pid}"）
+        :param pid: 上传文件到此目录的 id 或 pickcode，或者指定的 target（格式为 f"U_{aid}_{pid}" 或 f"S_{share_id}_{pid}"）
+        :param share_id: 共享 id
         :param filesize: 文件大小，⚠️ 此参数可以省略
         :param base_url: 接口的基地址
         :param async_: 是否异步
         :param request_kwargs: 其它请求参数
         """
-        if isinstance(pid, str) and pid.startswith("U_"):
+        if isinstance(pid, str) and pid.startswith(("U_", "S_")):
             target = pid
+        elif share_id:
+            target = f"S_{share_id}_{pid}"
         else:
             target = f"U_1_{pid}"
         payload: dict = {"filename": filename or str(uuid4()), "path": dirname, "target": target}
@@ -26358,7 +26480,7 @@ class P115Client(P115OpenClient):
         :return: 接口响应
         """
         def gen_step():
-            if isinstance(pid, str) and pid.startswith("U_"):
+            if isinstance(pid, str) and pid.startswith(("U_", "S_")):
                 target = pid
             else:
                 target = f"U_1_{pid}"
@@ -26442,14 +26564,14 @@ class P115Client(P115OpenClient):
             不支持秒传，但也不必传文件大小和 sha1，最大支持上传 50 MB 的文件
 
         :param file: 待上传的文件
-        :param pid: 上传文件到此目录的 id 或 pickcode，或者指定的 target（格式为 f"U_{aid}_{pid}"）
+        :param pid: 上传文件到此目录的 id 或 pickcode，或者指定的 target（格式为 f"U_{aid}_{pid}" 或 f"S_{share_id}_{pid}"）
         :param filename: 文件名，如果为空，则会自动确定
         :param async_: 是否异步
         :param request_kwargs: 其余请求参数
 
         :return: 接口响应
         """
-        if isinstance(pid, str) and not pid.startswith("U_"):
+        if isinstance(pid, str) and not pid.startswith(("U_", "S_")):
             pid = self.to_id(pid)
         def gen_step():
             nonlocal file, filename
@@ -26577,6 +26699,9 @@ class P115Client(P115OpenClient):
             不支持秒传，但也不必传文件大小和 sha1
 
         .. note::
+            如果上传到共享目录，占用的是创建者的网盘空间
+
+        .. note::
             只要上传后的 `aid` 或 `area_id` 不为 1，则不占用空间，这是 `upload_file` 所不能的（因为即使指定了 "U_{aid}_{pid}"，也会忽略其中的 `aid`，强行视为 1）
 
         .. note::
@@ -26596,7 +26721,7 @@ class P115Client(P115OpenClient):
             尽量不要使 ``aid=15``，因为这会导致白白占掉空间，不能删除，也不能正常下载。
 
         :param file: 待上传的文件
-        :param pid: 上传文件到此目录的 id 或 pickcode，或者指定的 target（格式为 f"U_{aid}_{pid}"）
+        :param pid: 上传文件到此目录的 id 或 pickcode，或者指定的 target（格式为 f"U_{aid}_{pid}" 或 f"S_{share_id}_{pid}"）
         :param filename: 文件名，如果为空，则会自动确定
         :param filesize: 文件大小，⚠️ 此参数可以省略
         :param dirname: 保存目录，是在 `pid` 对应目录下的相对路径，默认为 `pid` 所对应目录本身
@@ -26605,7 +26730,7 @@ class P115Client(P115OpenClient):
 
         :return: 接口响应
         """
-        if isinstance(pid, str) and not pid.startswith("U_"):
+        if isinstance(pid, str) and not pid.startswith(("U_", "S_")):
             pid = self.to_id(pid)
         def gen_step():
             nonlocal file, filename
@@ -26768,7 +26893,7 @@ class P115Client(P115OpenClient):
 
         :return: 接口响应
         """
-        if isinstance(pid, str) and not pid.startswith("U_"):
+        if isinstance(pid, str) and not pid.startswith(("U_", "S_")):
             pid = self.to_id(pid)
         return upload_file(
             file=file, 
@@ -28272,6 +28397,95 @@ class P115Client(P115OpenClient):
     ########## User Share API ##########
 
     @overload
+    def usershare_add_folder(
+        self, 
+        payload: dict, 
+        /, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def usershare_add_folder(
+        self, 
+        payload: dict, 
+        /, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def usershare_add_folder(
+        self, 
+        payload: dict, 
+        /, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """转存共享文件或目录
+
+        POST https://webapi.115.com/usershare/add_folder
+
+        :payload:
+            - share_id: int | str
+            - pid: int | str
+            - cname: str
+        """
+        api = complete_url("/usershare/add_folder", base_url=base_url)
+        return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
+
+    @overload
+    def usershare_add_folder_app(
+        self, 
+        payload: dict, 
+        /, 
+        app: str = "android", 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def usershare_add_folder_app(
+        self, 
+        payload: dict, 
+        /, 
+        app: str = "android", 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def usershare_add_folder_app(
+        self, 
+        payload: dict, 
+        /, 
+        app: str = "android", 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """转存共享文件或目录
+
+        POST https://proapi.115.com/{app}/2.0/usershare/add_folder
+
+        :payload:
+            - share_id: int | str
+            - pid: int | str
+            - cname: str
+        """
+        api = complete_url("/2.0/usershare/add_folder", base_url=base_url, app=app)
+        return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
+
+    @overload
     def usershare_action(
         self, 
         payload: int | dict, 
@@ -28318,6 +28532,580 @@ class P115Client(P115OpenClient):
         return self.request(url=api, params=payload, async_=async_, **request_kwargs)
 
     @overload
+    def usershare_action_app(
+        self, 
+        payload: int | dict, 
+        /, 
+        app: str = "android", 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def usershare_action_app(
+        self, 
+        payload: int | dict, 
+        /, 
+        app: str = "android", 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def usershare_action_app(
+        self, 
+        payload: int | dict, 
+        /, 
+        app: str = "android", 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """获取共享动态列表
+
+        GET https://proapi.115.com/{app}/2.0/usershare/action
+
+        :payload:
+            - share_id: int | str
+            - offset: int = 0
+            - limit: int = 32
+        """
+        api = complete_url("/2.0/usershare/action", base_url=base_url, app=app)
+        if isinstance(payload, int):
+            payload = {"share_id": payload}
+        payload = {"limit": 32, "offset": 0, **payload}
+        return self.request(url=api, params=payload, async_=async_, **request_kwargs)
+
+    @overload
+    def usershare_copy(
+        self, 
+        payload: dict, 
+        /, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def usershare_copy(
+        self, 
+        payload: dict, 
+        /, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def usershare_copy(
+        self, 
+        payload: dict, 
+        /, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """转存文件或目录
+
+        POST https://webapi.115.com/usershare/copy
+
+        :payload:
+            - share_id: int | str
+            - file_ids: int | str  💡 文件或目录的 id，多个用逗号 "," 隔开
+            - to_cid: int = 0      💡 转存到你的网盘中的目录 id
+            - copy_type: 0 | 1 = 0 💡 复制类型：0:共享->网盘 1:网盘->共享
+        """
+        api = complete_url("/usershare/copy", base_url=base_url)
+        return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
+
+    @overload
+    def usershare_copy_app(
+        self, 
+        payload: dict, 
+        /, 
+        app: str = "android", 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def usershare_copy_app(
+        self, 
+        payload: dict, 
+        /, 
+        app: str = "android", 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def usershare_copy_app(
+        self, 
+        payload: dict, 
+        /, 
+        app: str = "android", 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """转存文件或目录
+
+        POST https://proapi.115.com/{app}/2.0/usershare/copy
+
+        :payload:
+            - share_id: int | str
+            - file_ids: int | str  💡 文件或目录的 id，多个用逗号 "," 隔开
+            - to_cid: int = 0      💡 转存到你的网盘中的目录 id
+            - copy_type: 0 | 1 = 0 💡 复制类型：0:共享->网盘 1:网盘->共享
+        """
+        api = complete_url("/2.0/usershare/copy", base_url=base_url, app=app)
+        return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
+
+    @overload
+    def usershare_delete(
+        self, 
+        payload: dict, 
+        /, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def usershare_delete(
+        self, 
+        payload: dict, 
+        /, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def usershare_delete(
+        self, 
+        payload: dict, 
+        /, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """删除共享文件或目录
+
+        POST https://webapi.115.com/usershare/delete
+
+        :payload:
+            - share_id: int | str
+            - file_ids: int | str 💡 共享中的文件或目录的 id，多个用逗号 "," 隔开
+            - ignore_warn: 0 | 1 = 0
+        """
+        api = complete_url("/usershare/delete", base_url=base_url)
+        return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
+
+    @overload
+    def usershare_delete_app(
+        self, 
+        payload: dict, 
+        /, 
+        app: str = "android", 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def usershare_delete_app(
+        self, 
+        payload: dict, 
+        /, 
+        app: str = "android", 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def usershare_delete_app(
+        self, 
+        payload: dict, 
+        /, 
+        app: str = "android", 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """删除共享文件或目录
+
+        POST https://proapi.115.com/{app}/2.0/usershare/delete
+
+        :payload:
+            - share_id: int | str
+            - file_ids: int | str 💡 共享中的文件或目录的 id，多个用逗号 "," 隔开
+            - ignore_warn: 0 | 1 = 0
+        """
+        api = complete_url("/2.0/usershare/delete", base_url=base_url, app=app)
+        return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
+
+    @overload
+    def usershare_download_url_web(
+        self, 
+        payload: dict, 
+        /, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        user_agent: None | str = None, 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def usershare_download_url_web(
+        self, 
+        payload: dict, 
+        /, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        user_agent: None | str = None, 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def usershare_download_url_web(
+        self, 
+        payload: dict, 
+        /, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        user_agent: None | str = None, 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """获取文件的下载链接（网页版接口）
+
+        POST https://webapi.115.com/usershare/download
+
+        .. note::
+            最大允许下载 200 MB 的文件，即使文件违规，或者 `aid=12`，也可以正常下载
+
+        :payload:
+            - share_id: int | str
+            - pick_code: str
+            - dl: int = 0
+        """
+        api = complete_url("/usershare/download", base_url=base_url)
+        headers = request_kwargs["headers"] = dict(request_kwargs.get("headers") or ())
+        if user_agent is None:
+            headers.setdefault("user-agent", "")
+        else:
+            headers["user-agent"] = user_agent
+        def parse(resp, content: bytes, /) -> dict:
+            json = json_loads(content)
+            if "Set-Cookie" in resp.headers:
+                if isinstance(resp.headers, Mapping):
+                    match = CRE_SET_COOKIE.search(resp.headers["Set-Cookie"])
+                    if match is not None:
+                        headers["Cookie"] = match[0]
+                else:
+                    for k, v in reversed(resp.headers.items()):
+                        if k == "Set-Cookie" and CRE_SET_COOKIE.match(v) is not None:
+                            headers["Cookie"] = v
+                            break
+            json["headers"] = headers
+            return json
+        request_kwargs.setdefault("parse", parse)
+        return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
+
+    @overload
+    def usershare_file_list(
+        self, 
+        payload: dict, 
+        /, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def usershare_file_list(
+        self, 
+        payload: dict, 
+        /, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def usershare_file_list(
+        self, 
+        payload: dict, 
+        /, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """共享目录中的文件列表
+
+        GET https://webapi.115.com/usershare/filelist
+
+        :payload:
+            - share_id: int | str
+            - cid: int | str 💡 目录 id，对应 parent_id
+            - limit: int = 32 💡 分页大小，目前最大值是 1,150，以前是没限制的
+            - offset: int = 0 💡 分页开始的索引，索引从 0 开始计算
+            - asc: 0 | 1 = <default> 💡 是否升序排列。0:降序 1:升序
+            - count_folders: 0 | 1 = 1 💡 统计文件数和目录数，好像也可以写成 ``countfolders``
+            - cur: 0 | 1 = <default> 💡 是否只搜索当前目录
+            - custom_order: 0 | 1 = <default> 💡 启用自定义排序，如果指定了 "asc"、"fc_mix"、"o" 中其一，则此参数会被自动设置为 1
+
+                - 0: 使用记忆排序（自定义排序失效） 
+                - 1: 使用自定义排序（不使用记忆排序） 
+                - 2: 自定义排序（非目录置顶）
+
+            - fc_mix: 0 | 1 = <default> 💡 是否目录和文件混合，如果为 0 则目录在前（目录置顶）
+            - nf: str = <default> 💡 不要显示文件（即仅显示目录），但如果 show_dir=0，则此参数无效
+            - o: str = <default> 💡 用某字段排序
+
+                - "file_name": 文件名
+                - "file_size": 文件大小
+                - "file_type": 文件种类
+                - "user_utime": 修改时间
+                - "user_ptime": 创建时间
+                - "user_otime": 上一次打开时间
+
+            - record_open_time: 0 | 1 = 1 💡 是否要记录目录的打开时间
+            - show_dir: 0 | 1 = 1 💡 是否显示目录，好像也可以写成 showdir
+            - star: 0 | 1 = <default> 💡 是否星标文件
+            - suffix: str = <default> 💡 后缀名（优先级高于 `type`）
+            - suffix_type: int = <default>
+            - type: int = <default> 💡 文件类型
+
+                - 0: 全部（仅当前目录）
+                - 1: 文档
+                - 2: 图片
+                - 3: 音频
+                - 4: 视频
+                - 5: 压缩包
+                - 6: 软件/应用
+                - 7: 书籍
+                - 8: 其它
+                - 9: 相当于 8
+                - 10: 相当于 8
+                - 11: 相当于 8
+                - 12: ？？？
+                - 13: 相当于 3
+                - 14: ？？？
+                - 15: 图片和视频，相当于 2 和 4
+                - 16: ？？？
+                - 17~98: 相当于 8
+                - 99: 所有文件
+                - >=100: 相当于 8
+        """
+        api = complete_url("/usershare/filelist", base_url=base_url)
+        payload = {"limit": 32, "offset": 0, "show_dir": 1, **payload}
+        return self.request(url=api, params=payload, async_=async_, **request_kwargs)
+
+    @overload
+    def usershare_file_list_app(
+        self, 
+        payload: dict, 
+        /, 
+        app: str = "android", 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def usershare_file_list_app(
+        self, 
+        payload: dict, 
+        /, 
+        app: str = "android", 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def usershare_file_list_app(
+        self, 
+        payload: dict, 
+        /, 
+        app: str = "android", 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """共享目录中的文件列表
+
+        GET https://proapi.115.com/{app}/2.0/usershare/filelist
+
+        :payload:
+            - share_id: int | str
+            - cid: int | str 💡 目录 id，对应 parent_id
+            - limit: int = 32 💡 分页大小，目前最大值是 1,150，以前是没限制的
+            - offset: int = 0 💡 分页开始的索引，索引从 0 开始计算
+            - asc: 0 | 1 = <default> 💡 是否升序排列。0:降序 1:升序
+            - count_folders: 0 | 1 = 1 💡 统计文件数和目录数，好像也可以写成 ``countfolders``
+            - cur: 0 | 1 = <default> 💡 是否只搜索当前目录
+            - custom_order: 0 | 1 = <default> 💡 启用自定义排序，如果指定了 "asc"、"fc_mix"、"o" 中其一，则此参数会被自动设置为 1
+
+                - 0: 使用记忆排序（自定义排序失效） 
+                - 1: 使用自定义排序（不使用记忆排序） 
+                - 2: 自定义排序（非目录置顶）
+
+            - fc_mix: 0 | 1 = <default> 💡 是否目录和文件混合，如果为 0 则目录在前（目录置顶）
+            - nf: str = <default> 💡 不要显示文件（即仅显示目录），但如果 show_dir=0，则此参数无效
+            - o: str = <default> 💡 用某字段排序
+
+                - "file_name": 文件名
+                - "file_size": 文件大小
+                - "file_type": 文件种类
+                - "user_utime": 修改时间
+                - "user_ptime": 创建时间
+                - "user_otime": 上一次打开时间
+
+            - record_open_time: 0 | 1 = 1 💡 是否要记录目录的打开时间
+            - show_dir: 0 | 1 = 1 💡 是否显示目录，好像也可以写成 showdir
+            - star: 0 | 1 = <default> 💡 是否星标文件
+            - suffix: str = <default> 💡 后缀名（优先级高于 `type`）
+            - suffix_type: int = <default>
+            - type: int = <default> 💡 文件类型
+
+                - 0: 全部（仅当前目录）
+                - 1: 文档
+                - 2: 图片
+                - 3: 音频
+                - 4: 视频
+                - 5: 压缩包
+                - 6: 软件/应用
+                - 7: 书籍
+                - 8: 其它
+                - 9: 相当于 8
+                - 10: 相当于 8
+                - 11: 相当于 8
+                - 12: ？？？
+                - 13: 相当于 3
+                - 14: ？？？
+                - 15: 图片和视频，相当于 2 和 4
+                - 16: ？？？
+                - 17~98: 相当于 8
+                - 99: 所有文件
+                - >=100: 相当于 8
+        """
+        api = complete_url("/2.0/usershare/filelist", base_url=base_url, app=app)
+        payload = {"limit": 32, "offset": 0, "show_dir": 1, **payload}
+        return self.request(url=api, params=payload, async_=async_, **request_kwargs)
+
+    @overload
+    def usershare_info(
+        self, 
+        payload: int | str | dict, 
+        /, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def usershare_info(
+        self, 
+        payload: int | str | dict, 
+        /, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def usershare_info(
+        self, 
+        payload: int | str | dict, 
+        /, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """获取共享信息
+
+        GET https://webapi.115.com/usershare/shareinfo
+
+        :payload:
+            - share_id: int | str
+        """
+        api = complete_url("/usershare/shareinfo", base_url=base_url)
+        if isinstance(payload, (int, str)):
+            payload = {"share_id": payload}
+        return self.request(url=api, params=payload, async_=async_, **request_kwargs)
+
+    @overload
+    def usershare_info_app(
+        self, 
+        payload: int | str | dict, 
+        /, 
+        app: str = "android", 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def usershare_info_app(
+        self, 
+        payload: int | str | dict, 
+        /, 
+        app: str = "android", 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def usershare_info_app(
+        self, 
+        payload: int | str | dict, 
+        /, 
+        app: str = "android", 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """获取共享信息
+
+        GET https://proapi.115.com/{app}/2.0/usershare/shareinfo
+
+        :payload:
+            - share_id: int | str
+        """
+        api = complete_url("/2.0/usershare/shareinfo", base_url=base_url, app=app)
+        if isinstance(payload, (int, str)):
+            payload = {"share_id": payload}
+        return self.request(url=api, params=payload, async_=async_, **request_kwargs)
+
+    @overload
     def usershare_invite(
         self, 
         payload: int | str | dict, 
@@ -28356,6 +29144,52 @@ class P115Client(P115OpenClient):
             - share_id: int | str
         """
         api = complete_url("/usershare/invite", base_url=base_url)
+        if isinstance(payload, (int, str)):
+            payload = {"share_id": payload}
+        return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
+
+    @overload
+    def usershare_invite_app(
+        self, 
+        payload: int | str | dict, 
+        /, 
+        app: str = "android", 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def usershare_invite_app(
+        self, 
+        payload: int | str | dict, 
+        /, 
+        app: str = "android", 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def usershare_invite_app(
+        self, 
+        payload: int | str | dict, 
+        /, 
+        app: str = "android", 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """获取共享链接
+
+        POST https://proapi.115.com/{app}/2.0/usershare/invite
+
+        :payload:
+            - share_id: int | str
+        """
+        api = complete_url("/2.0/usershare/invite", base_url=base_url, app=app)
         if isinstance(payload, (int, str)):
             payload = {"share_id": payload}
         return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
@@ -28460,6 +29294,7 @@ class P115Client(P115OpenClient):
         self, 
         payload: int | dict, 
         /, 
+        method: str = "POST", 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
         async_: Literal[False] = False, 
@@ -28471,6 +29306,7 @@ class P115Client(P115OpenClient):
         self, 
         payload: int | dict, 
         /, 
+        method: str = "POST", 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
         async_: Literal[True], 
@@ -28481,6 +29317,7 @@ class P115Client(P115OpenClient):
         self, 
         payload: int | dict, 
         /, 
+        method: str = "POST", 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
         async_: Literal[False, True] = False, 
@@ -28488,18 +29325,104 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """某共享的成员信息
 
-        GET https://webapi.115.com/usershare/member
+        POST https://webapi.115.com/usershare/member
 
         :payload:
             - share_id: int | str
-            - action: "member_list" | "member_info" | "noticeset" = "member_list"
-            - notice_set: 0 | 1 = <default> 💡 action 为 "noticeset" 时可以设置
+            - action: str = "member_list"
+
+                - "member_list": 用户列表
+                - "member_info": 用户信息
+                - "noticeset":   设置通知
+                - "priviset":    设置权限（共享拥有者用于对待他人）
+                - "remove":      移除成员
+                - "join":        加入邀请
+                - "quit":        退出共享
+
+            - notice_set: 0 | 1 = <default> 💡 是否开启通知，``action`` 为 "noticeset" 时设置
+            - privi_set[{user_id}]: int | str = <default> 💡 设置权限，``action`` 为 "priviset" 时设置，多个用逗号 "," 隔开
+
+                - 2: 上传
+                - 8: 转存/下载
+
+            - member_uid: int | str = <default> 💡 用户 id，``action`` 为 "remove" 时设置
+            - delete_file: 0 | 1 = <default>    💡 是否同时删除他共享的文件，``action`` 为 "remove" 或 "quit" 时设置
+            - invite_code: str = <default>      💡 分享码，``action`` 为 "join" 时设置
         """
         api = complete_url("/usershare/member", base_url=base_url)
         if isinstance(payload, int):
             payload = {"share_id": payload}
         payload.setdefault("action", "member_list")
-        return self.request(url=api, params=payload, async_=async_, **request_kwargs)
+        return self.request(url=api, method=method, payload=payload, async_=async_, **request_kwargs)
+
+    @overload
+    def usershare_member_app(
+        self, 
+        payload: int | dict, 
+        /, 
+        method: str = "POST", 
+        app: str = "android", 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def usershare_member_app(
+        self, 
+        payload: int | dict, 
+        /, 
+        method: str = "POST", 
+        app: str = "android", 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def usershare_member_app(
+        self, 
+        payload: int | dict, 
+        /, 
+        method: str = "POST", 
+        app: str = "android", 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """某共享的成员信息
+
+        POST https://proapi.115.com/{app}/2.0/usershare/member
+
+        :payload:
+            - share_id: int | str
+            - action: str = "member_list"
+
+                - "member_list": 用户列表
+                - "member_info": 用户信息
+                - "noticeset":   设置通知
+                - "priviset":    设置权限（共享拥有者用于对待他人）
+                - "remove":      移除成员
+                - "join":        加入邀请
+                - "quit":        退出共享
+
+            - notice_set: 0 | 1 = <default> 💡 是否开启通知，``action`` 为 "noticeset" 时设置
+            - privi_set[{user_id}]: int | str = <default> 💡 设置权限，``action`` 为 "priviset" 时设置，多个用逗号 "," 隔开
+
+                - 2: 上传
+                - 8: 转存/下载
+
+            - member_uid: int | str = <default> 💡 用户 id，``action`` 为 "remove" 时设置
+            - delete_file: 0 | 1 = <default>    💡 是否同时删除他共享的文件，``action`` 为 "remove" 或 "quit" 时设置
+            - invite_code: str = <default>      💡 分享码，``action`` 为 "join" 时设置
+        """
+        api = complete_url("/2.0/usershare/member", base_url=base_url, app=app)
+        if isinstance(payload, int):
+            payload = {"share_id": payload}
+        payload.setdefault("action", "member_list")
+        return self.request(url=api, method=method, payload=payload, async_=async_, **request_kwargs)
 
     @overload
     def usershare_share(
@@ -28548,7 +29471,57 @@ class P115Client(P115OpenClient):
         payload = {"ignore_warn": 0, "share_opt": 1, "safe_pwd": "", **payload}
         return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
 
-     ########## Extension API ##########
+    @overload
+    def usershare_share_app(
+        self, 
+        payload: int | str | dict, 
+        /, 
+        app: str = "android", 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def usershare_share_app(
+        self, 
+        payload: int | str | dict, 
+        /, 
+        app: str = "android", 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def usershare_share_app(
+        self, 
+        payload: int | str | dict, 
+        /, 
+        app: str = "android", 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """设置共享
+
+        POST https://proapi.115.com/{app}/2.0/usershare/share
+
+        :payload:
+            - file_id: int | str     💡 文件或目录的 id
+            - share_opt: 1 | 2 = 1   💡 1: 设置 2: 取消
+            - ignore_warn: 0 | 1 = 0
+            - safe_pwd: str = ""
+        """
+        api = complete_url("/2.0/usershare/share", base_url=base_url, app=app)
+        if isinstance(payload, (int, str)):
+            payload = {"file_id": payload}
+        payload = {"ignore_warn": 0, "share_opt": 1, "safe_pwd": "", **payload}
+        return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
+
+    ########## Extension API ##########
 
     @overload
     def get_fs(

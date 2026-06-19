@@ -48,7 +48,7 @@ def complete_url(
     force_app: bool | Container[str] = False, 
     domain: str | Callable[[], str] = "", 
     as_query: bool = False, 
-    query: Mapping[str, Any] | Sequence[tuple[str, Any]] = (), 
+    query: str | Mapping[str, Any] | Sequence[tuple[str, Any]] = (), 
 ) -> str:
     """完整 HTTP Web 接口 URL
 
@@ -81,7 +81,7 @@ def complete_url(
         - `https://f.115.com/api/proxy/115?domain={domain}&path={path}&{query}`
         - `https://n.115.com/api/proxy/115?domain={domain}&path={path}&{query}`
 
-        其中 `https://f.115.com` 和 `https://n.115.com` 可以拼接查询参数 `domain`，默认值是 "webapi"
+        其中 `https://f.115.com` 和 `https://n.115.com` 可以拼接查询参数 `domain`，默认值是 "webapi"，请求时需要携带 "origin" 头
     """
     if callable(path):
         path = path()
@@ -89,52 +89,57 @@ def complete_url(
         base_url = base_url()
     if callable(app):
         app = app()
-    if app.startswith("="):
-        force_app = True
-        app = app[1:]
-    elif isinstance(force_app, Container):
-        force_app = app in force_app
     if callable(domain):
         domain = domain()
-    if path and not path.startswith("/"):
-        path = "/" + path
-    if base_url:
-        if base_url.endswith(("://115cdn.com", "://115vod.com")):
-            as_query = False
-            if not domain:
-                domain = "site"
+    if base_url.startswith(("http://f.115.com/api/proxy/115", "https://f.115.com/api/proxy/115", "http://n.115.com/api/proxy/115", "https://n.115.com/api/proxy/115")):
+        as_query = True
     else:
-        as_query = False
-        if app or path.startswith("/open/"):
-            base_url = "https://proapi.115.com"
-        elif domain:
-            if domain in ("web.api", "pro.api"):
-                base_url = f"http://{domain}.115.com"
-            else:
-                base_url = f"https://{domain}.115.com"
+        if app.startswith("="):
+            force_app = True
+            app = app[1:]
+        elif isinstance(force_app, Container):
+            force_app = app in force_app
+        if path and not path.startswith("/"):
+            path = "/" + path
+        if base_url:
+            if base_url.endswith(("://115cdn.com", "://115vod.com")):
+                as_query = False
+                if not domain:
+                    domain = "site"
         else:
-            base_url = "https://webapi.115.com"
-    if app in ("windows", "mac", "linux"):
-        app = "os_" + app
-    if app and not path.startswith("/open/"):
-        if not force_app:
-            if app in (
-                "ios", "115ios", "115ipad", "android", "115android", 
-                "harmony", "os_windows", "os_mac", "os_linux", 
-                # NOTE: 下面这几个值往往不可用，但 "wechatmini" 和 "alipaymini" 偶尔可用
-                # "wechatmini", "alipaymini", "ipad", "tv", "apple_tv", 
-            ):
-                pass
-            elif app.endswith("ios"):
-                app = "ios"
-            elif app.endswith("ipad"):
-                app = "115ipad"
-            elif app.endswith("android"):
-                app = "android"
+            as_query = False
+            if app or path.startswith("/open/"):
+                base_url = "https://proapi.115.com"
+            elif domain:
+                if domain in ("web.api", "pro.api"):
+                    base_url = f"http://{domain}.115.com"
+                else:
+                    base_url = f"https://{domain}.115.com"
             else:
-                app = "android"
-        path = "/" + app + path
+                base_url = "https://webapi.115.com"
+        if app in ("windows", "mac", "linux"):
+            app = "os_" + app
+        if app and not path.startswith("/open/"):
+            if not force_app:
+                if app in (
+                    "ios", "115ios", "115ipad", "android", "115android", 
+                    "harmony", "os_windows", "os_mac", "os_linux", 
+                    # NOTE: 下面这几个值往往不可用，但 "wechatmini" 和 "alipaymini" 偶尔可用
+                    # "wechatmini", "alipaymini", "ipad", "tv", "apple_tv", 
+                ):
+                    pass
+                elif app.endswith("ios"):
+                    app = "ios"
+                elif app.endswith("ipad"):
+                    app = "115ipad"
+                elif app.endswith("android"):
+                    app = "android"
+                else:
+                    app = "android"
+            path = "/" + app + path
     url = base_url
+    if isinstance(query, str):
+        query = parse_qsl(query)
     if as_query:
         query = dict(query)
         if domain:

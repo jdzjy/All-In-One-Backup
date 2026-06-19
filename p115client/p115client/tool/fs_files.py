@@ -2,8 +2,8 @@
 # encoding: utf-8
 
 __all__ = [
-    "iter_fs_files", "iter_fs_files_serialized", "iter_fs_files_threaded", 
-    "iter_fs_files_asynchronized", 
+    "fs_files", "iter_fs_files", "iter_fs_files_serialized", 
+    "iter_fs_files_threaded", "iter_fs_files_asynchronized", 
 ]
 __doc__ = "这个模块利用 P115Client.fs_files 方法做了一些封装"
 
@@ -15,25 +15,124 @@ from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from concurrent.futures import Future, ThreadPoolExecutor
 from copy import copy
-from inspect import isawaitable
 from itertools import cycle
 from os import PathLike
 from time import sleep, time
-from typing import overload, Any, Final, Literal
+from typing import overload, Final, Literal
 from warnings import warn
 
 from errno2 import errno
 from http_response import get_status_code, is_timeouterror
-from iterutils import run_gen_step_iter, Yield
+from iterutils import run_gen_step, run_gen_step_iter, Yield
 
 from ..client import check_response, P115Client, P115OpenClient
 from ..exception import throw, P115DataError, P115Warning
 
 
-# get_webapi_origin: Final = cycle(("http://web.api.115.com", "https://webapi.115.com")).__next__
-# get_proapi_origin: Final = cycle(("http://pro.api.115.com", "https://proapi.115.com")).__next__
-get_webapi_origin: Final = lambda: "https://webapi.115.com"
-get_proapi_origin: Final = lambda: "https://proapi.115.com"
+get_webapi_origin: Final = cycle((
+    "http://webapi.115.com", "http://web.api.115.com", 
+    "http://115cdn.com", "http://115vod.com", 
+    "http://f.115.com/api/proxy/115", "http://n.115.com/api/proxy/115", 
+)).__next__
+get_proapi_origin: Final = cycle((
+    "http://proapi.115.com", "http://pro.api.115.com", 
+)).__next__
+# get_webapi_origin: Final = lambda: "http://webapi.115.com"
+# get_proapi_origin: Final = lambda: "http://proapi.115.com"
+
+
+@overload
+def fs_files(
+    client: str | PathLike | P115Client | P115OpenClient, 
+    payload: int | str | dict = 0, 
+    /, 
+    page_size: int = 0, 
+    app: str = "web", 
+    use_media_api: bool = False, 
+    *, 
+    async_: Literal[False] = False, 
+    **request_kwargs, 
+) -> Iterator[dict]:
+    ...
+@overload
+def fs_files(
+    client: str | PathLike | P115Client | P115OpenClient, 
+    payload: int | str | dict = 0, 
+    /, 
+    page_size: int = 0, 
+    app: str = "web", 
+    use_media_api: bool = False, 
+    *, 
+    async_: Literal[True], 
+    **request_kwargs, 
+) -> AsyncIterator[dict]:
+    ...
+def fs_files(
+    client: str | PathLike | P115Client | P115OpenClient, 
+    payload: int | str | dict = 0, 
+    /, 
+    page_size: int = 0, 
+    app: str = "web", 
+    use_media_api: bool = False, 
+    *, 
+    async_: Literal[False, True] = False, 
+    **request_kwargs, 
+) -> AsyncIterator[dict] | Iterator[dict]:
+    """拉取一个目录中的文件或目录的数据
+
+    :param client: 115 网盘客户端对象
+    :param payload: 目录的 id 或者详细的查询参数
+    :param page_size: 分页大小，如果 <= 0，则自动确定
+    :param app: 使用此设备的接口
+    :param use_media_api: 是否使用 ``P115Client.fs_files_media`` 接口
+    :param async_: 是否异步
+    :param request_kwargs: 其它 http 请求参数，会传给具体的请求函数，默认的是 httpx，可用参数 request 进行设置
+
+    :return: 接口调用的结果
+    """
+    if isinstance(client, (str, PathLike)):
+        client = P115Client(client, check_for_relogin=True)
+    if page_size <= 0:
+        if use_media_api:
+            page_size = 10_000
+        else:
+            page_size = 7_000
+    if not isinstance(client, P115Client) or app == "open":
+        page_size = min(page_size, 1150)
+        fs_files: Callable = client.fs_files_open
+    elif app in ("", "web", "desktop"):
+        if use_media_api:
+            page_size = min(page_size, 500)
+            fs_files = client.fs_files_media
+        else:
+            page_size = min(page_size, 1150)
+            fs_files = client.fs_files
+        request_kwargs.setdefault("base_url", get_webapi_origin)
+    elif app == "aps":
+        page_size = min(page_size, 1200)
+        fs_files = client.fs_files_aps
+    else:
+        if use_media_api:
+            fs_files = client.fs_files_media_app
+        else:
+            fs_files = client.fs_files_app
+        request_kwargs["app"] = app
+        request_kwargs.setdefault("base_url", get_proapi_origin)
+    if isinstance(payload, (int, str)):
+        payload = {"cid": client.to_id(payload)}
+    payload = {
+        "asc": 1, "cid": 0, "cur": 1, "fc_mix": 1, "o": "user_ptime", 
+        "offset": 0, "limit": page_size, "show_dir": 1, **payload, 
+    }
+    cid = int(payload["cid"])
+    def gen_step():
+        resp = yield fs_files(payload, async_=async_, **request_kwargs)
+        check_response(resp)
+        if cid and int(resp["cid"]) != cid:
+            throw(errno.ENOENT, cid)
+        resp["has_next_page"] = len(resp["data"]) > 0 and payload["offset"] + len(resp["data"]) < int(resp["count"])
+        return resp
+    return run_gen_step(gen_step, async_)
 
 
 @overload
@@ -41,11 +140,11 @@ def iter_fs_files(
     client: str | PathLike | P115Client | P115OpenClient, 
     payload: int | str | dict = 0, 
     /, 
-    page_size: int = 7_000, 
+    page_size: int = 0, 
     first_page_size: int = 0, 
     count: int = -1, 
-    callback: None | Callable[[dict], Any] = None, 
     app: str = "web", 
+    use_media_api: bool = False, 
     raise_for_changed_count: bool = False, 
     cooldown: None | float = None, 
     max_workers: None | int = None, 
@@ -59,11 +158,11 @@ def iter_fs_files(
     client: str | PathLike | P115Client | P115OpenClient, 
     payload: int | str | dict = 0, 
     /, 
-    page_size: int = 7_000, 
+    page_size: int = 0, 
     first_page_size: int = 0, 
     count: int = -1, 
-    callback: None | Callable[[dict], Any] = None, 
     app: str = "web", 
+    use_media_api: bool = False, 
     raise_for_changed_count: bool = False, 
     cooldown: None | float = None, 
     max_workers: None | int = None, 
@@ -76,11 +175,11 @@ def iter_fs_files(
     client: str | PathLike | P115Client | P115OpenClient, 
     payload: int | str | dict = 0, 
     /, 
-    page_size: int = 7_000, 
+    page_size: int = 0, 
     first_page_size: int = 0, 
     count: int = -1, 
-    callback: None | Callable[[dict], Any] = None, 
     app: str = "web", 
+    use_media_api: bool = False, 
     raise_for_changed_count: bool = False, 
     cooldown: None | float = None, 
     max_workers: None | int = None, 
@@ -95,8 +194,8 @@ def iter_fs_files(
     :param page_size: 分页大小，如果 <= 0，则自动确定
     :param first_page_size: 首次拉取的分页大小，如果 <= 0，则自动确定
     :param count: 文件总数
-    :param callback: 回调函数，调用后，会获得一个值，会添加到返回值中，key 为 "callback"
     :param app: 使用此设备的接口
+    :param use_media_api: 是否使用 ``P115Client.fs_files_media`` 接口
     :param raise_for_changed_count: 分批拉取时，发现总数发生变化后，是否报错
     :param cooldown: 冷却时间，单位为秒。如果为 None，则用默认值（非并发时为 0，并发时为 1）
     :param max_workers: 最大并发数，如果为 None 或 < 0 则自动确定，如果为 0 则单工作者惰性执行
@@ -122,8 +221,8 @@ def iter_fs_files(
         page_size=page_size, 
         first_page_size=first_page_size, 
         count=count, 
-        callback=callback, 
         app=app, 
+        use_media_api=use_media_api, 
         raise_for_changed_count=raise_for_changed_count, 
         **request_kwargs, 
     )
@@ -134,11 +233,11 @@ def iter_fs_files_serialized(
     client: str | PathLike | P115Client | P115OpenClient, 
     payload: int | str | dict = 0, 
     /, 
-    page_size: int = 7_000, 
+    page_size: int = 0, 
     first_page_size: int = 0, 
     count: int = -1, 
-    callback: None | Callable[[dict], Any] = None, 
     app: str = "web", 
+    use_media_api: bool = False, 
     raise_for_changed_count: bool = False, 
     cooldown: float = 0, 
     *, 
@@ -151,11 +250,11 @@ def iter_fs_files_serialized(
     client: str | PathLike | P115Client | P115OpenClient, 
     payload: int | str | dict = 0, 
     /, 
-    page_size: int = 7_000, 
+    page_size: int = 0, 
     first_page_size: int = 0, 
     count: int = -1, 
-    callback: None | Callable[[dict], Any] = None, 
     app: str = "web", 
+    use_media_api: bool = False, 
     raise_for_changed_count: bool = False, 
     cooldown: float = 0, 
     *, 
@@ -167,11 +266,11 @@ def iter_fs_files_serialized(
     client: str | PathLike | P115Client | P115OpenClient, 
     payload: int | str | dict = 0, 
     /, 
-    page_size: int = 7_000, 
+    page_size: int = 0, 
     first_page_size: int = 0, 
     count: int = -1, 
-    callback: None | Callable[[dict], Any] = None, 
     app: str = "web", 
+    use_media_api: bool = False, 
     raise_for_changed_count: bool = False, 
     cooldown: float = 0, 
     *, 
@@ -185,8 +284,8 @@ def iter_fs_files_serialized(
     :param page_size: 分页大小，如果 <= 0，则自动确定
     :param first_page_size: 首次拉取的分页大小，如果 <= 0，则自动确定
     :param count: 文件总数
-    :param callback: 回调函数，调用后，会获得一个值，会添加到返回值中，key 为 "callback"
     :param app: 使用此设备的接口
+    :param use_media_api: 是否使用 ``P115Client.fs_files_media`` 接口
     :param raise_for_changed_count: 分批拉取时，发现总数发生变化后，是否报错
     :param cooldown: 冷却时间，单位为秒
     :param async_: 是否异步
@@ -197,29 +296,39 @@ def iter_fs_files_serialized(
     if isinstance(client, (str, PathLike)):
         client = P115Client(client, check_for_relogin=True)
     if page_size <= 0:
-        page_size = 7_000
+        if use_media_api:
+            page_size = 10_000
+        else:
+            page_size = 7_000
     fs_files: Callable
     if not isinstance(client, P115Client) or app == "open":
         page_size = min(page_size, 1150)
         fs_files = client.fs_files_open
-    elif app in ("", "web", "desktop", "aps"):
-        page_size = min(page_size, 1150)
+    elif app in ("", "web", "desktop"):
+        if use_media_api:
+            page_size = min(page_size, 500)
+            fs_files = client.fs_files_media
+        else:
+            page_size = min(page_size, 1150)
+            fs_files = client.fs_files
         request_kwargs.setdefault("base_url", get_webapi_origin)
-        fs_files = client.fs_files
     elif app == "aps":
         page_size = min(page_size, 1200)
         fs_files = client.fs_files_aps
     else:
-        request_kwargs.setdefault("base_url", get_proapi_origin)
+        if use_media_api:
+            fs_files = client.fs_files_media_app
+        else:
+            fs_files = client.fs_files_app
         request_kwargs["app"] = app
-        fs_files = client.fs_files_app
+        request_kwargs.setdefault("base_url", get_proapi_origin)
     if first_page_size <= 0:
         first_page_size = page_size
     if isinstance(payload, (int, str)):
         payload = {"cid": client.to_id(payload)}
     payload = {
-        "asc": 1, "cid": 0, "fc_mix": 1, "o": "user_ptime", "offset": 0, 
-        "limit": first_page_size, "show_dir": 1, **payload, 
+        "asc": 1, "cid": 0, "cur": 1, "fc_mix": 1, "o": "user_ptime", 
+        "offset": 0, "limit": first_page_size, "show_dir": 1, **payload, 
     }
     cid = int(payload["cid"])
     def gen_step():
@@ -243,7 +352,7 @@ def iter_fs_files_serialized(
                     if payload["limit"] < 1150:
                         payload["limit"] = 1150
                     continue
-                if cid and int(resp["path"][-1]["cid"]) != cid:
+                if cid and int(resp["cid"]) != cid:
                     if count < 0:
                         throw(errno.ENOTDIR, cid)
                     else:
@@ -258,8 +367,6 @@ def iter_fs_files_serialized(
                     else:
                         warn(message, category=P115Warning)
                     count = count_new
-                if callback is not None:
-                    resp["callback"] = yield callback(resp)
                 break
             yield Yield(resp)
             payload["offset"] += len(resp["data"])
@@ -275,11 +382,11 @@ def iter_fs_files_threaded(
     client: str | PathLike | P115Client | P115OpenClient, 
     payload: int | str | dict = 0, 
     /, 
-    page_size: int = 7_000, 
+    page_size: int = 0, 
     first_page_size: int = 0, 
     count: int = -1, 
-    callback: None | Callable[[dict], Any] = None, 
     app: str = "web", 
+    use_media_api: bool = False, 
     raise_for_changed_count: bool = False, 
     cooldown: float = 1, 
     max_workers: None | int = None, 
@@ -292,8 +399,8 @@ def iter_fs_files_threaded(
     :param page_size: 分页大小，如果 <= 0，则自动确定
     :param first_page_size: 第 1 次拉取的分页大小，如果指定此参数，则会等待这次请求返回，才会开始后续，也即非并发
     :param count: 文件总数
-    :param callback: 回调函数，调用后，会获得一个值，会添加到返回值中，key 为 "callback"
     :param app: 使用此设备的接口
+    :param use_media_api: 是否使用 ``P115Client.fs_files_media`` 接口
     :param raise_for_changed_count: 分批拉取时，发现总数发生变化后，是否报错
     :param cooldown: 冷却时间，单位为秒
     :param max_workers: 最大工作线程数，如果为 None，则自动确定
@@ -304,36 +411,46 @@ def iter_fs_files_threaded(
     if isinstance(client, (str, PathLike)):
         client = P115Client(client, check_for_relogin=True)
     if page_size <= 0:
-        page_size = 7_000
+        if use_media_api:
+            page_size = 10_000
+        else:
+            page_size = 7_000
     fs_files: Callable[..., Awaitable[dict]]
     if not isinstance(client, P115Client) or app == "open":
         page_size = min(page_size, 1150)
         fs_files = client.fs_files_open
-    elif app in ("", "web", "desktop", "aps"):
-        page_size = min(page_size, 1150)
+    elif app in ("", "web", "desktop"):
+        if use_media_api:
+            page_size = min(page_size, 500)
+            fs_files = client.fs_files_media
+        else:
+            page_size = min(page_size, 1150)
+            fs_files = client.fs_files
         request_kwargs.setdefault("base_url", get_webapi_origin)
-        fs_files = client.fs_files
     elif app == "aps":
         page_size = min(page_size, 1200)
         fs_files = client.fs_files_aps
     else:
-        request_kwargs.setdefault("base_url", get_proapi_origin)
+        if use_media_api:
+            fs_files = client.fs_files_media_app
+        else:
+            fs_files = client.fs_files_app
         request_kwargs["app"] = app
-        fs_files = client.fs_files_app
+        request_kwargs.setdefault("base_url", get_proapi_origin)
     if isinstance(payload, (int, str)):
         payload = {"cid": client.to_id(payload)}
     if first_page_size <= 0:
         first_page_size = page_size
     payload = {
-        "asc": 1, "cid": 0, "fc_mix": 1, "o": "user_ptime", "offset": 0, 
-        "limit": first_page_size, "show_dir": 1, **payload, 
+        "asc": 1, "cid": 0, "cur": 1, "fc_mix": 1, "o": "user_ptime", 
+        "offset": 0, "limit": first_page_size, "show_dir": 1, **payload, 
     }
     cid = int(payload["cid"])
     def get_files(payload: dict, /):
         nonlocal count
         resp = fs_files(payload, **request_kwargs)
         check_response(resp)
-        if cid and int(resp["path"][-1]["cid"]) != cid:
+        if cid and int(resp["cid"]) != cid:
             if count < 0:
                 throw(errno.ENOTDIR, cid)
             else:
@@ -348,8 +465,6 @@ def iter_fs_files_threaded(
             else:
                 warn(message, category=P115Warning)
             count = count_new
-        if callback is not None:
-            resp["callback"] = callback(resp)
         return resp
     dq: deque[tuple[Future, int]] = deque()
     push, pop = dq.append, dq.popleft
@@ -410,11 +525,11 @@ async def iter_fs_files_asynchronized(
     client: str | PathLike | P115Client | P115OpenClient, 
     payload: int | str | dict = 0, 
     /, 
-    page_size: int = 7_000, 
+    page_size: int = 0, 
     first_page_size: int = 0, 
     count: int = -1, 
-    callback: None | Callable[[dict], Any] = None, 
     app: str = "web", 
+    use_media_api: bool = False, 
     raise_for_changed_count: bool = False, 
     cooldown: float = 1, 
     max_workers: None | int = None, 
@@ -427,8 +542,8 @@ async def iter_fs_files_asynchronized(
     :param page_size: 分页大小，如果 <= 0，则自动确定
     :param first_page_size: 第 1 次拉取的分页大小，如果指定此参数，则会等待这次请求返回，才会开始后续，也即非并发
     :param count: 文件总数
-    :param callback: 回调函数，调用后，会获得一个值，会添加到返回值中，key 为 "callback"
     :param app: 使用此设备的接口
+    :param use_media_api: 是否使用 ``P115Client.fs_files_media`` 接口
     :param raise_for_changed_count: 分批拉取时，发现总数发生变化后，是否报错
     :param cooldown: 冷却时间，单位为秒
     :param max_workers: 最大工作协程数，如果为 None 或 <= 0，则为 64
@@ -439,29 +554,39 @@ async def iter_fs_files_asynchronized(
     if isinstance(client, (str, PathLike)):
         client = P115Client(client, check_for_relogin=True)
     if page_size <= 0:
-        page_size = 7_000
+        if use_media_api:
+            page_size = 10_000
+        else:
+            page_size = 7_000
     fs_files: Callable[..., Awaitable[dict]]
     if not isinstance(client, P115Client) or app == "open":
         page_size = min(page_size, 1150)
         fs_files = client.fs_files_open
-    elif app in ("", "web", "desktop", "aps"):
-        page_size = min(page_size, 1150)
+    elif app in ("", "web", "desktop"):
+        if use_media_api:
+            page_size = min(page_size, 500)
+            fs_files = client.fs_files_media
+        else:
+            page_size = min(page_size, 1150)
+            fs_files = client.fs_files
         request_kwargs.setdefault("base_url", get_webapi_origin)
-        fs_files = client.fs_files
     elif app == "aps":
         page_size = min(page_size, 1200)
         fs_files = client.fs_files_aps
     else:
-        request_kwargs.setdefault("base_url", get_proapi_origin)
+        if use_media_api:
+            fs_files = client.fs_files_media_app
+        else:
+            fs_files = client.fs_files_app
         request_kwargs["app"] = app
-        fs_files = client.fs_files_app
+        request_kwargs.setdefault("base_url", get_proapi_origin)
     if first_page_size <= 0:
         first_page_size = page_size
     if isinstance(payload, (int, str)):
         payload = {"cid": client.to_id(payload)}
     payload = {
-        "asc": 1, "cid": 0, "fc_mix": 1, "o": "user_ptime", "offset": 0, 
-        "limit": first_page_size, "show_dir": 1, **payload, 
+        "asc": 1, "cid": 0, "cur": 1, "fc_mix": 1, "o": "user_ptime", 
+        "offset": 0, "limit": first_page_size, "show_dir": 1, **payload, 
     }
     cid = int(payload["cid"])
     if max_workers is None or max_workers <= 0:
@@ -472,7 +597,7 @@ async def iter_fs_files_asynchronized(
         async with sema:
             resp = await fs_files(payload, async_=True, **request_kwargs)
         check_response(resp)
-        if cid and int(resp["path"][-1]["cid"]) != cid:
+        if cid and int(resp["cid"]) != cid:
             if count < 0:
                 throw(errno.ENOTDIR, cid)
             else:
@@ -487,11 +612,6 @@ async def iter_fs_files_asynchronized(
             else:
                 warn(message, category=P115Warning)
             count = count_new
-        if callback is not None:
-            ret = callback(resp)
-            if isawaitable(ret):
-                ret = await ret
-            resp["callback"] = ret
         return resp
     dq: deque[tuple[Task, int]] = deque()
     push, pop = dq.append, dq.popleft
@@ -542,5 +662,3 @@ async def iter_fs_files_asynchronized(
                         break
                     task = make_task()
 
-# TODO: 这个模块对外暴露，应该只有一个 iter_fs_files，其它接口，fs_files 部分由外部传入
-# TODO: 移除 callback 参数

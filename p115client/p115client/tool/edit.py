@@ -5,29 +5,30 @@ __all__ = [
     "update_abstract", "update_desc", "update_star", "update_label", "update_score", 
     "update_top", "update_show_play_long", "update_category_shortcut", "batch_unstar", 
     "update_name", "post_event", "makedir", "iter_batch_makedir", "batch_makedir", 
-    "copyfile", "renamefile", "transferfile", 
+    "batch_copy", "batch_delete", "batch_move", "batch_recyclebin_clean", 
+    "batch_recyclebin_revert", "batch_hide", "copyfile", "renamefile", "transferfile", 
 ]
 __doc__ = "这个模块提供了一些和修改文件或目录信息有关的函数"
 
-from asyncio import Future as AsyncFuture
 from collections.abc import (
     AsyncIterable, AsyncIterator, Callable, Coroutine, Iterable, 
     Iterator, Mapping, MutableMapping, 
 )
-from concurrent.futures import Future
+from contextlib import suppress
 from functools import partial
 from itertools import batched
 from os import PathLike
 from typing import cast, overload, Any, Literal
 
-from concurrenttools import conmap, run_as_thread, run_as_async
+from concurrenttools import conmap
 from iterutils import (
-    chunked, map as do_map, run_gen_step, as_gen_step, 
+    chunked, foreach, map as do_map, run_gen_step, as_gen_step, 
     through, 
 )
 from p115pickcode import to_id
 
 from ..client import check_response, P115Client, P115OpenClient
+from ..exception import P115BusyOSError
 from ..type import P115URL
 
 
@@ -165,10 +166,9 @@ def update_desc(
     )
 
 
-# TODO: 要支持 open
 @overload
 def update_star(
-    client: str | PathLike | P115Client, 
+    client: str | PathLike | P115Client | P115OpenClient, 
     ids: Iterable[int | str], 
     /, 
     star: bool = True, 
@@ -182,7 +182,7 @@ def update_star(
     ...
 @overload
 def update_star(
-    client: str | PathLike | P115Client, 
+    client: str | PathLike | P115Client | P115OpenClient, 
     ids: Iterable[int | str] | AsyncIterable[int | str], 
     /, 
     star: bool = True, 
@@ -195,7 +195,7 @@ def update_star(
 ) -> Coroutine:
     ...
 def update_star(
-    client: str | PathLike | P115Client, 
+    client: str | PathLike | P115Client | P115OpenClient, 
     ids: Iterable[int | str] | AsyncIterable[int | str], 
     /, 
     star: bool = True, 
@@ -222,7 +222,7 @@ def update_star(
     """
     if isinstance(client, (str, PathLike)):
         client = P115Client(client, check_for_relogin=True)
-    if not isinstance(client, P115Client) or app == "open":
+    if app == "open" or not isinstance(client, P115Client):
         method = "fs_star_set_open"
     elif app in ("", "web", "desktop", "aps"):
         method = "fs_star_set"
@@ -554,12 +554,82 @@ def update_category_shortcut(
     )
 
 
-# TODO: 要支持 open
 @overload
-def batch_unstar(
+def update_name(
     client: str | PathLike | P115Client, 
+    id_name_pairs: Iterable[tuple[int | str, str]], 
     /, 
     batch_size: int = 10_000, 
+    app: str = "web", 
+    *, 
+    async_: Literal[False] = False, 
+    **request_kwargs, 
+) -> dict:
+    ...
+@overload
+def update_name(
+    client: str | PathLike | P115Client, 
+    id_name_pairs: Iterable[tuple[int | str, str]], 
+    /, 
+    batch_size: int = 10_000, 
+    app: str = "web", 
+    *, 
+    async_: Literal[True], 
+    **request_kwargs, 
+) -> Coroutine[Any, Any, dict]:
+    ...
+def update_name(
+    client: str | PathLike | P115Client, 
+    id_name_pairs: Iterable[tuple[int | str, str]], 
+    /, 
+    batch_size: int = 10_000, 
+    app: str = "web", 
+    *, 
+    async_: Literal[False, True] = False, 
+    **request_kwargs, 
+) -> dict | Coroutine[Any, Any, dict]:
+    """批量给文件或目录设置名字
+
+    .. note::
+        不支持 open，是因为它仅能一次修改一个名字，并不能批量
+
+    :param client: 115 客户端或 cookies
+    :param id_name_pairs: 一堆文件或目录的 id 到新名字的元组
+    :param batch_size: 批次大小，分批次，每次提交的任务数
+    :param app: 使用此设备的接口
+    :param async_: 是否异步
+    :param request_kwargs: 其它请求参数
+
+    :return: 成功命名的 {id: name} 的字典
+    """
+    if isinstance(client, (str, PathLike)):
+        client = P115Client(client, check_for_relogin=True)
+    if app in ("", "web", "desktop", "aps"):
+        method: Callable = client.fs_rename
+    else:
+        method = client.fs_rename_app
+        request_kwargs["app"] = app
+    def gen_step():
+        mapping: dict[int, str] = {}
+        for batch in batched(id_name_pairs, batch_size):
+            resp = yield method(
+                batch, 
+                async_=async_, 
+                **request_kwargs, 
+            )
+            check_response(resp)
+            if data := resp["data"]:
+                for k, v in data.items():
+                    mapping[int(k)] = v
+        return mapping
+    return run_gen_step(gen_step, async_)
+
+
+@overload
+def batch_unstar(
+    client: str | PathLike | P115Client | P115OpenClient, 
+    /, 
+    batch_size: int = 0, 
     ensure_file: None | bool = None, 
     max_workers: None | int = 0, 
     app: str = "web", 
@@ -570,9 +640,9 @@ def batch_unstar(
     ...
 @overload
 def batch_unstar(
-    client: str | PathLike | P115Client, 
+    client: str | PathLike | P115Client | P115OpenClient, 
     /, 
-    batch_size: int = 10_000, 
+    batch_size: int = 0, 
     ensure_file: None | bool = None, 
     max_workers: None | int = 0, 
     app: str = "web", 
@@ -582,9 +652,9 @@ def batch_unstar(
 ) -> Coroutine:
     ...
 def batch_unstar(
-    client: str | PathLike | P115Client, 
+    client: str | PathLike | P115Client | P115OpenClient, 
     /, 
-    batch_size: int = 10_000, 
+    batch_size: int = 0, 
     ensure_file: None | bool = None, 
     max_workers: None | int = 0, 
     app: str = "web", 
@@ -615,114 +685,56 @@ def batch_unstar(
                 return int(info[k])
         raise KeyError
     def gen_step():
-        from .iterdir import _iter_fs_files
-        yield update_star(
-            client, 
-            do_map(get_id, _iter_fs_files(
-                client, 
-                payload={
-                    "cid": 0, "count_folders": 1, "cur": 0, "fc_mix": 0, 
-                    "offset": 0, "show_dir": 1, "star": 1
-                }, 
-                ensure_file=ensure_file, 
-                app=app, 
-                cooldown=0.5, 
-                async_=async_, 
-                **request_kwargs, 
-            )), 
-            star=False, 
-            batch_size=batch_size, 
-            max_workers=max_workers, 
-            app=app, 
-            async_=async_, 
-            **request_kwargs, 
-        )
-    return run_gen_step(gen_step, async_)
-
-
-# TODO: 要支持 open
-@overload
-def update_name(
-    client: str | PathLike | P115Client, 
-    id_name_pairs: Iterable[tuple[int | str, str]], 
-    /, 
-    batch_size: int = 10_000, 
-    post_event_type: None | Literal["doc", "img"] = "img", 
-    app: str = "web", 
-    *, 
-    async_: Literal[False] = False, 
-    **request_kwargs, 
-) -> list[Future]:
-    ...
-@overload
-def update_name(
-    client: str | PathLike | P115Client, 
-    id_name_pairs: Iterable[tuple[int | str, str]], 
-    /, 
-    batch_size: int = 10_000, 
-    post_event_type: None | Literal["doc", "img"] = "img", 
-    app: str = "web", 
-    *, 
-    async_: Literal[True], 
-    **request_kwargs, 
-) -> Coroutine[Any, Any, list[AsyncFuture]]:
-    ...
-def update_name(
-    client: str | PathLike | P115Client, 
-    id_name_pairs: Iterable[tuple[int | str, str]], 
-    /, 
-    batch_size: int = 10_000, 
-    post_event_type: None | Literal["doc", "img"] = "img", 
-    app: str = "web", 
-    *, 
-    async_: Literal[False, True] = False, 
-    **request_kwargs, 
-) -> list[Future] | Coroutine[Any, Any, list[AsyncFuture]]:
-    """批量给文件或目录设置名字
-
-    :param client: 115 客户端或 cookies
-    :param id_name_pairs: 一堆文件或目录的 id 到新名字的元组
-    :param batch_size: 批次大小，分批次，每次提交的任务数
-    :param post_event_type: 推送事件类型，如果为 None，则不推送
-    :param app: 使用此设备的接口
-    :param async_: 是否异步
-    :param request_kwargs: 其它请求参数
-
-    :return: 返回推送事件的 Future 对象列表（因为是并发执行的）
-    """
-    if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
-    if app in ("", "web", "desktop", "aps"):
-        method: Callable = client.fs_rename
-    else:
-        method = client.fs_rename_app
-        request_kwargs["app"] = app
-    if async_:
-        run: Callable = run_as_async
-    else:
-        run = run_as_thread
-    def gen_step():
-        futures: list = []
-        for batch in batched(id_name_pairs, batch_size):
-            resp = yield method(
-                batch, 
-                async_=async_, 
-                **request_kwargs, 
-            )
-            check_response(resp)
-            if post_event_type and resp["data"]:
-                futures.append(run(
-                    post_event, 
+        if max_workers == 0:
+            from .fs_files import fs_files
+            from .iterdir import overview_attr
+            while True:
+                resp = yield fs_files(
                     client, 
-                    resp["data"].keys(), 
-                    type=post_event_type, 
-                    batch_size=batch_size, 
-                    max_workers=1, 
+                    payload={"cid": 0, "cur": 0, "star": 1}, 
+                    page_size=batch_size, 
+                    ensure_file=ensure_file, 
                     app=app, 
                     async_=async_, 
                     **request_kwargs, 
-                ))
-        return futures
+                )
+                if len(resp["data"]):
+                    yield update_star(
+                        client, 
+                        (overview_attr(info).id for info in resp["data"]), 
+                        star=False, 
+                        batch_size=len(resp["data"]), 
+                        app=app, 
+                        async_=async_, 
+                        **request_kwargs, 
+                    )
+                if not resp["has_next_page"]:
+                    break
+        else:
+            from .iterdir import iter_stared
+            ids: list[int] = []
+            append = ids.append
+            yield foreach(
+                lambda a: append(get_id(a)), 
+                iter_stared(
+                    client, 
+                    ensure_file=ensure_file, 
+                    app=app, 
+                    cooldown=0.5, 
+                    async_=async_, 
+                    **request_kwargs, 
+                )
+            )
+            yield update_star(
+                client, 
+                ids, 
+                star=False, 
+                batch_size=batch_size or 10_000, 
+                max_workers=max_workers, 
+                app=app, 
+                async_=async_, 
+                **request_kwargs, 
+            )
     return run_gen_step(gen_step, async_)
 
 
@@ -1097,6 +1109,424 @@ def batch_makedir(
 
 
 @overload
+def batch_copy(
+    client: str | PathLike | P115Client | P115OpenClient, 
+    ids: int | str | Iterable[int | str], 
+    /, 
+    pid: int = 0, 
+    batch_size: int = 1_000, 
+    app: str = "android", 
+    *, 
+    async_: Literal[False] = False, 
+    **request_kwargs, 
+) -> None:
+    ...
+@overload
+def batch_copy(
+    client: str | PathLike | P115Client | P115OpenClient, 
+    ids: int | str | Iterable[int | str], 
+    /, 
+    pid: int = 0, 
+    batch_size: int = 1_000, 
+    app: str = "android", 
+    *, 
+    async_: Literal[True], 
+    **request_kwargs, 
+) -> Coroutine[Any, Any, None]:
+    ...
+def batch_copy(
+    client: str | PathLike | P115Client | P115OpenClient, 
+    ids: int | str | Iterable[int | str], 
+    /, 
+    pid: int = 0, 
+    batch_size: int = 1_000, 
+    app: str = "android", 
+    *, 
+    async_: Literal[False, True] = False, 
+    **request_kwargs, 
+) -> None | Coroutine[Any, Any, None]:
+    """批量复制
+
+    .. note::
+        复制操作不支持并发
+
+    :param client: 115 客户端或 cookies
+    :param ids: 一组文件或目录的 id 或 pickcode
+    :param pid: 目录的 id 或 pickcode
+    :param batch_size: 批次大小，分批次，每次提交的 id 数
+    :param app: 使用此设备的接口
+    :param async_: 是否异步
+    :param request_kwargs: 其它请求参数
+    """
+    if isinstance(client, (str, PathLike)):
+        client = P115Client(client, check_for_relogin=True)
+    if app == "open" or not isinstance(client, P115Client):
+        fs_copy: Callable = client.fs_copy_open
+    elif app in ("", "web", "desktop", "aps"):
+        fs_copy = client.fs_copy
+    else:
+        fs_copy = client.fs_copy_app
+        request_kwargs["app"] = app
+    if isinstance(ids, (int, str)):
+        ids = ids,
+    pid = to_id(pid)
+    def gen_step():
+        for batch in batched(map(to_id, ids), batch_size):
+            while True:
+                with suppress(P115BusyOSError):
+                    resp = yield fs_copy(batch, pid=pid, async_=async_, **request_kwargs)
+                    check_response(resp)
+                    break
+    return run_gen_step(gen_step, async_)
+
+
+@overload
+def batch_delete(
+    client: str | PathLike | P115Client | P115OpenClient, 
+    ids: int | str | Iterable[int | str], 
+    /, 
+    batch_size: int = 1_000, 
+    app: str = "android", 
+    *, 
+    async_: Literal[False] = False, 
+    **request_kwargs, 
+) -> None:
+    ...
+@overload
+def batch_delete(
+    client: str | PathLike | P115Client | P115OpenClient, 
+    ids: int | str | Iterable[int | str], 
+    /, 
+    batch_size: int = 1_000, 
+    app: str = "android", 
+    *, 
+    async_: Literal[True], 
+    **request_kwargs, 
+) -> Coroutine[Any, Any, None]:
+    ...
+def batch_delete(
+    client: str | PathLike | P115Client | P115OpenClient, 
+    ids: int | str | Iterable[int | str], 
+    /, 
+    batch_size: int = 1_000, 
+    app: str = "android", 
+    *, 
+    async_: Literal[False, True] = False, 
+    **request_kwargs, 
+) -> None | Coroutine[Any, Any, None]:
+    """批量删除
+
+    .. note::
+        删除操作不支持并发
+
+    :param client: 115 客户端或 cookies
+    :param ids: 一组文件或目录的 id 或 pickcode
+    :param batch_size: 批次大小，分批次，每次提交的 id 数
+    :param app: 使用此设备的接口
+    :param async_: 是否异步
+    :param request_kwargs: 其它请求参数
+    """
+    if isinstance(client, (str, PathLike)):
+        client = P115Client(client, check_for_relogin=True)
+    if app == "open" or not isinstance(client, P115Client):
+        fs_delete: Callable = client.fs_delete_open
+    elif app in ("", "web", "desktop", "aps"):
+        fs_delete = client.fs_delete
+    else:
+        fs_delete = client.fs_delete_app
+        request_kwargs["app"] = app
+    if isinstance(ids, (int, str)):
+        ids = ids,
+    def gen_step():
+        for batch in batched(map(to_id, ids), batch_size):
+            while True:
+                with suppress(P115BusyOSError):
+                    resp = yield fs_delete(batch, async_=async_, **request_kwargs)
+                    check_response(resp)
+                    break
+    return run_gen_step(gen_step, async_)
+
+
+@overload
+def batch_move(
+    client: str | PathLike | P115Client | P115OpenClient, 
+    ids: int | str | Iterable[int | str], 
+    /, 
+    pid: int = 0, 
+    batch_size: int = 1_000, 
+    app: str = "android", 
+    *, 
+    async_: Literal[False] = False, 
+    **request_kwargs, 
+) -> None:
+    ...
+@overload
+def batch_move(
+    client: str | PathLike | P115Client | P115OpenClient, 
+    ids: int | str | Iterable[int | str], 
+    /, 
+    pid: int = 0, 
+    batch_size: int = 1_000, 
+    app: str = "android", 
+    *, 
+    async_: Literal[True], 
+    **request_kwargs, 
+) -> Coroutine[Any, Any, None]:
+    ...
+def batch_move(
+    client: str | PathLike | P115Client | P115OpenClient, 
+    ids: int | str | Iterable[int | str], 
+    /, 
+    pid: int = 0, 
+    batch_size: int = 1_000, 
+    app: str = "android", 
+    *, 
+    async_: Literal[False, True] = False, 
+    **request_kwargs, 
+) -> None | Coroutine[Any, Any, None]:
+    """批量移动
+
+    .. note::
+        移动操作不支持并发
+
+    :param client: 115 客户端或 cookies
+    :param ids: 一组文件或目录的 id 或 pickcode
+    :param pid: 目录的 id 或 pickcode
+    :param batch_size: 批次大小，分批次，每次提交的 id 数
+    :param app: 使用此设备的接口
+    :param async_: 是否异步
+    :param request_kwargs: 其它请求参数
+    """
+    if isinstance(client, (str, PathLike)):
+        client = P115Client(client, check_for_relogin=True)
+    if app == "open" or not isinstance(client, P115Client):
+        fs_move: Callable = client.fs_move_open
+    elif app in ("", "web", "desktop", "aps"):
+        fs_move = client.fs_move
+    else:
+        fs_move = client.fs_move_app
+        request_kwargs["app"] = app
+    if isinstance(ids, (int, str)):
+        ids = ids,
+    pid = to_id(pid)
+    def gen_step():
+        for batch in batched(map(to_id, ids), batch_size):
+            while True:
+                with suppress(P115BusyOSError):
+                    resp = yield fs_move(batch, pid=pid, async_=async_, **request_kwargs)
+                    check_response(resp)
+                    break
+    return run_gen_step(gen_step, async_)
+
+
+@overload
+def batch_recyclebin_clean(
+    client: str | PathLike | P115Client | P115OpenClient, 
+    rids: int | str | Iterable[int | str], 
+    /, 
+    password: str = "000000", 
+    batch_size: int = 1_000, 
+    app: str = "android", 
+    *, 
+    async_: Literal[False] = False, 
+    **request_kwargs, 
+) -> None:
+    ...
+@overload
+def batch_recyclebin_clean(
+    client: str | PathLike | P115Client | P115OpenClient, 
+    rids: int | str | Iterable[int | str], 
+    /, 
+    password: str = "000000", 
+    batch_size: int = 1_000, 
+    app: str = "android", 
+    *, 
+    async_: Literal[True], 
+    **request_kwargs, 
+) -> Coroutine[Any, Any, None]:
+    ...
+def batch_recyclebin_clean(
+    client: str | PathLike | P115Client | P115OpenClient, 
+    rids: int | str | Iterable[int | str], 
+    /, 
+    password: str = "000000", 
+    batch_size: int = 1_000, 
+    app: str = "android", 
+    *, 
+    async_: Literal[False, True] = False, 
+    **request_kwargs, 
+) -> None | Coroutine[Any, Any, None]:
+    """批量永久删除（从回收站）
+
+    .. note::
+        可以在设置中的【账号安全/安全密钥】页面下，关闭【文件(隐藏模式/清空删除回收站)】的按钮，就不需要传安全密钥了
+
+    :param client: 115 客户端或 cookies
+    :param rids: 文件或目录在回收站中的 id，如果不传，就是清空
+    :param password: 安全密钥，是 6 位数字
+    :param batch_size: 批次大小，分批次，每次提交的 id 数
+    :param app: 使用此设备的接口
+    :param async_: 是否异步
+    :param request_kwargs: 其它请求参数
+    """
+    if isinstance(client, (str, PathLike)):
+        client = P115Client(client, check_for_relogin=True)
+    if app == "open" or not isinstance(client, P115Client):
+        recyclebin_clean: Callable = client.recyclebin_clean_open
+    elif app in ("", "web", "desktop", "aps"):
+        recyclebin_clean = client.recyclebin_clean
+    else:
+        recyclebin_clean = client.recyclebin_clean_app
+        request_kwargs["app"] = app
+    if rids and isinstance(rids, (int, str)):
+        rids = rids,
+    def gen_step():
+        if rids:
+            for batch in batched(rids, batch_size):
+                while True:
+                    with suppress(P115BusyOSError):
+                        resp = yield recyclebin_clean(batch, password=password, async_=async_, **request_kwargs)
+                        check_response(resp)
+                        break
+        else:
+            resp = yield recyclebin_clean(password=password, async_=async_, **request_kwargs)
+            check_response(resp)
+    return run_gen_step(gen_step, async_)
+
+
+@overload
+def batch_recyclebin_revert(
+    client: str | PathLike | P115Client | P115OpenClient, 
+    rids: int | str | Iterable[int | str], 
+    /, 
+    batch_size: int = 1_000, 
+    app: str = "android", 
+    *, 
+    async_: Literal[False] = False, 
+    **request_kwargs, 
+) -> None:
+    ...
+@overload
+def batch_recyclebin_revert(
+    client: str | PathLike | P115Client | P115OpenClient, 
+    rids: int | str | Iterable[int | str], 
+    /, 
+    batch_size: int = 1_000, 
+    app: str = "android", 
+    *, 
+    async_: Literal[True], 
+    **request_kwargs, 
+) -> Coroutine[Any, Any, None]:
+    ...
+def batch_recyclebin_revert(
+    client: str | PathLike | P115Client | P115OpenClient, 
+    rids: int | str | Iterable[int | str], 
+    /, 
+    batch_size: int = 1_000, 
+    app: str = "android", 
+    *, 
+    async_: Literal[False, True] = False, 
+    **request_kwargs, 
+) -> None | Coroutine[Any, Any, None]:
+    """批量还原（从回收站）
+
+    .. note::
+        还原操作不支持并发
+
+    :param client: 115 客户端或 cookies
+    :param rids: 文件或目录在回收站中的 id
+    :param batch_size: 批次大小，分批次，每次提交的 id 数
+    :param app: 使用此设备的接口
+    :param async_: 是否异步
+    :param request_kwargs: 其它请求参数
+    """
+    if isinstance(client, (str, PathLike)):
+        client = P115Client(client, check_for_relogin=True)
+    if app == "open" or not isinstance(client, P115Client):
+        recyclebin_revert: Callable = client.recyclebin_revert_open
+    elif app in ("", "web", "desktop", "aps"):
+        recyclebin_revert = client.recyclebin_revert
+    else:
+        recyclebin_revert = client.recyclebin_revert_app
+        request_kwargs["app"] = app
+    if isinstance(rids, (int, str)):
+        rids = rids,
+    def gen_step():
+        for batch in batched(rids, batch_size):
+            while True:
+                with suppress(P115BusyOSError):
+                    resp = yield recyclebin_revert(batch, async_=async_, **request_kwargs)
+                    check_response(resp)
+                    break
+    return run_gen_step(gen_step, async_)
+
+
+@overload
+def batch_hide(
+    client: str | PathLike | P115Client, 
+    ids: int | str | Iterable[int | str], 
+    /, 
+    hidden: bool = True, 
+    batch_size: int = 10_000, 
+    app: str = "web", 
+    *, 
+    async_: Literal[False] = False, 
+    **request_kwargs, 
+):
+    ...
+@overload
+def batch_hide(
+    client: str | PathLike | P115Client, 
+    ids: int | str | Iterable[int | str], 
+    /, 
+    hidden: bool = True, 
+    batch_size: int = 10_000, 
+    app: str = "web", 
+    *, 
+    async_: Literal[True], 
+    **request_kwargs, 
+) -> Coroutine:
+    ...
+def batch_hide(
+    client: str | PathLike | P115Client, 
+    ids: int | str | Iterable[int | str], 
+    /, 
+    hidden: bool = True, 
+    batch_size: int = 10_000, 
+    app: str = "web", 
+    *, 
+    async_: Literal[False, True] = False, 
+    **request_kwargs, 
+):
+    """批量隐藏（加密/隐藏模式）或展示文件或目录
+
+    :param client: 115 客户端或 cookies
+    :param ids: 一组目录的 id 或 pickcode
+    :param hidden: 是否隐藏
+    :param batch_size: 批次大小，分批次，每次提交的 id 数
+    :param async_: 是否异步
+    :param request_kwargs: 其它请求参数
+    """
+    if isinstance(client, (str, PathLike)):
+        client = P115Client(client, check_for_relogin=True)
+    if app in ("", "web", "desktop", "aps"):
+        fs_hide: Callable = client.fs_hide
+    else:
+        fs_hide = client.fs_hide_app
+        request_kwargs["app"] = app
+    if isinstance(ids, (int, str)):
+        ids = ids,
+    def gen_step():
+        for batch in batched(ids, batch_size):
+            while True:
+                with suppress(P115BusyOSError):
+                    resp = yield fs_hide(batch, hidden=hidden, async_=async_, **request_kwargs)
+                    check_response(resp)
+                    break
+    return run_gen_step(gen_step, async_)
+
+
+@overload
 def copyfile(
     client: str | PathLike | P115Client | P115OpenClient, 
     id: int | str | Mapping, 
@@ -1150,7 +1580,7 @@ def copyfile(
     """
     if isinstance(client, (str, PathLike)):
         client = P115Client(client, check_for_relogin=True)
-    if not isinstance(client, P115Client) or app == "open":
+    if app == "open" or not isinstance(client, P115Client):
         get_url: Callable = client.download_url_open
         fs_copy: Callable = client.fs_copy_open
         upload_file_init: Callable = client.upload_file_init_open
@@ -1270,7 +1700,7 @@ def renamefile(
     """
     if isinstance(client, (str, PathLike)):
         client = P115Client(client, check_for_relogin=True)
-    if not isinstance(client, P115Client) or app == "open":
+    if app == "open" or not isinstance(client, P115Client):
         get_url: Callable = client.download_url_open
         fs_move: Callable = client.fs_move_open
         upload_file_init: Callable = client.upload_file_init_open
@@ -1463,4 +1893,6 @@ def transferfile(
         ))
     return run_gen_step(gen_step, async_)
 
-# TODO: 增加批量的 复制、移动、删除、还原、改名、星标 等操作，要包括 open
+# TODO: 对于移动、删除、还原，一次之后，再罗列就可以不包括被操作过的，因此可以优化
+# TODO: 对于批量复制和删除，为了避免 > 5万 后不能操作的尴尬，可以罗列出所有文件 id，批量处理
+# TODO: 修改封面、设置共享

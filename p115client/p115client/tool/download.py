@@ -1575,7 +1575,7 @@ def iter_download_nodes(
                 put_nowait(sentinel)
         def set_max_page(page: int, /):
             nonlocal max_page
-            if 0 < max_page < page:
+            if 0 < max_page <= page:
                 return
             max_page = page
             for i, p in enumerate(task_page):
@@ -1630,7 +1630,7 @@ def iter_download_nodes(
                     else:
                         with lock:
                             page = next_page()
-                    if 0 < max_page <= page:
+                    if 0 < max_page < page:
                         continue
                     task_page[task_id] = page
                     resp: dict = yield get_nodes({"pickcode": pickcode, "page": page}, **kwargs)

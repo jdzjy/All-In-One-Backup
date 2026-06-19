@@ -3,7 +3,7 @@
 
 __all__ = [
     "ensure_attr_path", "ensure_attr_path_using_star_event", "iterdir", "iterdir_traverse", 
-    "iterdir_walk", "iter_stared_dirs", "iter_dirs", "iter_dirs_with_path", "iter_files", 
+    "iterdir_walk", "iter_stared", "iter_dirs", "iter_dirs_with_path", "iter_files", 
     "iter_files_with_path", "iter_files_with_path_skim", "iter_files_shortcut", 
     "iter_files_frament", "traverse_tree", "traverse_tree_with_path", "iter_nodes", 
     "iter_nodes_skim", "iter_nodes_by_pickcode", "iter_nodes_using_update", 
@@ -245,7 +245,7 @@ def update_resp_ancestors(
     need_update_id_to_dirnode = id_to_dirnode not in (..., None)
     if "path" in resp:
         resp["ancestors"] = ancestors
-        start_idx = 1 - int(resp["path"][0]["cid"])
+        start_idx = 1 - (int(resp["path"][0]["cid"]) > 0)
         if start_idx:
             add_ancestor({"id": 0, "parent_id": 0, "name": ""})
         for info in resp["path"][start_idx:]:
@@ -253,6 +253,8 @@ def update_resp_ancestors(
             add_ancestor({"id": id, "parent_id": pid, "name": name})
             if need_update_id_to_dirnode:
                 cast(MutableMapping, id_to_dirnode)[id] = (name, pid)
+    elif "offset" in resp:
+        return resp
     else:
         if resp and "paths" not in resp:
             check_response(resp)
@@ -608,6 +610,7 @@ def _iter_fs_files(
     first_page_size: int = 0, 
     normalize_attr: None | Callable[[dict], dict] = normalize_attr, 
     id_to_dirnode: None | EllipsisType | MutableMapping[int, tuple[str, int]] = ..., 
+    use_media_api: bool = False, 
     raise_for_changed_count: bool = False, 
     ensure_file: None | bool = None, 
     hold_top: bool = True, 
@@ -628,6 +631,7 @@ def _iter_fs_files(
     first_page_size: int = 0, 
     normalize_attr: None | Callable[[dict], dict] = normalize_attr, 
     id_to_dirnode: None | EllipsisType | MutableMapping[int, tuple[str, int]] = ..., 
+    use_media_api: bool = False, 
     raise_for_changed_count: bool = False, 
     ensure_file: None | bool = None, 
     hold_top: bool = True, 
@@ -647,6 +651,7 @@ def _iter_fs_files(
     first_page_size: int = 0, 
     normalize_attr: None | Callable[[dict], dict] = normalize_attr, 
     id_to_dirnode: None | EllipsisType | MutableMapping[int, tuple[str, int]] = ..., 
+    use_media_api: bool = False, 
     raise_for_changed_count: bool = False, 
     ensure_file: None | bool = None, 
     hold_top: bool = True, 
@@ -666,6 +671,7 @@ def _iter_fs_files(
     :param first_page_size: 首次拉取的分页大小，如果 <= 0，则和 `page_size` 相同
     :param normalize_attr: 把数据进行转换处理，使之便于阅读
     :param id_to_dirnode: 字典，保存 id 到对应文件的 ``(name, parent_id)`` 元组的字典
+    :param use_media_api: 是否使用 ``P115Client.fs_files_media`` 接口
     :param raise_for_changed_count: 分批拉取时，发现总数发生变化后，是否报错
     :param ensure_file: 是否确保为文件
 
@@ -693,20 +699,25 @@ def _iter_fs_files(
         client = P115Client(client, check_for_relogin=True)
     if isinstance(payload, (int, str)):
         payload = {"cid": to_id(payload)}
-    show_files = payload.get("suffix") or payload.get("type")
+    suffix = payload.get("suffix")
+    if suffix:
+        use_media_api = False
+    show_files = bool(suffix or payload.get("type"))
     if show_files:
         payload.setdefault("show_dir", 0)
     if not ensure_file:
         payload["count_folders"] = 1
     if ensure_file:
         payload["show_dir"] = 0
-        if not show_files:
-            payload.setdefault("cur", 1)
+        payload.setdefault("cur", 0 if show_files else 1)
     elif ensure_file is False:
         payload["show_dir"] = 1
+        payload.setdefault("cur", 1)
         payload["nf"] = 1
     if payload.get("type") == 99:
         payload.pop("type", None)
+    if payload.get("show_dir"):
+        use_media_api = False
     if id_to_dirnode is None:
         id_to_dirnode = ID_TO_DIRNODE_CACHE[client.user_id]
     if isinstance(escape, bool):
@@ -723,6 +734,7 @@ def _iter_fs_files(
             page_size=page_size, 
             first_page_size=first_page_size, 
             app=app, 
+            use_media_api=use_media_api, 
             raise_for_changed_count=raise_for_changed_count, 
             cooldown=cooldown, 
             max_workers=max_workers, 
@@ -732,15 +744,15 @@ def _iter_fs_files(
             while True:
                 resp = yield get_next()
                 update_resp_ancestors(resp, id_to_dirnode)
-                top_ancestors = resp["ancestors"]
-                if escape is None:
-                    top_path = "/".join(a["name"] for a in top_ancestors)
-                else:
-                    top_path = "/".join(escape(a["name"]) for a in top_ancestors)
-                if top_path:
-                    topdir = top_path + "/"
-                else:
-                    topdir = top_path = "/"
+                if top_ancestors := resp.get("ancestors"):
+                    if escape is None:
+                        top_path = "/".join(a["name"] for a in top_ancestors)
+                    else:
+                        top_path = "/".join(escape(a["name"]) for a in top_ancestors)
+                    if top_path:
+                        topdir = top_path + "/"
+                    else:
+                        topdir = top_path = "/"
                 for info in resp["data"]:
                     if normalize_attr is None:
                         attr: Mapping | OverviewAttr = overview_attr(info)
@@ -755,14 +767,19 @@ def _iter_fs_files(
                         continue
                     if hold_top:
                         info["top_id"]        = top_id
-                        info["top_ancestors"] = top_ancestors
-                        info["top_path"]      = top_path
+                        if top_ancestors:
+                            info["top_ancestors"] = top_ancestors
+                            info["top_path"]      = top_path
                     if attr["parent_id"] == top_id:
-                       name = attr["name"]
-                       if escape is not None:
-                           name = escape(name)
-                       info["path"] = topdir + name
-                       info["ancestors"] = [*top_ancestors, {"name": attr["name"], "id": attr["id"], "parent_id": top_id}]
+                        name = attr["name"]
+                        if escape is not None:
+                            name = escape(name)
+                        if top_ancestors:
+                            info["ancestors"] = [
+                                *top_ancestors, 
+                                {"name": attr["name"], "id": attr["id"], "parent_id": top_id}, 
+                            ]
+                            info["path"] = topdir + name
                     yield Yield(info)
     return run_gen_step_iter(gen_step, async_)
 
@@ -780,6 +797,7 @@ def iterdir(
     fc_mix: Literal[0, 1] = 1, 
     normalize_attr: None | Callable[[dict], dict] = normalize_attr, 
     id_to_dirnode: None | EllipsisType | MutableMapping[int, tuple[str, int]] = None, 
+    use_media_api: bool = False, 
     raise_for_changed_count: bool = False, 
     ensure_file: None | bool = None, 
     hold_top: bool = False, 
@@ -805,6 +823,7 @@ def iterdir(
     fc_mix: Literal[0, 1] = 1, 
     normalize_attr: None | Callable[[dict], dict] = normalize_attr, 
     id_to_dirnode: None | EllipsisType | MutableMapping[int, tuple[str, int]] = None, 
+    use_media_api: bool = False, 
     raise_for_changed_count: bool = False, 
     ensure_file: None | bool = None, 
     hold_top: bool = False, 
@@ -829,6 +848,7 @@ def iterdir(
     fc_mix: Literal[0, 1] = 1, 
     normalize_attr: None | Callable[[dict], dict] = normalize_attr, 
     id_to_dirnode: None | EllipsisType | MutableMapping[int, tuple[str, int]] = None, 
+    use_media_api: bool = False, 
     raise_for_changed_count: bool = False, 
     ensure_file: None | bool = None, 
     hold_top: bool = False, 
@@ -896,6 +916,7 @@ def iterdir(
         first_page_size=first_page_size, 
         normalize_attr=normalize_attr, 
         id_to_dirnode=id_to_dirnode, 
+        use_media_api=use_media_api, 
         raise_for_changed_count=raise_for_changed_count, 
         ensure_file=ensure_file, 
         hold_top=hold_top, 
@@ -1121,15 +1142,19 @@ def iterdir_walk(
 
 
 @overload
-def iter_stared_dirs(
+def iter_stared(
     client: str | PathLike | P115Client | P115OpenClient, 
+    cid: int | str | Mapping = 0, 
     page_size: int = 0, 
     first_page_size: int = 0, 
+    start: int = 0, 
     order: Literal["file_name", "file_size", "file_type", "user_utime", "user_ptime", "user_otime"] = "user_ptime", 
     asc: Literal[0, 1] = 1, 
+    fc_mix: Literal[0, 1] = 0, 
     normalize_attr: None | Callable[[dict], dict] = normalize_attr, 
     id_to_dirnode: None | EllipsisType | MutableMapping[int, tuple[str, int]] = None, 
     raise_for_changed_count: bool = False, 
+    ensure_file: None | bool = None, 
     app: str = "android", 
     cooldown: None | float = None, 
     max_workers: None | int = 0, 
@@ -1139,15 +1164,19 @@ def iter_stared_dirs(
 ) -> Iterator[dict]:
     ...
 @overload
-def iter_stared_dirs(
+def iter_stared(
     client: str | PathLike | P115Client | P115OpenClient, 
+    cid: int | str | Mapping = 0, 
     page_size: int = 0, 
     first_page_size: int = 0, 
+    start: int = 0, 
     order: Literal["file_name", "file_size", "file_type", "user_utime", "user_ptime", "user_otime"] = "user_ptime", 
     asc: Literal[0, 1] = 1, 
+    fc_mix: Literal[0, 1] = 0, 
     normalize_attr: None | Callable[[dict], dict] = normalize_attr, 
     id_to_dirnode: None | EllipsisType | MutableMapping[int, tuple[str, int]] = None, 
     raise_for_changed_count: bool = False, 
+    ensure_file: None | bool = None, 
     app: str = "android", 
     cooldown: None | float = None, 
     max_workers: None | int = 0, 
@@ -1156,15 +1185,19 @@ def iter_stared_dirs(
     **request_kwargs, 
 ) -> AsyncIterator[dict]:
     ...
-def iter_stared_dirs(
+def iter_stared(
     client: str | PathLike | P115Client | P115OpenClient, 
+    cid: int | str | Mapping = 0, 
     page_size: int = 0, 
     first_page_size: int = 0, 
+    start: int = 0, 
     order: Literal["file_name", "file_size", "file_type", "user_utime", "user_ptime", "user_otime"] = "user_ptime", 
     asc: Literal[0, 1] = 1, 
+    fc_mix: Literal[0, 1] = 0, 
     normalize_attr: None | Callable[[dict], dict] = normalize_attr, 
     id_to_dirnode: None | EllipsisType | MutableMapping[int, tuple[str, int]] = None, 
     raise_for_changed_count: bool = False, 
+    ensure_file: None | bool = None, 
     app: str = "android", 
     cooldown: None | float = None, 
     max_workers: None | int = 0, 
@@ -1172,11 +1205,16 @@ def iter_stared_dirs(
     async_: Literal[False, True] = False, 
     **request_kwargs, 
 ) -> Iterator[dict] | AsyncIterator[dict]:
-    """遍历以迭代获得所有被打上星标的目录信息
+    """遍历以迭代获得所有被打上星标的文件或目录信息
+
+    .. note::
+        只有根目录 0，才支持遍历目录树，其它的仅支持罗列出直属于所指定目录
 
     :param client: 115 客户端或 cookies
+    :param cid: 目录的 id 或 pickcode
     :param page_size: 分页大小
     :param first_page_size: 首次拉取的分页大小，如果 <= 0，则和 `page_size` 相同
+    :param start: 开始索引，从 0 开始
     :param order: 排序
 
         - "file_name": 文件名
@@ -1187,9 +1225,17 @@ def iter_stared_dirs(
         - "user_otime": 上一次打开时间
 
     :param asc: 升序排列。0: 否，1: 是
+    :param show_dir: 展示文件夹。0: 否，1: 是
+    :param fc_mix: 文件夹置顶。0: 文件夹在文件之前，1: 文件和文件夹混合并按指定排序
     :param normalize_attr: 把数据进行转换处理，使之便于阅读
     :param id_to_dirnode: 字典，保存 id 到对应文件的 ``(name, parent_id)`` 元组的字典
     :param raise_for_changed_count: 分批拉取时，发现总数发生变化后，是否报错
+    :param ensure_file: 是否确保为文件
+
+        - True: 必须是文件
+        - False: 必须是目录
+        - None: 可以是目录或文件
+
     :param app: 使用指定 app（设备）的接口
     :param cooldown: 冷却时间，单位为秒。如果为 None，则用默认值（非并发时为 0，并发时为 1）
     :param max_workers: 最大并发数，如果为 None 或 < 0 则自动确定，如果为 0 则单工作者惰性执行
@@ -1201,15 +1247,15 @@ def iter_stared_dirs(
     return _iter_fs_files(
         client, 
         payload={
-            "asc": asc, "cid": 0, "count_folders": 1, "cur": 0, "fc_mix": 0, 
-            "o": order, "offset": 0, "show_dir": 1, "star": 1, 
+            "asc": asc, "cid": cid, "count_folders": 1, "cur": 0, "fc_mix": fc_mix, 
+            "o": order, "offset": start, "star": 1, 
         }, 
         page_size=page_size, 
         first_page_size=first_page_size, 
         normalize_attr=normalize_attr, 
         id_to_dirnode=id_to_dirnode, 
         raise_for_changed_count=raise_for_changed_count, 
-        ensure_file=False, 
+        ensure_file=ensure_file, 
         app=app, 
         cooldown=cooldown, 
         max_workers=max_workers, 
@@ -1400,6 +1446,7 @@ def iter_files(
     cur: Literal[0, 1] = 0, 
     normalize_attr: None | Callable[[dict], dict] = normalize_attr, 
     id_to_dirnode: None | EllipsisType | MutableMapping[int, tuple[str, int]] = None, 
+    use_media_api: bool = False, 
     raise_for_changed_count: bool = False, 
     app: str = "android", 
     cooldown: None | float = None, 
@@ -1422,6 +1469,7 @@ def iter_files(
     cur: Literal[0, 1] = 0, 
     normalize_attr: None | Callable[[dict], dict] = normalize_attr, 
     id_to_dirnode: None | EllipsisType | MutableMapping[int, tuple[str, int]] = None, 
+    use_media_api: bool = False, 
     raise_for_changed_count: bool = False, 
     app: str = "android", 
     cooldown: None | float = None, 
@@ -1443,6 +1491,7 @@ def iter_files(
     cur: Literal[0, 1] = 0, 
     normalize_attr: None | Callable[[dict], dict] = normalize_attr, 
     id_to_dirnode: None | EllipsisType | MutableMapping[int, tuple[str, int]] = None, 
+    use_media_api: bool = False, 
     raise_for_changed_count: bool = False, 
     app: str = "android", 
     cooldown: None | float = None, 
@@ -1511,6 +1560,7 @@ def iter_files(
         first_page_size=first_page_size, 
         normalize_attr=normalize_attr, 
         id_to_dirnode=id_to_dirnode, 
+        use_media_api=use_media_api, 
         raise_for_changed_count=raise_for_changed_count, 
         ensure_file=True, 
         app=app, 
@@ -1536,6 +1586,7 @@ def iter_files_with_path(
     with_ancestors: bool = False, 
     id_to_dirnode: None | EllipsisType | MutableMapping[int, tuple[str, int]] = None, 
     path_already: bool = False, 
+    use_media_api: bool = False, 
     raise_for_changed_count: bool = False, 
     app: str = "android", 
     cooldown: None | float = 0.5, 
@@ -1561,6 +1612,7 @@ def iter_files_with_path(
     with_ancestors: bool = False, 
     id_to_dirnode: None | EllipsisType | MutableMapping[int, tuple[str, int]] = None, 
     path_already: bool = False, 
+    use_media_api: bool = False, 
     raise_for_changed_count: bool = False, 
     app: str = "android", 
     cooldown: None | float = 0.5, 
@@ -1585,6 +1637,7 @@ def iter_files_with_path(
     with_ancestors: bool = False, 
     id_to_dirnode: None | EllipsisType | MutableMapping[int, tuple[str, int]] = None, 
     path_already: bool = False, 
+    use_media_api: bool = False, 
     raise_for_changed_count: bool = False, 
     app: str = "android", 
     cooldown: None | float = 0.5, 
@@ -1633,6 +1686,7 @@ def iter_files_with_path(
     :param with_ancestors: 文件信息中是否要包含 "ancestors"
     :param id_to_dirnode: 字典，保存 id 到对应文件的 ``(name, parent_id)`` 元组的字典
     :param path_already: 如果为 True，则说明 id_to_dirnode 中已经具备构建路径所需要的目录节点，所以不会再去拉取目录节点的信息
+    :param use_media_api: 是否使用 ``P115Client.fs_files_media`` 接口
     :param raise_for_changed_count: 分批拉取时，发现总数发生变化后，是否报错
     :param app: 使用指定 app（设备）的接口
     :param cooldown: 冷却时间，单位为秒。如果为 None，则用默认值（非并发时为 0，并发时为 1）
@@ -1687,6 +1741,7 @@ def iter_files_with_path(
             cur=cur, 
             normalize_attr=normalize_attr, 
             id_to_dirnode=id_to_dirnode, 
+            use_media_api=use_media_api, 
             raise_for_changed_count=raise_for_changed_count, 
             max_workers=max_workers, 
             app=app, 
@@ -1719,6 +1774,7 @@ def iter_files_with_path(
                     id_to_dirnode=id_to_dirnode, 
                     max_workers=None, 
                     max_page=max_dirs and -(-max_dirs // 3000), 
+                    app=app, 
                     async_=async_, 
                     **request_kwargs, 
                 ))
@@ -1737,6 +1793,17 @@ def iter_files_with_path(
         def gen_step():
             cache: list[dict] = []
             add_to_cache = cache.append
+            if cid and use_media_api:
+                from .attr import get_ancestors
+                yield get_ancestors(
+                    client, 
+                    cid, 
+                    ensure_file=False, 
+                    id_to_dirnode=id_to_dirnode, 
+                    app=app, 
+                    async_=async_, 
+                    **request_kwargs, 
+                )
             if async_:
                 task: Any = create_task(fetch_dirs(cid))
             else:
@@ -1753,6 +1820,7 @@ def iter_files_with_path(
                 cur=cur, 
                 normalize_attr=normalize_attr, 
                 id_to_dirnode=id_to_dirnode, 
+                use_media_api=use_media_api, 
                 raise_for_changed_count=raise_for_changed_count, 
                 max_workers=max_workers, 
                 app=app, 
@@ -1964,6 +2032,7 @@ def iter_files_frament(
     escape: None | bool | Callable[[str], str] = True, 
     normalize_attr: None | Callable[[dict], dict] = normalize_attr, 
     id_to_dirnode: None | EllipsisType | MutableMapping[int, tuple[str, int]] = None, 
+    use_media_api: bool = False, 
     raise_for_changed_count: bool = False, 
     app: str = "web", 
     cooldown: None | float = None, 
@@ -1988,6 +2057,7 @@ def iter_files_frament(
     escape: None | bool | Callable[[str], str] = True, 
     normalize_attr: None | Callable[[dict], dict] = normalize_attr, 
     id_to_dirnode: None | EllipsisType | MutableMapping[int, tuple[str, int]] = None, 
+    use_media_api: bool = False, 
     raise_for_changed_count: bool = False, 
     app: str = "web", 
     cooldown: None | float = None, 
@@ -2011,6 +2081,7 @@ def iter_files_frament(
     escape: None | bool | Callable[[str], str] = True, 
     normalize_attr: None | Callable[[dict], dict] = normalize_attr, 
     id_to_dirnode: None | EllipsisType | MutableMapping[int, tuple[str, int]] = None, 
+    use_media_api: bool = False, 
     raise_for_changed_count: bool = False, 
     app: str = "web", 
     cooldown: None | float = None, 
@@ -2052,6 +2123,7 @@ def iter_files_frament(
     :param id_to_dirnode: 字典，保存 id 到对应文件的 ``(name, parent_id)`` 元组的字典
     :param app: 使用指定 app（设备）的接口
     :param cooldown: 冷却时间，单位为秒。如果为 None，则用默认值（非并发时为 0，并发时为 1）
+    :param use_media_api: 是否使用 ``P115Client.fs_files_media`` 接口
     :param raise_for_changed_count: 分批拉取时，发现总数发生变化后，是否报错
     :param async_: 是否异步
     :param request_kwargs: 其它请求参数
@@ -2106,6 +2178,7 @@ def iter_files_frament(
                         escape=escape, 
                         normalize_attr=normalize_attr, 
                         id_to_dirnode=id_to_dirnode, 
+                        use_media_api=use_media_api, 
                         raise_for_changed_count=raise_for_changed_count, 
                         app=app, 
                         cooldown=cooldown, 
@@ -2122,6 +2195,7 @@ def iter_files_frament(
                         type=type, 
                         normalize_attr=normalize_attr, 
                         id_to_dirnode=id_to_dirnode, 
+                        use_media_api=use_media_api, 
                         raise_for_changed_count=raise_for_changed_count, 
                         app=app, 
                         cooldown=cooldown, 
@@ -3064,7 +3138,7 @@ def iter_dir_nodes_using_star(
             yield update_star(client, ids, app=app, async_=async_, **request_kwargs)
         yield update_desc(client, ids, async_=async_, **request_kwargs)
         discard = ids.discard
-        with with_iter_next(iter_stared_dirs(
+        with with_iter_next(iter_stared(
             client, 
             order="user_utime", 
             asc=0, 
@@ -3564,7 +3638,11 @@ def iter_media_files(
         offset = 0
         count = 0
         while True:
-            resp = yield fs_files(payload, async_=async_, **request_kwargs)
+            resp = yield fs_files(
+                payload, 
+                async_=async_, 
+                **request_kwargs, 
+            )
             check_response(resp)
             if int(resp["cid"]) != cid:
                 throw(errno.ENOENT, cid)
@@ -4393,13 +4471,10 @@ def extract_iterdir(
     if isinstance(client, (str, PathLike)):
         client = P115Client(client, check_for_relogin=True)
     pickcode = client.to_pickcode(pickcode)
-    if app in ("", "web", "desktop", "aps"):
-        extract_list: Callable = client.extract_list
-    else:
-        extract_list = partial(client.extract_list_app, app=app)
     def gen_step():
         next_marker = ""
         start_t: float = 0
+        extract_list = client.extract_list
         while True:
             if cooldown and cooldown > 0:
                 if start_t and (delta := start_t + cooldown - time()) > 0:
@@ -4413,6 +4488,7 @@ def extract_iterdir(
                 path=path, 
                 next_marker=next_marker, 
                 page_count=page_size, 
+                app=app, 
                 async_=async_, 
                 **request_kwargs, 
             )
