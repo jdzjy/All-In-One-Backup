@@ -41,6 +41,12 @@ jobs:
           repository: fish2018/pansou-web
           path: temp/pansou-web
 
+      - name: Checkout Target Repo 5
+        uses: actions/checkout@v3
+        with:
+          repository: randomshit699/Bncr_plugins
+          path: temp/Bncr_plugins          
+
       # 3. 核心处理、精准差异化提取与优雅通知
       - name: Process, Commit and Notify
         env:
@@ -50,13 +56,14 @@ jobs:
           cd main-repo
           
           # 断开与原作者的命运绑定
-          rm -rf ../temp/p115client/.git ../temp/p123client/.git ../temp/pansou/.git ../temp/pansou-web/.git
+          rm -rf ../temp/p115client/.git ../temp/p123client/.git ../temp/pansou/.git ../temp/pansou-web/.git/.git ../temp/Bncr_plugins/.git
           
           # 增量同步文件
           rsync -a --delete ../temp/p115client/ ./p115client/
           rsync -a --delete ../temp/p123client/ ./p123client/
           rsync -a --delete ../temp/pansou/ ./pansou/
           rsync -a --delete ../temp/pansou-web/ ./pansou-web/
+          rsync -a --delete ../temp/Bncr_plugins/ ./Bncr_plugins/
           
           # 配置 Git 机器人身份
           git config user.name 'GitHub Actions Bot'
