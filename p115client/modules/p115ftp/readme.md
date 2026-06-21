@@ -50,8 +50,6 @@ options:
                             COOKIES='UID=...; CID=..., SEID=...'
                             p115dav --cookies-path <(echo "$COOKIES")
                         
-  -cl, --check-for-relogin
-                        当风控时，自动重新扫码登录
   -ut, --use-thumbs     为请求图片链接提供缩略图 CDN 链接
   -ll, --log-level LOG_LEVEL
                         指定日志级别，可以是数字或名称，不传此参数则不输出日志，默认值: 'ERROR'

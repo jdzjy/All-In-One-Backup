@@ -56,7 +56,7 @@ class P115FuseOperations(Operations):
         readdir_ttl: float = 60, 
     ):
         if not isinstance(client, P115Client):
-            client = P115Client(client, check_for_relogin=True)
+            client = P115Client(client)
         self.client = client
         self.fs = client.get_fs(id_to_readdir=TTLDict(readdir_ttl))
         self._opened: dict[int, Any] = {}

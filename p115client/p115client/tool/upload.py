@@ -6,27 +6,31 @@ from __future__ import annotations
 __all__ = [
     "upload_host_image", "iter_115_to_115", "iter_115_to_115_resume", 
     "sha1_for_check_existence", "upload_for_check_existence", 
-    "upload_init", "P115MultipartUpload", 
+    "iter_download_upload", "upload_init", "P115MultipartUpload", 
 ]
 __doc__ = "这个模块提供了一些和上传有关的函数"
 
 from collections.abc import (
     AsyncIterable, AsyncIterator, Awaitable, Buffer, Iterable, Callable, 
-    Coroutine, Iterator, 
+    Coroutine, Iterator, Mapping, Sequence, 
 )
 from inspect import isawaitable
 from itertools import count, dropwhile
 from os import fsdecode, PathLike
-from typing import cast, overload, Any, Literal
+from typing import cast, overload, Any, Literal, NamedTuple
 
 from asynctools import to_list
 from concurrenttools import threadpool_map, taskgroup_map, Return
+from dicttools import get_first
 from dicttools import dict_map
+from errno2 import errno
 from filewrap import SupportsRead
+from hashtools import file_mdigest, file_mdigest_async
 from http_request import SupportsGeturl
+from http_response import get_total_length
 from iterutils import (
     as_gen_step, foreach, run_gen_step, run_gen_step_iter, 
-    with_iter_next, YieldFrom, 
+    with_iter_next, Yield, YieldFrom, 
 )
 from p115oss import (
     upload_file_init, oss_multipart_upload_init, oss_multipart_upload_complete, 
@@ -36,6 +40,7 @@ from p115pickcode import to_id
 from yarl import URL
 
 from ..client import check_response, P115Client, P115OpenClient
+from ..exception import P115AccessError, P115BadFile
 from ..type import P115URL
 from ..tool import load_final_image
 from .attr import normalize_attr_simple
@@ -94,7 +99,7 @@ def upload_host_image(
     :return: 图片链接
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     def gen_step():
         if isinstance(base_url, bool):
             resp = yield client.upload_file_image(
@@ -596,7 +601,7 @@ def sha1_for_check_existence(
     :return: 是否存在文件
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     def gen_step():
         resp = yield client.note_get_pic_url(sha1, async_=async_, **request_kwargs)
         check_response(resp)
@@ -644,7 +649,7 @@ def upload_for_check_existence(
     :return: 是否存在文件
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     def gen_step():
         if isinstance(client, P115Client):
             resp = yield client.upload_init(
@@ -661,6 +666,158 @@ def upload_for_check_existence(
             resp = resp["data"]
         return resp["status"] in (2, 7)
     return run_gen_step(gen_step, async_)
+
+
+class UploadBlock(NamedTuple):
+    block_number: int
+    block_size: int
+    hashes: dict[str, str]
+
+
+@overload
+def iter_download_upload(
+    client: str | PathLike | P115Client, 
+    pickcode: int | str | Mapping, 
+    size: int = -1, 
+    block_size: int = 1024 * 1024 * 50, 
+    start_block_number: int = 1, 
+    hashmethods: str | Sequence[str] = ("sha1", "md5"), 
+    *, 
+    async_: Literal[False] = False, 
+    **request_kwargs, 
+) -> Iterator[UploadBlock]:
+    ...
+@overload
+def iter_download_upload(
+    client: str | PathLike | P115Client, 
+    pickcode: int | str | Mapping, 
+    size: int = -1, 
+    block_size: int = 1024 * 1024 * 50, 
+    start_block_number: int = 1, 
+    hashmethods: str | Sequence[str] = ("sha1", "md5"), 
+    *, 
+    async_: Literal[True], 
+    **request_kwargs, 
+) -> AsyncIterator[UploadBlock]:
+    ...
+def iter_download_upload(
+    client: str | PathLike | P115Client, 
+    pickcode: int | str | Mapping, 
+    size: int = -1, 
+    block_size: int = 1024 * 1024 * 50, # 50 MB
+    start_block_number: int = 1,        # start from 1
+    hashmethods: str | Sequence[str] = ("sha1", "md5"), 
+    *, 
+    async_: Literal[False, True] = False, 
+    **request_kwargs, 
+) -> Iterator[UploadBlock] | AsyncIterator[UploadBlock]:
+    """对一个文件先下载再分多块上传，确保这些分块的数据在 115 上存在
+
+    :param client: 115 客户端或 cookies
+    :param pickcode: pickcode 或 id
+    :param size: 文件大小，如果 < 0，则会自动确定
+    :param block_size: 分块大小
+    :param start_block_number: 从某个分块号开始（从 1 开始计数）
+    :param hashmethods: 若干个单向哈希算法（请不要有重复）
+    :param async_: 是否异步
+    :param request_kwargs: 其它请求参数
+
+    :return: 迭代器，返回多个分块信息，每个信息是一个元组
+
+        .. code:: python
+
+            class UploadBlock(NamedTuple):
+                block_number: int      # 分块编号，从 1 开始
+                block_size: int        # 此分块大小
+                hashes: dict[str, str] # 多个散列值的字典
+    """
+    if isinstance(client, (str, PathLike)):
+        client = P115Client(client)
+    if block_size <= 0:
+        block_size = 1024 * 1024 * 50
+    if start_block_number <= 0:
+        start_block_number = 1
+    range_start = (start_block_number - 1) * block_size
+    def gen_step():
+        nonlocal pickcode, size, hashmethods
+        if isinstance(hashmethods, str):
+            hashmethods = hashmethods,
+        attr: None | Mapping = None
+        if isinstance(pickcode, Mapping):
+            attr = pickcode
+            pickcode = cast(str | int, get_first(attr, "pickcode", "id"))
+        pickcode = client.to_pickcode(pickcode)
+        if size < 0:
+            if not (attr and "size" in attr):
+                from .attr import get_attr
+                attr = yield get_attr(
+                    client, 
+                    pickcode, 
+                    skim=True, 
+                    async_=async_, 
+                    **request_kwargs, 
+                )
+            size = attr["size"]
+        if size <= range_start:
+            return
+        url = yield client.download_url(
+            pickcode, 
+            app="android" if size > 1024 * 1024 * 200 else "web2", # 200 MB
+            async_=async_, 
+            **request_kwargs, 
+        )
+        file = yield client.open(
+            url, 
+            start=range_start, 
+            async_=async_, 
+        )
+        try:
+            real_size = get_total_length(file)
+            if real_size != size:
+                raise P115BadFile(errno.EBADF, {"pickcode": pickcode, "url": url})
+            index = start_block_number - 1
+            while data := (yield file.read(block_size)):
+                check_result = False
+                bsize = len(data)
+                if hashmethods:
+                    if async_:
+                        _, hashobjs = yield file_mdigest_async(data, *hashmethods)
+                    else:
+                        _, hashobjs = file_mdigest(data, *hashmethods)
+                    hashes = {m: o.hexdigest() for m, o in zip(hashmethods, hashobjs)}
+                    if sha1 := hashes.get("sha1"):
+                        if bsize <= 1024 * 1024: # 1 MB
+                            check_result = yield sha1_for_check_existence(
+                                client, 
+                                sha1=sha1, 
+                                async_=async_, 
+                            )
+                        else:
+                            check_result = yield upload_for_check_existence(
+                                client, 
+                                sha1=sha1, 
+                                size=bsize, 
+                                async_=async_, 
+                            )
+                else:
+                    hashes = {}
+                if not check_result:
+                    resp = yield client.upload_file_sample(
+                        data, 
+                        pid="U_12_0", 
+                        async_=async_, 
+                    )
+                    check_response(resp)
+                    hashes["sha1"] = resp["data"]["sha1"].lower()
+                index += 1
+                yield Yield(UploadBlock(
+                    block_number=index, 
+                    block_size=bsize, 
+                    hashes=hashes, 
+                ))
+        finally:
+            yield file.close()
+    return run_gen_step_iter(gen_step, async_)
 
 
 @overload
@@ -718,7 +875,7 @@ def upload_init(
     :return: 响应信息，如果有字段 "reuse" 为 True，则说明秒传成功
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if isinstance(client, P115Client):
         return upload_file_init(
             file=file, 

@@ -467,11 +467,10 @@ class P115FileSystemProvider(DAVProvider):
         client: str | PathLike | P115Client = Path("~/115-cookies.txt").expanduser(), 
         origin_302: bool | float | str = True, 
         use_thumbs: bool = True, 
-        check_for_relogin: bool = False, 
     ):
         super().__init__()
         if not isinstance(client, P115Client):
-            client = P115Client(client, check_for_relogin=check_for_relogin)
+            client = P115Client(client)
         self.client = client
         self.origin_302 = ""
         if not origin_302:

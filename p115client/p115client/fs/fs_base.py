@@ -1595,7 +1595,7 @@ class P115FileSystemBase[P115PathType: P115PathBase](ABC):
         id_to_readdir: None | int | dict[int, dict[int, MutableMapping]] = None, 
     ):
         if isinstance(client, (str, PathLike)):
-            client = P115Client(client, check_for_relogin=True)
+            client = P115Client(client)
         self.client: P115Client = client
         self.refresh = refresh
         if id_to_readdir is None:

@@ -84,7 +84,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_sha1_size ON data(sha1, size);""")
             cookies_path = Path("115-cookies.txt")
             if not cookies_path.exists():
                 cookies_path = ""
-        self.client = P115Client(cookies_path, app="alipaymini", check_for_relogin=True) if cookies_path else None
+        self.client = P115Client(cookies_path, app="alipaymini") if cookies_path else None
         self._log = partial(logger.log, extra={"instance": repr(self)})
         self.predicate = predicate
         self.strm_predicate = strm_predicate

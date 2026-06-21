@@ -366,7 +366,7 @@ def _init_client(
     disable_event: bool = False, 
 ) -> tuple[P115Client, Connection | Cursor]:
     if isinstance(client, str):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if client.login_app() in ("web", "desktop", "harmony"):
         warn(f'app within ("web", "desktop", "harmony") is not recommended, as it will retrieve a new "tv" cookies', category=P115Warning)
         client.login_another_app("tv", replace=True)

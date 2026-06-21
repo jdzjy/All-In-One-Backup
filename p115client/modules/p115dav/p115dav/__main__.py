@@ -186,7 +186,6 @@ parser.add_argument("-fs", "--fast-strm", action="store_true", help="""快速实
 """)
 parser.add_argument("-H", "--host", default="", help="ip 或 hostname，默认值：'0.0.0.0'")
 parser.add_argument("-P", "--port", default=8000, type=int, help="端口号，默认值：8000，如果为 0 则自动确定")
-parser.add_argument("-cl", "--check-for-relogin", action="store_true", help="当风控时，自动重新扫码登录")
 parser.add_argument("-cu", "--cache-url", action="store_true", help="缓存下载链接")
 parser.add_argument("-d", "--debug", action="store_true", help="启用 debug 模式，输出详细的错误信息")
 parser.add_argument("-ow", "--only-webdav", action="store_true", help="禁用网页版，只有 webdav 可用")
@@ -322,7 +321,6 @@ def main(argv: None | list[str] | Namespace = None, /):
         debug=args.debug, 
         wsgidav_config=wsgidav_config, 
         only_webdav=args.only_webdav, 
-        check_for_relogin=args.check_for_relogin, 
     )
     uvicorn.run(app, **run_config)
 

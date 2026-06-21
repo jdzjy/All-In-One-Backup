@@ -63,10 +63,10 @@ def main(argv: None | list[str] | Namespace = None, /):
     from p115client import P115Client
 
     if cookies := args.cookies.strip():
-        client = P115Client(cookies, check_for_relogin=True)
+        client = P115Client(cookies)
     else:
         from pathlib import Path
-        client = P115Client(Path(args.cookies_path or "115-cookies.txt"), check_for_relogin=True)
+        client = P115Client(Path(args.cookies_path or "115-cookies.txt"))
 
     uvicorn_run_config_path = args.uvicorn_run_config_path
     if uvicorn_run_config_path:

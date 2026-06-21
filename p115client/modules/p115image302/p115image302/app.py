@@ -119,7 +119,7 @@ if __name__ == "__main__":
     from pathlib import Path
     from uvicorn import run
 
-    client = P115Client(Path("115-cookies.txt"), ensure_cookies=True, check_for_relogin=True)
+    client = P115Client(Path("115-cookies.txt"), ensure_cookies=True)
     run(
         make_application(client, debug=True), 
         host="0.0.0.0", 

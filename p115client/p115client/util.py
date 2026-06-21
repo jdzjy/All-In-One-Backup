@@ -6,15 +6,23 @@ __all__ = [
     "load_final_image", "share_extract_payload", "unescape_115_charref", 
     "determine_part_size", "to_cdn_url", "is_valid_id", "is_valid_sha1", 
     "is_valid_name", "is_valid_pickcode", "posix_escape_name", "lock_as_async", 
-    "call_with_lock", 
+    "call_with_lock", "get_stable_point", "set_stable_point", "get_user_key", 
+    "set_user_key", 
 ]
 __doc__ = "这个模块提供了一些工具函数，且不依赖于 p115client.client 中的实现"
 
 from asyncio import sleep as async_sleep
-from collections.abc import Callable, Container, Coroutine, Mapping, Sequence
-from contextlib import asynccontextmanager, AbstractAsyncContextManager
+from collections import UserDict
+from collections.abc import (
+    Callable, Container, Coroutine, Mapping, Sequence, 
+)
+from contextlib import (
+    contextmanager, asynccontextmanager, suppress, AbstractAsyncContextManager, 
+)
 from http import HTTPStatus
 from inspect import isawaitable, iscoroutinefunction
+from os import fsdecode, stat
+from os.path import abspath
 from re import compile as re_compile
 from string import ascii_uppercase, digits, hexdigits
 from typing import (
@@ -23,16 +31,91 @@ from typing import (
 )
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
+from filelock import FileLock
 from iterutils import run_gen_step
+from orjson import loads, dumps
 from p115pickcode import is_valid_pickcode
 from urllib3_future_request import request
 from yarl import URL
+
+from .const import _CACHE_DIR
 
 
 URL_PATH_TRANSTAB: Final = {b: f"%{b:X}" for b in b"?#"}
 CRE_115_CHARREF_sub: Final = re_compile("\\[\x02([0-9]+)\\]").sub
 CRE_SHARE_LINK_search: Final = re_compile(r"(?:^|(?<=/))(?P<share_code>[a-z0-9]+)(?:-|\?password=|\?)(?P<receive_code>[a-z0-9]{4})(?!==)\b").search
 CRE_ERR_JPG_search: Final = re_compile(r"/err/([0-9]+).jpg$").search
+
+
+class LockedJsonKV(UserDict):
+
+    def __init__(self, path="data.json", dict=None, /, **kwargs):
+        self._path = path = fsdecode(abspath(path))
+        self._lock = FileLock(path + ".lock")
+        try:
+            self.data = loads(open(path, "rb").read() or "{}")
+            self._mtime = stat(path).st_mtime_ns
+        except FileNotFoundError:
+            self.data = {}
+            self._mtime = 0
+        if dict or kwargs:
+            self.update(dict, **kwargs)
+
+    @contextmanager
+    def with_lock(self, /, need_dump: bool = False):
+        with self._lock:
+            try:
+                mtime = stat(self._path).st_mtime_ns
+                if self._mtime < mtime:
+                    self.data = loads(open(self._path, "rb").read())
+                    self._mtime = mtime
+            except FileNotFoundError:
+                self.data = {}
+                self._mtime = 0
+            yield self
+            if need_dump:
+                data = dumps(self.data)
+                open(self._path, "wb").write(data)
+                self._mtime = stat(self._path).st_mtime_ns
+
+    def __delitem__(self, key, /):
+        with self.with_lock(True):
+            del self.data[str(key)]
+
+    def __getitem__(self, key, /):
+        try:
+            return self.data[str(key)]
+        except KeyError as e:
+            with self.with_lock():
+                return self.data[str(key)]
+
+    def __setitem__(self, key, val, /):
+        with self.with_lock(True):
+            self.data[str(key)] = val
+
+    def update(self, /, *args, **kwargs):
+        if any(args) or kwargs:
+            with self.with_lock(True):
+                update = super().update
+                for arg in args:
+                    update(arg)
+                if kwargs:
+                    update(kwargs)
+
+    def discard(self, /, keys):
+        with self.with_lock(True):
+            data = self.data
+            if isinstance(keys, str):
+                with suppress(KeyError):
+                    del data[keys]
+            else:
+                for key in keys:
+                    with suppress(KeyError):
+                        del data[key]
+
+
+UID_TO_STABLE_POINT: Final = LockedJsonKV(_CACHE_DIR / "pickcode_stable_points.json")
+UID_TO_USER_KEY: Final = LockedJsonKV(_CACHE_DIR / "userkey_stable_points.json")
 
 
 class SharePayload(TypedDict):
@@ -442,4 +525,26 @@ def call_with_lock[**Args, R](
     else:
         with lock:
             return func(*args, **kwds)
+
+
+def get_stable_point(user_id: int | str) -> str:
+    return UID_TO_STABLE_POINT[user_id]
+
+
+def set_stable_point(user_id: int | str, point_or_pickcode: str) -> str:
+    from p115pickcode import get_stable_point
+    point = get_stable_point(point_or_pickcode)
+    with suppress(Exception):
+        UID_TO_STABLE_POINT[user_id] = point
+    return point
+
+
+def get_user_key(user_id: int | str) -> str:
+    return UID_TO_USER_KEY[user_id]
+
+
+def set_user_key(user_id: int | str, user_key: str) -> str:
+    with suppress(Exception):
+        UID_TO_USER_KEY[user_id] = user_key
+    return user_key
 

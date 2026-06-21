@@ -140,7 +140,7 @@ def find_dup_based_on_lib(args, client, libdir_cid, target_cid):
 def main():
     args = parse_args()
     cookies = get_cookie(args)
-    client = P115Client(cookies, app=args.app, check_for_relogin=True)
+    client = P115Client(cookies, app=args.app)
     if args.cookies_path and cookies != client.cookies_str:
         open(args.cookies_path, "w").write(client.cookies_str)
 

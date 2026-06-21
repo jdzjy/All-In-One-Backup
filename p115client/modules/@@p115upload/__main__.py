@@ -75,7 +75,7 @@ def main(argv: None | list[str] | Namespace = None, /):
             cookies = Path(cookies_path)
         else:
             cookies = Path("115-cookies.txt")
-    client = P115Client(cookies, check_for_relogin=True, ensure_cookies=True, app="qandroid")
+    client = P115Client(cookies, ensure_cookies=True, app="qandroid")
 
     src_path = args.src_path
     dst_path = args.dst_path

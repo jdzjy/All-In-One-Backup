@@ -46,8 +46,6 @@ options:
                             COOKIES='UID=...; CID=..., SEID=...'
                             p115dav --cookies-path <(echo "$COOKIES")
                         
-  -cl, --check-for-relogin
-                        当风控时，自动重新扫码登录
   -nt, --no-thumbs      不要为请求图片链接提供缩略图
   -o, --origin-302 ORIGIN_302
                         设置 302 请求转发。如果为空，则由此模块提供；特别的，如果缺省此参数，则视为缓存链接；如果为空字符串 ''，则不缓存

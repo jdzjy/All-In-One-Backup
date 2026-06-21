@@ -29,16 +29,14 @@ from ..client import check_response, P115Client, P115OpenClient
 from ..exception import throw, P115DataError, P115Warning
 
 
+# get_webapi_origin: Final = "https://webapi.115.com"
 get_webapi_origin: Final = cycle((
-    "http://webapi.115.com", "http://web.api.115.com", 
-    "http://115cdn.com", "http://115vod.com", 
-    "http://f.115.com/api/proxy/115", "http://n.115.com/api/proxy/115", 
+    "https://webapi.115.com", "http://web.api.115.com", 
+    "https://115cdn.com/webapi", "https://115vod.com/webapi", 
+    "https://f.115.com/api/proxy/115", "https://n.115.com/api/proxy/115", 
 )).__next__
-get_proapi_origin: Final = cycle((
-    "http://proapi.115.com", "http://pro.api.115.com", 
-)).__next__
-# get_webapi_origin: Final = lambda: "http://webapi.115.com"
-# get_proapi_origin: Final = lambda: "http://proapi.115.com"
+#get_proapi_origin: Final = cycle(("https://proapi.115.com", "https://pro.api.115.com")).__next__
+get_proapi_origin: Final = "https://proapi.115.com"
 
 
 @overload
@@ -91,7 +89,7 @@ def fs_files(
     :return: 接口调用的结果
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if page_size <= 0:
         if use_media_api:
             page_size = 10_000
@@ -100,7 +98,7 @@ def fs_files(
     if not isinstance(client, P115Client) or app == "open":
         page_size = min(page_size, 1150)
         fs_files: Callable = client.fs_files_open
-    elif app in ("", "web", "desktop"):
+    elif app in ("", "web", "desktop", "chrome"):
         if use_media_api:
             page_size = min(page_size, 500)
             fs_files = client.fs_files_media
@@ -294,7 +292,7 @@ def iter_fs_files_serialized(
     :return: 迭代器，每次返回一次接口调用的结果
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if page_size <= 0:
         if use_media_api:
             page_size = 10_000
@@ -304,7 +302,7 @@ def iter_fs_files_serialized(
     if not isinstance(client, P115Client) or app == "open":
         page_size = min(page_size, 1150)
         fs_files = client.fs_files_open
-    elif app in ("", "web", "desktop"):
+    elif app in ("", "web", "desktop", "chrome"):
         if use_media_api:
             page_size = min(page_size, 500)
             fs_files = client.fs_files_media
@@ -409,7 +407,7 @@ def iter_fs_files_threaded(
     :return: 迭代器
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if page_size <= 0:
         if use_media_api:
             page_size = 10_000
@@ -419,7 +417,7 @@ def iter_fs_files_threaded(
     if not isinstance(client, P115Client) or app == "open":
         page_size = min(page_size, 1150)
         fs_files = client.fs_files_open
-    elif app in ("", "web", "desktop"):
+    elif app in ("", "web", "desktop", "chrome"):
         if use_media_api:
             page_size = min(page_size, 500)
             fs_files = client.fs_files_media
@@ -552,7 +550,7 @@ async def iter_fs_files_asynchronized(
     :return: 异步迭代器
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if page_size <= 0:
         if use_media_api:
             page_size = 10_000
@@ -562,7 +560,7 @@ async def iter_fs_files_asynchronized(
     if not isinstance(client, P115Client) or app == "open":
         page_size = min(page_size, 1150)
         fs_files = client.fs_files_open
-    elif app in ("", "web", "desktop"):
+    elif app in ("", "web", "desktop", "chrome"):
         if use_media_api:
             page_size = min(page_size, 500)
             fs_files = client.fs_files_media

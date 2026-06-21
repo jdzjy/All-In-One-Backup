@@ -18,7 +18,7 @@ from p115tiny302 import make_application
 from uvicorn import run
 
 cookies = "UID=...; CID=...; SEID=...; KID=..."
-client = P115Client(cookies, ensure_cookies=True, check_for_relogin=True)
+client = P115Client(cookies, ensure_cookies=True)
 run(
     make_application(client, debug=True), 
     host="0.0.0.0", 

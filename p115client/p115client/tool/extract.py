@@ -72,7 +72,7 @@ def extract_push(
     :return: 接口响应
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if app in ("", "web", "desktop", "aps"):
         extract_push: Callable = client.extract_push
     else:
@@ -138,7 +138,7 @@ def extract_push_progress(
     :return: 接口响应
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if app in ("", "web", "desktop", "aps"):
         extract_push: Callable = client.extract_push_progress
     else:
@@ -203,7 +203,7 @@ def extract_iterdir_raw(
     :return: 迭代器，返回此目录内的文件信息（文件和目录）
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     def gen_step():
         extract_list = client.extract_list
         next_marker = ""
@@ -280,7 +280,7 @@ def extract_file(
     :return: 任务 id
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     def gen_step():
         resp = yield client.extract_file(
             pickcode, 
@@ -336,7 +336,7 @@ def extract_progress(
     :return: 接口响应
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if app in ("", "web", "desktop", "aps"):
         extract_progress: Callable = client.extract_progress
     else:

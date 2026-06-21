@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-__all__ = ["check_response", "ClientRequestMixin", "P115OpenClient", "P115Client"]
+__all__ = ["check_response", "P115OpenClient", "P115Client"]
 __doc__ = "115 客户端模块"
 
 from asyncio import Lock as AsyncLock
@@ -14,18 +14,15 @@ from collections.abc import (
     Iterable, Iterator, Mapping, MutableMapping, Sequence, 
 )
 from datetime import date, datetime, timedelta
-from functools import cached_property, partial
 from hashlib import md5, sha1
 from http.cookiejar import Cookie, CookieJar
 from http.cookies import Morsel, BaseCookie
-from inspect import isawaitable, iscoroutinefunction, signature, Signature
-from itertools import count
+from inspect import isawaitable
 from operator import itemgetter
 from os import fsdecode, isatty, PathLike
 from pathlib import Path, PurePath
 from re import compile as re_compile, Match, MULTILINE
 from string import digits
-from sys import _getframe
 from threading import Lock
 from time import time
 from typing import cast, overload, Any, Final, Literal, Self
@@ -33,7 +30,6 @@ from urllib.parse import parse_qsl, quote, unquote, urlencode, urlsplit
 from uuid import uuid4
 from warnings import warn
 
-from argtools import argcount
 from asynctools import ensure_async
 from cookietools import cookies_to_dict, update_cookies
 from dicttools import (
@@ -52,13 +48,13 @@ from p115cipher import (
     ecdh_encode_token, make_upload_payload, 
 )
 from p115oss import upload_file
-from p115pickcode import get_stable_point, to_id, to_pickcode
+from p115pickcode import to_id, to_pickcode
 from property import locked_cacheproperty
 from temporary import temp_globals
 from yarl import URL
 
 from .const import (
-    _CACHE_DIR, CLIENT_API_METHODS_MAP, CLIENT_METHOD_API_MAP, 
+    CLIENT_API_METHODS_MAP, CLIENT_METHOD_API_MAP, 
     SSOENT_TO_APP, 
 )
 from .exception import (
@@ -78,6 +74,75 @@ _default_k_ec = {"k_ec": ecdh_encode_token(0).decode()}
 _default_code_verifier = "0" * 64
 _default_code_challenge = b64encode(md5(b"0" * 64).digest()).decode()
 _default_code_challenge_method = "md5"
+
+
+def json_loads(content: Buffer, /):
+    try:
+        return loads(memoryview(content).cast("B"))
+    except Exception:
+        throw(errno.ENODATA, bytes(content))
+
+
+def json_parse(_, content: Buffer, /):
+    return json_loads(content)
+
+
+def json_decrypt_parse(_, content: Buffer, /):
+    return json_loads(ecdh_aes_decrypt(content))
+
+
+def get_request(
+    url: str, 
+    method: str = "GET", 
+    payload: Any = None, 
+    headers: Any = None, 
+    ecdh_encrypt: bool = False, 
+    request: None | Callable = None, 
+    **request_kwargs, 
+) -> tuple[Callable, dict]:
+    if request is None:
+        from urllib3_future_request import request
+    request = cast(Callable, request)
+    request_kwargs.update(url=url, method=method)
+    is_open_api = URL(url).path.startswith("/open/")
+    if is_open_api:
+        ecdh_encrypt = False
+    if payload is not None:
+        request_kwargs.setdefault(
+            "data" if method.upper() in ("POST", "PUT") else "params", 
+            payload, 
+        )
+    params = request_kwargs.get("params")
+    if isinstance(params, dict):
+        params.setdefault("app_ver", "99.99.99.99")
+    headers = request_kwargs["headers"] = dict_key_to_lower_merge(headers or ())
+    headers["referer"] = headers.get("referer") or str(URL(url).origin())
+    if ecdh_encrypt:
+        url = make_url(url, params=_default_k_ec)
+        if data := request_kwargs.get("data"):
+            if not isinstance(data, (Buffer, str, UserString)):
+                data = urlencode(data)
+            request_kwargs["data"] = ecdh_aes_encrypt(ensure_bytes(data) + b"&")
+            headers["content-type"] = "application/x-www-form-urlencoded"
+        request_kwargs.setdefault("parse", json_decrypt_parse)
+    else:
+        request_kwargs.setdefault("parse", json_parse)
+    return request, request_kwargs
+
+
+def md5_secret_password(password: None | int | str = "670b14728ad9902aecba32e22fa4f6bd", /) -> str:
+    if not password:
+        return "670b14728ad9902aecba32e22fa4f6bd"
+    if isinstance(password, str) and len(password) == 32:
+        return password
+    return md5(f"{password:>06}".encode("ascii")).hexdigest()
+
+
+def parse_upload_init_response(_, content: bytes, /) -> dict:
+    data = ecdh_aes_decrypt(content)
+    if not isinstance(data, (bytes, bytearray)):
+        data = memoryview(data).cast("B")
+    return json_loads(data)
 
 
 def expand_payload(
@@ -110,105 +175,6 @@ def expand_payload(
                 yield from expand_payload(v2, f"{k}[{k2}]")
         else:
             yield k, v
-
-
-def json_loads(content: Buffer, /):
-    try:
-        if isinstance(content, (bytes, bytearray)):
-            return loads(content)
-        else:
-            return loads(memoryview(content).cast("B"))
-    except Exception:
-        throw(errno.ENODATA, bytes(content))
-
-
-def default_parse(_, content: Buffer, /):
-    if not isinstance(content, (bytes, bytearray)):
-        content = memoryview(content).cast("B")
-    if len(content) > 2 and bytes((content[0], content[-1])) not in (b"{}", b"[]", b'""'):
-        try:
-            content = ecdh_aes_decrypt(content)
-        except Exception:
-            pass
-    return json_loads(content)
-
-
-def md5_secret_password(password: None | int | str = "670b14728ad9902aecba32e22fa4f6bd", /) -> str:
-    if not password:
-        return "670b14728ad9902aecba32e22fa4f6bd"
-    if isinstance(password, str) and len(password) == 32:
-        return password
-    return md5(f"{password:>06}".encode("ascii")).hexdigest()
-
-
-def get_request(
-    async_: None | bool = None, 
-    request_kwargs: None | dict = None, 
-    self = None, 
-) -> Callable:
-    def iter_locals(depth_start: int = 1, /) -> Iterator[dict]:
-        try:
-            frame = _getframe(depth_start)
-        except ValueError:
-            return
-        while frame:
-            yield frame.f_locals
-    def has_keyword_async(request: Callable | Signature, /) -> bool:
-        if callable(request):
-            try:
-                request = signature(request)
-            except (ValueError, TypeError):
-                return False
-        params = request.parameters
-        param = params.get("async_")
-        return bool(param and param.kind in (param.POSITIONAL_OR_KEYWORD, param.KEYWORD_ONLY))
-    if request_kwargs is None:
-        for f_locals in iter_locals(2):
-            if "request_kwargs" in f_locals:
-                request_kwargs = f_locals["request_kwargs"]
-                break
-    if async_ is None and request_kwargs:
-        async_ = request_kwargs.get("async_")
-    if async_ is None:
-        for f_locals in iter_locals(2):
-            if "async_" in f_locals:
-                async_ = f_locals["async_"]
-                break
-    request: None | Callable = None
-    if isinstance(self, ClientRequestMixin):
-        request = self.request
-        if async_ is not None:
-            if request_kwargs is None:
-                request = partial(request, async_=async_)
-            else:
-                request_kwargs["async_"] = async_
-    else:
-        if request_kwargs:
-            request = request_kwargs.pop("request", None)
-        if request is None:
-            from urllib3_future_request import request
-            request = cast(Callable, request)
-        if async_ is not None and not iscoroutinefunction(request) and has_keyword_async(request):
-            if request_kwargs is None:
-                request = partial(request, async_=async_)
-            else:
-                request_kwargs["async_"] = async_
-        if request_kwargs is None:
-            request = partial(request, parse=default_parse)
-        else:
-            request_kwargs.setdefault("parse", default_parse)
-    return request
-
-
-def default_check_for_relogin(e: BaseException, /) -> bool:
-    return get_status_code(e) == 405
-
-
-def parse_upload_init_response(_, content: bytes, /) -> dict:
-    data = ecdh_aes_decrypt(content)
-    if not isinstance(data, (bytes, bytearray)):
-        data = memoryview(data).cast("B")
-    return json_loads(data)
 
 
 @overload
@@ -492,95 +458,18 @@ def check_response(resp: dict | Awaitable[dict], /) -> dict | Coroutine[Any, Any
 
 
 class ClientRequestMixin:
-    """混入类，部署了 HTTP 请求相关的属性和方法，并集成了一部分公共的静态方法和类方法
-    """
-    cookies_path: None | PurePath = None
+    app_id: int = 0
+    cookies_path: PurePath
 
-    def _read_cookies(
-        self, 
-        /, 
-        encoding: str = "latin-1", 
-    ) -> P115Cookies:
-        if cookies_path := self.__dict__.get("cookies_path"):
-            try:
-                with cookies_path.open("rb") as f:
-                    cookies = str(f.read(), encoding)
-                if cookies:
-                    update_cookies(self.cookies, cookies_to_dict(cookies), domain=".115.com")
-            except OSError:
-                pass
-        return self.cookies_str
-
-    def _write_cookies(
-        self, 
-        cookies: None | str = None, 
-        /, 
-        encoding: str = "latin-1", 
-    ):
-        if cookies_path := self.__dict__.get("cookies_path"):
-            if cookies is None:
-                cookies = self.cookies_str
-            cookies_bytes = bytes(cookies, encoding)
-            with cookies_path.open("wb") as f:
-                f.write(cookies_bytes)
-
-    @property
-    def cookies(self, /) -> BaseCookie:
-        """请求所用的 Cookies 对象（同步和异步共用）
+    @locked_cacheproperty
+    def cookies(self, /) -> CookieJar:
+        """公用 cookiejar
         """
-        try:
-            return self.__dict__["cookies"]
-        except KeyError:
-            cookies = self.__dict__["cookies"] = BaseCookie()
-            return cookies
-
-    @cookies.setter
-    def cookies(
-        self, 
-        cookies: None | str | CookieJar | BaseCookie | Mapping[str, Any] | Iterable[Any] = None, 
-        /, 
-    ):
-        """更新 cookies
-        """
-        cookie_store = self.cookies
-        if cookies is None:
-            cookie_store.clear()
-            self._write_cookies("")
-        elif isinstance(cookies, str):
-            cookies = cookies_to_dict(cookies.strip().rstrip(";"))
-        if not cookies:
-            return
-        cookies_old = self.cookies_str
-        update_cookies(cookie_store, cookies, domain=".115.com")
-        cookies_new = self.cookies_str
-        try:
-            if self.user_id != cookies_new.user_id:
-                seen: set[str] = set()
-                pop_key = self.__dict__.pop
-                for cls in type(self).mro():
-                    if not isinstance(cls, ClientRequestMixin):
-                        seen.update(cls.__dict__)
-                        continue
-                    for key, val in cls.__dict__.items():
-                        if key in seen:
-                            continue
-                        seen.add(key)
-                        if isinstance(val, (cached_property, locked_cacheproperty)):
-                            pop_key(key, None)
-        except KeyError:
-            pass
-        if cookies_new != cookies_old:
-            self._write_cookies(cookies_new)
-
-    @property
-    def cookies_str(self, /) -> P115Cookies:
-        """所有 .115.com 域下的 cookie 值
-        """
-        return P115Cookies.from_simple_cookie(self.cookies)
+        return CookieJar()
 
     @locked_cacheproperty
     def headers(self, /) -> KeyLowerDict[str, str]:
-        """请求头（同步和异步共用）
+        """公用请求头
         """
         return KeyLowerDict[str, str]({
             "accept": "*/*", 
@@ -591,13 +480,59 @@ class ClientRequestMixin:
 
     @locked_cacheproperty
     def user_id(self, /) -> int:
-        if user_id := self.cookies_str.user_id:
-            return user_id
-        elif "authorization" in self.headers:
-            resp = check_response(P115OpenClient.user_info_open(cast(P115OpenClient, self)))
+        for cookie in self.cookies:
+            if cookie.name == "UID":
+                return int(cookie.value.partition("_")[0])
+        if isinstance(self, P115OpenClient):
+            resp = check_response(self.user_info_open())
             return int(resp["data"]["user_id"])
+        raise LookupError("can't get user_id")
+
+    @locked_cacheproperty
+    def request_lock(self, /) -> Lock:
+        return Lock()
+
+    @locked_cacheproperty
+    def request_alock(self, /) -> AsyncLock:
+        return AsyncLock()
+
+    @property
+    def cookies_str(self, /) -> P115Cookies:
+        """所有名为 *ID 的 cookie 值
+        """
+        return P115Cookies(self.cookies)
+
+    def _read_cookies(self, encoding: str = "latin-1", /):
+        if cookies_path := self.__dict__.get("cookies_path"):
+            try:
+                with cookies_path.open("rb") as f:
+                    cookies = str(f.read(), encoding)
+                if cookies:
+                    update_cookies(self.cookies, cookies_to_dict(cookies))
+            except OSError:
+                pass
+
+    def _write_cookies(self, encoding: str = "latin-1", /):
+        if cookies_path := self.__dict__.get("cookies_path"):
+            cookies_bytes = bytes(self.cookies_str, encoding)
+            with cookies_path.open("wb") as f:
+                f.write(cookies_bytes)
+
+    def update_cookies(
+        self, 
+        cookies: None | str | CookieJar | BaseCookie | Mapping[str, Any] | Iterable[Any] = None, 
+        /, 
+    ):
+        """更新 cookies（如果为 None 则是清空）
+        """
+        if cookies is None:
+            self.cookies.clear()
         else:
-            return 0
+            if isinstance(cookies, str):
+                cookies = cookies_to_dict(cookies.strip().rstrip(";"))
+            if cookies:
+                update_cookies(self.cookies, cookies)
+                self._write_cookies()
 
     def request(
         self, 
@@ -613,12 +548,12 @@ class ClientRequestMixin:
     ):
         """执行网络请求
 
-        :param url: HTTP 的请求链接
-        :param method: HTTP 的请求方法
-        :param payload: HTTP 的请求载体（如果 `method` 是 "POST"，则作为请求体，否则作为查询参数）
-        :param ecdh_encrypt: 是否使用 ecdh 算法对请求体进行加密（返回值需要解密）
+        :param url:     HTTP 的请求链接
+        :param method:  HTTP 的请求方法
+        :param payload: HTTP 的请求载体（``method`` 为 "POST" 或 "PUT" 时，视为 ``data``，否则视为 ``params``）
+        :param ecdh_encrypt: 是否加密通信，如果是 open 接口则无效
         :param request: HTTP 请求调用，如果为 None，则用默认设置
-            如果传入调用，则必须至少能接受以下几个关键词参数：
+            如果传入调用，则必须至少能接受以下几个关键词参数（如果接收到了不用的参数，也要能自动忽略）：
 
             - url:     HTTP 的请求链接
             - method:  HTTP 的请求方法
@@ -720,7 +655,7 @@ class ClientRequestMixin:
 
                     from aiosonic_request import request
 
-            13. `tornado_client_request <https://pypi.org/project/tornado_client_request/>`_，由 `tornado <https://www.tornadoweb.org/en/latest/httpclient.html>`_ 封装，支持异步请求
+            13. `tornado_client_request <https://pypi.org/project/tornado_client_request/>`_，由 `tornado <https://www.tornadoweb.org/en/latest/httpclient.html>`_ 封装，支持同步和异步请求
 
                 .. code:: python
 
@@ -738,32 +673,304 @@ class ClientRequestMixin:
 
                     from niquests_request import request
         """
-        if payload is not None:
-            if method.upper() == "POST":
-                request_kwargs.setdefault("data", payload)
-            else:
-                request_kwargs.setdefault("params", payload)
-        request_kwargs["request"] = request
-        request_kwargs.setdefault("cookies", self.cookies)
-        request = get_request(async_, request_kwargs)
-        headers = request_kwargs["headers"] = dict_update(
-            self.headers.copy(), 
-            request_kwargs.get("headers") or (), 
+        headers = self.headers.copy()
+        headers.update(request_kwargs.pop("headers", None) or ())
+        request, request_kwargs = get_request(
+            url=url, 
+            method=method, 
+            payload=payload, 
+            headers=headers, 
+            ecdh_encrypt=ecdh_encrypt, 
+            request=request, 
+            **request_kwargs, 
         )
-        if ecdh_encrypt and (data := request_kwargs.get("data")):
-            url = make_url(url, params=_default_k_ec)
-            if not isinstance(data, (Buffer, str, UserString)):
-                data = urlencode(data)
-            request_kwargs["data"] = ecdh_aes_encrypt(ensure_bytes(data) + b"&")
-            headers["content-type"] = "application/x-www-form-urlencoded"
-        return request(url=url, method=method, **request_kwargs)
+        headers = request_kwargs["headers"]
+        if URL(url).path.startswith("/open/"):
+            if "authorization" not in headers:
+                assert isinstance(self, P115OpenClient)
+                def gen_step():
+                    if async_:
+                        lock: Lock | AsyncLock = self.request_alock
+                    else:
+                        lock = self.request_lock
+                    if not hasattr(self, "access_token"):
+                        yield lock.acquire()
+                        try:
+                            if not getattr(self, "access_token", None):
+                                if getattr(self, "refresh_token", None):
+                                    yield self.refresh_access_token(async_=async_)
+                                elif hasattr(self, "login_another_open"):
+                                    yield self.login_another_open(replace=True, async_=async_)
+                                else:
+                                    raise RuntimeError("can't get access token")
+                        finally:
+                            lock.release()
+                    while True:
+                        access_token = self.access_token
+                        headers["authorization"] = "Bearer " + access_token
+                        resp = yield request(async_=async_, **request_kwargs)
+                        if resp.get("errno") != 40140125:
+                            return resp
+                        yield lock.acquire()
+                        try:
+                            if access_token == self.access_token:
+                                yield self.refresh_access_token(async_=async_)
+                        finally:
+                            lock.release()
+                return run_gen_step(gen_step, async_)
+        elif "cookie" not in headers:
+            request_kwargs["cookies"] = self.cookies
+        return request(async_=async_, **request_kwargs)
+
+    def open(
+        self, 
+        url: str, 
+        /, 
+        start: int | str = 0, 
+        urlopen: None | Callable = None, 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ):
+        """打开下载链接，返回响应对象
+
+        :param url: 下载链接
+        :param start: 开始索引，从 0 开始
+        :param async_: 是否异步
+        :param request_kwargs: 其它请求参数
+
+        :return: 响应对象
+        """
+        headers = request_kwargs["headers"] = dict(request_kwargs.get("headers") or ())
+        headers.setdefault("user-agent", "")
+        if isinstance(start, str):
+            if not start.startswith("bytes="):
+                start = "bytes=" + start
+        elif start >= 0:
+            start = f"bytes={start}-"
+        else:
+            start = f"bytes={start}"
+        headers["range"] = start
+        if isinstance(url, P115URL):
+            headers.update(url.get("headers") or ())
+        if urlopen is None:
+            from urllib3_future_request import request as urlopen
+        urlopen = cast(Callable, urlopen)
+        return urlopen(url, async_=async_, **request_kwargs)
+
+    ########## App API ##########
+
+    @overload
+    @staticmethod
+    def app_area_list(
+        base_url: str | Callable[[], str] = "https://cdnres.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs
+    ) -> dict:
+        ...
+    @overload
+    @staticmethod
+    def app_area_list(
+        base_url: str | Callable[[], str] = "https://cdnres.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    @staticmethod
+    def app_area_list(
+        base_url: str | Callable[[], str] = "https://cdnres.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """获取地区编码列表
+
+        GET https://cdnres.115.com/my/m_r/setting_new/js/ylmf_area.js
+        """
+        api = complete_url("/my/m_r/setting_new/js/ylmf_area.js", base_url=base_url)
+        def iter_area(data: dict, /) -> Iterator[tuple[int, str]]:
+            for code, detail in data.items():
+                if isinstance(code, str):
+                    continue
+                if isinstance(detail, dict):
+                    yield code, detail["n"]
+                    for key in ("c", "t"):
+                        if key in detail and detail[key]:
+                            yield from iter_area(detail[key])
+                            break
+                else:
+                    yield code, detail
+        def parse(_, content, /):
+            data_str = cast(Match[str], CRE_AREA_DATA_search(content.decode("utf-8")))[0]
+            data = eval(data_str, {"n": "n", "c": "c", "t": "t", "l": "l"})
+            return {"state": True, "data": list(iter_area(data))}
+        request_kwargs.setdefault("parse", parse)
+        request, request_kwargs = get_request(url=api, **request_kwargs)
+        return request(async_=async_, **request_kwargs)
+
+    @overload
+    @staticmethod
+    def app_face_codes(
+        base_url: str | Callable[[], str] = "https://my.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    @staticmethod
+    def app_face_codes(
+        base_url: str | Callable[[], str] = "https://my.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    @staticmethod
+    def app_face_codes(
+        base_url: str | Callable[[], str] = "https://my.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """获取表情包
+
+        GET https://my.115.com/api/face_code.js
+        """
+        api = complete_url("/api/face_code.js", base_url=base_url)
+        def parse(_, content, /):
+            return json_loads(content[25:-1])
+        request_kwargs.setdefault("parse", parse)
+        request, request_kwargs = get_request(url=api, **request_kwargs)
+        return request(async_=async_, **request_kwargs)
+
+    @overload
+    @staticmethod
+    def app_publick_key(
+        app: str = "web", 
+        base_url: str | Callable[[], str] = "https://passportapi.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs
+    ) -> dict:
+        ...
+    @overload
+    @staticmethod
+    def app_publick_key(
+        app: str = "web", 
+        base_url: str | Callable[[], str] = "https://passportapi.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    @staticmethod
+    def app_publick_key(
+        app: str = "web", 
+        base_url: str | Callable[[], str] = "https://passportapi.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """获取 RSA 加密公钥，用于某些情况下的加密
+
+        GET https://passportapi.115.com/app/1.0/{app}/1.0/login/getKey
+
+        .. note::
+            返回的公钥是签名证书，并经过 BASE64 处理，可用下面步骤还原
+
+            .. code:: python
+
+                from base64 import b64decode
+                from p115client import P115Client
+
+                resp = P115Client.app_publick_key()
+                perm = b64decode(resp["data"]["key"])
+
+                # pip install pycryptodome
+                from Crypto.PublicKey import RSA
+
+                pubkey = RSA.import_key(perm)
+                print(repr(pubkey))
+        """
+        api = complete_url(f"/app/1.0/{app}/1.0/login/getKey", base_url=base_url)
+        request, request_kwargs = get_request(url=api, **request_kwargs)
+        return request(async_=async_, **request_kwargs)
+
+    @overload
+    @staticmethod
+    def app_version_list(
+        base_url: str | Callable[[], str] = "https://appversion.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs
+    ) -> dict:
+        ...
+    @overload
+    @staticmethod
+    def app_version_list(
+        base_url: str | Callable[[], str] = "https://appversion.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    @staticmethod
+    def app_version_list(
+        base_url: str | Callable[[], str] = "https://appversion.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """获取当前各平台最新版 115 app 下载链接
+
+        GET https://appversion.115.com/1.0/web/1.0/api/chrome
+        """
+        api = complete_url("/1.0/web/1.0/api/chrome", base_url=base_url)
+        request, request_kwargs = get_request(url=api, **request_kwargs)
+        return request(async_=async_, **request_kwargs)
+
+    @overload
+    @staticmethod
+    def app_version_list2(
+        base_url: str | Callable[[], str] = "https://appversion.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs
+    ) -> dict:
+        ...
+    @overload
+    @staticmethod
+    def app_version_list2(
+        base_url: str | Callable[[], str] = "https://appversion.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    @staticmethod
+    def app_version_list2(
+        base_url: str | Callable[[], str] = "https://appversion.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """获取当前各平台最新版 115 app 下载链接
+
+        GET https://appversion.115.com/1.0/web/1.0/api/getMultiVer
+        """
+        api = complete_url("/1.0/web/1.0/api/getMultiVer", base_url=base_url)
+        request, request_kwargs = get_request(url=api, **request_kwargs)
+        return request(async_=async_, **request_kwargs)
 
     ########## Qrcode API ##########
 
     @overload
+    @staticmethod
     def login_authorize_open(
-        self: dict | ClientRequestMixin, 
-        payload: None | dict = None, 
+        payload: dict, 
         /, 
         base_url: str | Callable[[], str] = "https://qrcodeapi.115.com", 
         *, 
@@ -772,9 +979,9 @@ class ClientRequestMixin:
     ) -> dict:
         ...
     @overload
+    @staticmethod
     def login_authorize_open(
-        self: dict | ClientRequestMixin, 
-        payload: None | dict = None, 
+        payload: dict, 
         /, 
         base_url: str | Callable[[], str] = "https://qrcodeapi.115.com", 
         *, 
@@ -782,9 +989,9 @@ class ClientRequestMixin:
         **request_kwargs, 
     ) -> Coroutine[Any, Any, dict]:
         ...
+    @staticmethod
     def login_authorize_open(
-        self: dict | ClientRequestMixin, 
-        payload: None | dict = None, 
+        payload: dict, 
         /, 
         base_url: str | Callable[[], str] = "https://qrcodeapi.115.com", 
         *, 
@@ -800,10 +1007,7 @@ class ClientRequestMixin:
             https://www.yuque.com/115yun/open/okr2cq0wywelscpe#EiOrD
 
         .. note::
-            可以作为 ``staticmethod`` 使用
-
-        .. note::
-            同一个开放应用 id，最多同时有 3 个登入（目前可能又被调整），如果有新的登录，则自动踢掉较早的那一个
+            同一个开放应用 id，最多同时有 3 个登入，如果有新的登录，则自动踢掉较早的那一个
 
         :payload:
             - client_id: int | str 💡 AppID
@@ -812,11 +1016,7 @@ class ClientRequestMixin:
             - state: int | str = <default> 💡 随机值，会通过 redirect_uri 原样返回，可用于验证以防 MITM 和 CSRF
         """
         api = complete_url("/open/authorize", base_url=base_url)
-        if not isinstance(self, ClientRequestMixin):
-            payload = self
-        else:
-            assert payload is not None
-        payload = {"response_type": "code", **payload}
+        request_kwargs["follow_redirects"] = False
         def parse(resp, content, /):
             if get_status_code(resp) == 302:
                 return {
@@ -827,15 +1027,15 @@ class ClientRequestMixin:
                 }
             else:
                 return json_loads(content)
-        request_kwargs["parse"] = parse
-        request_kwargs["follow_redirects"] = False
-        return get_request(async_, request_kwargs, self=self)(
-            url=api, params=payload, **request_kwargs)
+        request_kwargs.setdefault("parse", parse)
+        request, request_kwargs = get_request(
+            url=api, params={"response_type": "code", **payload}, **request_kwargs)
+        return request(async_=async_, **request_kwargs)
 
     @overload
+    @staticmethod
     def login_authorize_access_token_open(
-        self: dict | ClientRequestMixin, 
-        payload: None | dict = None, 
+        payload: dict, 
         /, 
         base_url: str | Callable[[], str] = "https://qrcodeapi.115.com", 
         *, 
@@ -844,9 +1044,9 @@ class ClientRequestMixin:
     ) -> dict:
         ...
     @overload
+    @staticmethod
     def login_authorize_access_token_open(
-        self: dict | ClientRequestMixin, 
-        payload: None | dict = None, 
+        payload: dict, 
         /, 
         base_url: str | Callable[[], str] = "https://qrcodeapi.115.com", 
         *, 
@@ -854,9 +1054,9 @@ class ClientRequestMixin:
         **request_kwargs, 
     ) -> Coroutine[Any, Any, dict]:
         ...
+    @staticmethod
     def login_authorize_access_token_open(
-        self: dict | ClientRequestMixin, 
-        payload: None | dict = None, 
+        payload: dict, 
         /, 
         base_url: str | Callable[[], str] = "https://qrcodeapi.115.com", 
         *, 
@@ -871,9 +1071,6 @@ class ClientRequestMixin:
 
             https://www.yuque.com/115yun/open/okr2cq0wywelscpe#JnDgl
 
-        .. note::
-            可以作为 ``staticmethod`` 使用
- 
         :payload:
             - client_id: int | str 💡 AppID
             - client_secret: str 💡 AppSecret
@@ -882,18 +1079,18 @@ class ClientRequestMixin:
             - grant_type: str = "authorization_code" 💡 授权类型，固定为 authorization_code，表示授权码类型
         """
         api = complete_url("/open/authCodeToToken", base_url=base_url)
-        if not isinstance(self, ClientRequestMixin):
-            payload = self
-        else:
-            assert payload is not None
-        payload = {"grant_type": "authorization_code", **payload}
-        return get_request(async_, request_kwargs, self=self)(
-            url=api, method="POST", data=payload, **request_kwargs)
+        request, request_kwargs = get_request(
+            url=api, 
+            method="POST", 
+            data={"grant_type": "authorization_code", **payload}, 
+            **request_kwargs, 
+        )
+        return request(async_=async_, **request_kwargs)
 
     @overload
+    @staticmethod
     def login_qrcode(
-        self: str | dict | ClientRequestMixin, 
-        payload: None | str | dict = None, 
+        payload: str | dict, 
         /, 
         app: str = "web", 
         base_url: str | Callable[[], str] = "https://qrcodeapi.115.com", 
@@ -903,9 +1100,9 @@ class ClientRequestMixin:
     ) -> bytes:
         ...
     @overload
+    @staticmethod
     def login_qrcode(
-        self: str | dict | ClientRequestMixin, 
-        payload: None | str | dict = None, 
+        payload: str | dict, 
         /, 
         app: str = "web", 
         base_url: str | Callable[[], str] = "https://qrcodeapi.115.com", 
@@ -914,9 +1111,9 @@ class ClientRequestMixin:
         **request_kwargs, 
     ) -> Coroutine[Any, Any, bytes]:
         ...
+    @staticmethod
     def login_qrcode(
-        self: str | dict | ClientRequestMixin, 
-        payload: None | str | dict = None, 
+        payload: str | dict, 
         /, 
         app: str = "web", 
         base_url: str | Callable[[], str] = "https://qrcodeapi.115.com", 
@@ -928,28 +1125,21 @@ class ClientRequestMixin:
 
         GET https://qrcodeapi.115.com/api/1.0/{app}/1.0/qrcode
 
-        .. note::
-            可以作为 ``staticmethod`` 使用
-
         :param uid: 二维码的 uid
 
         :return: 图片的二进制数据（PNG 图片）
         """
         api = complete_url(f"/api/1.0/{app}/1.0/qrcode", base_url=base_url)
-        if not isinstance(self, ClientRequestMixin):
-            payload = self
-        else:
-            assert payload is not None
         if isinstance(payload, str):
             payload = {"uid": payload}
         request_kwargs.setdefault("parse", False)
-        return get_request(async_, request_kwargs, self=self)(
-            url=api, params=payload, **request_kwargs)
+        request, request_kwargs = get_request(url=api, **request_kwargs)
+        return request(async_=async_, **request_kwargs)
 
     @overload
+    @staticmethod
     def login_qrcode_access_token_open(
-        self: str | dict | ClientRequestMixin, 
-        payload: None | str | dict = None, 
+        payload: str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://qrcodeapi.115.com", 
         *, 
@@ -958,9 +1148,9 @@ class ClientRequestMixin:
     ) -> dict:
         ...
     @overload
+    @staticmethod
     def login_qrcode_access_token_open(
-        self: str | dict | ClientRequestMixin, 
-        payload: None | str | dict = None, 
+        payload: str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://qrcodeapi.115.com", 
         *, 
@@ -968,9 +1158,9 @@ class ClientRequestMixin:
         **request_kwargs, 
     ) -> Coroutine[Any, Any, dict]:
         ...
+    @staticmethod
     def login_qrcode_access_token_open(
-        self: str | dict | ClientRequestMixin, 
-        payload: None | str | dict = None, 
+        payload: str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://qrcodeapi.115.com", 
         *, 
@@ -981,9 +1171,6 @@ class ClientRequestMixin:
 
         POST https://qrcodeapi.115.com/open/deviceCodeToToken
 
-        .. note::
-            可以作为 ``staticmethod`` 使用
-
         .. admonition:: Reference
 
             https://www.yuque.com/115yun/open/shtpzfhewv5nag11#QCCVQ
@@ -993,14 +1180,11 @@ class ClientRequestMixin:
             - code_verifier: str = <default> 💡 默认字符串是 64 个 "0"
         """
         api = complete_url("/open/deviceCodeToToken", base_url=base_url)
-        if not isinstance(self, ClientRequestMixin):
-            payload = self
-        else:
-            assert payload is not None
         if isinstance(payload, str):
             payload = {"uid": payload, "code_verifier": _default_code_verifier}
-        return get_request(async_, request_kwargs, self=self)(
+        request, request_kwargs = get_request(
             url=api, method="POST", data=payload, **request_kwargs)
+        return request(async_=async_, **request_kwargs)
 
     @overload
     def login_qrcode_scan(
@@ -1136,10 +1320,9 @@ class ClientRequestMixin:
         return self.request(url=api, params=payload, async_=async_, **request_kwargs)
 
     @overload
+    @staticmethod
     def login_qrcode_scan_result(
-        self: str | ClientRequestMixin, 
-        /, 
-        uid: None | str = None, 
+        uid: str, 
         app: str = "alipaymini", 
         base_url: str | Callable[[], str] = "https://qrcodeapi.115.com", 
         *, 
@@ -1148,10 +1331,9 @@ class ClientRequestMixin:
     ) -> dict:
         ...
     @overload
+    @staticmethod
     def login_qrcode_scan_result(
-        self: str | ClientRequestMixin, 
-        /, 
-        uid: None | str = None, 
+        uid: str, 
         app: str = "alipaymini", 
         base_url: str | Callable[[], str] = "https://qrcodeapi.115.com", 
         *, 
@@ -1159,10 +1341,9 @@ class ClientRequestMixin:
         **request_kwargs, 
     ) -> Coroutine[Any, Any, dict]:
         ...
+    @staticmethod
     def login_qrcode_scan_result(
-        self: str | ClientRequestMixin, 
-        /, 
-        uid: None | str = None, 
+        uid: str, 
         app: str = "alipaymini", 
         base_url: str | Callable[[], str] = "https://qrcodeapi.115.com", 
         *, 
@@ -1174,10 +1355,7 @@ class ClientRequestMixin:
         POST https://qrcodeapi.115.com/app/1.0/{app}/1.0/login/qrcode/
 
         .. note::
-            可以作为 ``staticmethod`` 使用
-
-        .. note::
-            如果报错“IP登录异常”，那么要到次日零点才能解禁，其中尤其是 `app="web"` 最容易遇到此问题
+            如果报错“IP登录异常”，那么要到次日零点才能解禁（用 VPN 可以绕过），其中尤其是 `app="web"` 最容易遇到此问题
 
         :param uid: 扫码的 uid
         :param app: 绑定的 app
@@ -1187,11 +1365,6 @@ class ClientRequestMixin:
 
         :return: 接口返回值
         """
-        if not isinstance(self, ClientRequestMixin):
-            uid = self
-        else:
-            assert uid is not None
-        request_kwargs.setdefault("cookies", None)
         if app == "desktop":
             app = "web"
         elif app in ("windows", "mac", "linux"):
@@ -1209,14 +1382,14 @@ class ClientRequestMixin:
                     headers["user-agent"] = "OfficePad/1.0.0"
             app = "ios"
         api = complete_url(f"/app/1.0/{app}/1.0/login/qrcode/", base_url=base_url)
-        payload = {"account": uid}
-        return get_request(async_, request_kwargs, self=self)(
-            url=api, method="POST", data=payload, **request_kwargs)
+        request, request_kwargs = get_request(
+            url=api, method="POST", data={"account": uid}, **request_kwargs)
+        return request(async_=async_, **request_kwargs)
 
     @overload
+    @staticmethod
     def login_qrcode_scan_status(
-        self: dict | ClientRequestMixin, 
-        payload: None | dict = None, 
+        payload: dict, 
         /, 
         base_url: str | Callable[[], str] = "https://qrcodeapi.115.com", 
         *, 
@@ -1225,9 +1398,9 @@ class ClientRequestMixin:
     ) -> dict:
         ...
     @overload
+    @staticmethod
     def login_qrcode_scan_status(
-        self: dict | ClientRequestMixin, 
-        payload: None | dict = None, 
+        payload: dict, 
         /, 
         base_url: str | Callable[[], str] = "https://qrcodeapi.115.com", 
         *, 
@@ -1235,9 +1408,9 @@ class ClientRequestMixin:
         **request_kwargs, 
     ) -> Coroutine[Any, Any, dict]:
         ...
+    @staticmethod
     def login_qrcode_scan_status(
-        self: dict | ClientRequestMixin, 
-        payload: None | dict = None, 
+        payload: dict, 
         /, 
         base_url: str | Callable[[], str] = "https://qrcodeapi.115.com", 
         *, 
@@ -1252,26 +1425,19 @@ class ClientRequestMixin:
 
             https://www.yuque.com/115yun/open/shtpzfhewv5nag11#lAsp2
 
-        .. note::
-            可以作为 ``staticmethod`` 使用
-
         :payload:
             - uid: str
             - time: int
             - sign: str
         """
         api = complete_url("/get/status/", base_url=base_url)
-        if not isinstance(self, ClientRequestMixin):
-            payload = self
-        else:
-            assert payload is not None
-        return get_request(async_, request_kwargs, self=self)(
+        request, request_kwargs = get_request(
             url=api, params=payload, **request_kwargs)
+        return request(async_=async_, **request_kwargs)
 
     @overload
+    @staticmethod
     def login_qrcode_token(
-        self: None | ClientRequestMixin = None, 
-        /, 
         app: str = "web", 
         base_url: str | Callable[[], str] = "https://qrcodeapi.115.com", 
         *, 
@@ -1280,9 +1446,8 @@ class ClientRequestMixin:
     ) -> dict:
         ...
     @overload
+    @staticmethod
     def login_qrcode_token(
-        self: None | ClientRequestMixin = None, 
-        /, 
         app: str = "web", 
         base_url: str | Callable[[], str] = "https://qrcodeapi.115.com", 
         *, 
@@ -1290,9 +1455,8 @@ class ClientRequestMixin:
         **request_kwargs, 
     ) -> Coroutine[Any, Any, dict]:
         ...
+    @staticmethod
     def login_qrcode_token(
-        self: None | ClientRequestMixin = None, 
-        /, 
         app: str = "web", 
         base_url: str | Callable[[], str] = "https://qrcodeapi.115.com", 
         *, 
@@ -1302,18 +1466,15 @@ class ClientRequestMixin:
         """获取登录二维码，扫码可用
 
         GET https://qrcodeapi.115.com/api/1.0/{app}/1.0/token/
-
-        .. note::
-            可以作为 ``staticmethod`` 使用
         """
         api = complete_url(f"/api/1.0/{app}/1.0/token/", base_url=base_url)
-        return get_request(async_, request_kwargs, self=self)(
-            url=api, **request_kwargs)
+        request, request_kwargs = get_request(url=api, **request_kwargs)
+        return request(async_=async_, **request_kwargs)
 
     @overload
+    @staticmethod
     def login_qrcode_token_open(
-        self: int | str | dict | ClientRequestMixin, 
-        payload: None | int | str | dict = None, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://qrcodeapi.115.com", 
         *, 
@@ -1322,9 +1483,9 @@ class ClientRequestMixin:
     ) -> dict:
         ...
     @overload
+    @staticmethod
     def login_qrcode_token_open(
-        self: int | str | dict | ClientRequestMixin, 
-        payload: None | int | str | dict = None, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://qrcodeapi.115.com", 
         *, 
@@ -1332,9 +1493,9 @@ class ClientRequestMixin:
         **request_kwargs, 
     ) -> Coroutine[Any, Any, dict]:
         ...
+    @staticmethod
     def login_qrcode_token_open(
-        self: int | str | dict | ClientRequestMixin, 
-        payload: None | int | str | dict = None, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://qrcodeapi.115.com", 
         *, 
@@ -1349,14 +1510,11 @@ class ClientRequestMixin:
 
             https://www.yuque.com/115yun/open/shtpzfhewv5nag11#WzRhM
 
-        .. note::
-            可以作为 ``staticmethod`` 使用
-
         .. tip::
             此接口也可用于检测 app_id 是否可用
 
         .. note::
-            同一个开放应用 id，最多同时有 3 个登入（目前可能又被调整），如果有新的登录，则自动踢掉较早的那一个
+            同一个开放应用 id，最多同时有 3 个登入，如果有新的登录，则自动踢掉较早的那一个
 
         .. note::
             code_challenge 默认用的字符串为 64 个 0，hash 算法为 md5
@@ -1406,23 +1564,20 @@ class ClientRequestMixin:
             - code_challenge_method: str = <default> 💡 计算 `code_challenge` 的 hash 算法，支持 "md5", "sha1", "sha256"
         """
         api = complete_url("/open/authDeviceCode", base_url=base_url)
-        if not isinstance(self, ClientRequestMixin):
-            payload = self
-        else:
-            assert payload is not None
         if isinstance(payload, (int, str)):
             payload = {
                 "client_id": payload, 
                 "code_challenge": _default_code_challenge, 
                 "code_challenge_method": _default_code_challenge_method, 
             }
-        return get_request(async_, request_kwargs, self=self)(
+        request, request_kwargs = get_request(
             url=api, method="POST", data=payload, **request_kwargs)
+        return request(async_=async_, **request_kwargs)
 
     @overload
+    @staticmethod
     def login_refresh_token_open(
-        self: str | dict | ClientRequestMixin, 
-        payload: None | str | dict = None, 
+        payload: str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://qrcodeapi.115.com", 
         *, 
@@ -1431,9 +1586,9 @@ class ClientRequestMixin:
     ) -> dict:
         ...
     @overload
+    @staticmethod
     def login_refresh_token_open(
-        self: str | dict | ClientRequestMixin, 
-        payload: None | str | dict = None, 
+        payload: str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://qrcodeapi.115.com", 
         *, 
@@ -1441,9 +1596,9 @@ class ClientRequestMixin:
         **request_kwargs, 
     ) -> Coroutine[Any, Any, dict]:
         ...
+    @staticmethod
     def login_refresh_token_open(
-        self: str | dict | ClientRequestMixin, 
-        payload: None | str | dict = None, 
+        payload: str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://qrcodeapi.115.com", 
         *, 
@@ -1460,21 +1615,15 @@ class ClientRequestMixin:
 
             https://www.yuque.com/115yun/open/opnx8yezo4at2be6
 
-        .. note::
-            可以作为 ``staticmethod`` 使用
-
         :payload:
             - refresh_token: str
         """
         api = complete_url("/open/refreshToken", base_url=base_url)
-        if not isinstance(self, ClientRequestMixin):
-            payload = self
-        else:
-            assert payload is not None
         if isinstance(payload, str):
             payload = {"refresh_token": payload}
-        return get_request(async_, request_kwargs, self=self)(
+        request, request_kwargs = get_request(
             url=api, method="POST", data=payload, **request_kwargs)
+        return request(async_=async_, **request_kwargs)
 
     @overload
     @classmethod
@@ -1655,7 +1804,7 @@ class ClientRequestMixin:
     def login_with_app_id(
         cls, 
         /, 
-        app_id: int | str = 100195125, 
+        app_id: int, 
         console_qrcode: bool = True, 
         base_url: str | Callable[[], str] = "https://qrcodeapi.115.com", 
         *, 
@@ -1668,7 +1817,7 @@ class ClientRequestMixin:
     def login_with_app_id(
         cls, 
         /, 
-        app_id: int | str = 100195125, 
+        app_id: int, 
         console_qrcode: bool = True, 
         base_url: str | Callable[[], str] = "https://qrcodeapi.115.com", 
         *, 
@@ -1680,7 +1829,7 @@ class ClientRequestMixin:
     def login_with_app_id(
         cls, 
         /, 
-        app_id: int | str = 100195125, 
+        app_id: int, 
         console_qrcode: bool = True, 
         base_url: str | Callable[[], str] = "https://qrcodeapi.115.com", 
         *, 
@@ -1756,7 +1905,80 @@ class ClientRequestMixin:
             )
         return run_gen_step(gen_step, async_)
 
+    ########## Upload API ##########
 
+    @overload
+    @staticmethod
+    def upload_gettoken(
+        base_url: str | Callable[[], str] = "https://uplb.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    @staticmethod
+    def upload_gettoken(
+        base_url: str | Callable[[], str] = "https://uplb.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    @staticmethod
+    def upload_gettoken(
+        base_url: str | Callable[[], str] = "https://uplb.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """获取阿里云 OSS 的 token（上传凭证）
+
+        GET https://uplb.115.com/3.0/gettoken.php
+        """
+        api = complete_url("/3.0/gettoken.php", base_url=base_url)
+        request, request_kwargs = get_request(url=api, **request_kwargs)
+        return request(async_=async_, **request_kwargs)
+
+    @overload
+    @staticmethod
+    def upload_url(
+        base_url: str | Callable[[], str] = "https://uplb.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    @staticmethod
+    def upload_url(
+        base_url: str | Callable[[], str] = "https://uplb.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    @staticmethod
+    def upload_url(
+        base_url: str | Callable[[], str] = "https://uplb.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """获取用于上传的一些 http 接口，此接口具有一定幂等性，请求一次，然后把响应记下来即可
+
+        GET https://uplb.115.com/3.0/getuploadinfo.php
+
+        :response:
+            - endpoint: 此接口用于上传文件到阿里云 OSS 
+            - gettokenurl: 上传前需要用此接口获取 token
+        """
+        api = complete_url("/3.0/getuploadinfo.php", base_url=base_url)
+        request, request_kwargs = get_request(url=api, **request_kwargs)
+        return request(async_=async_, **request_kwargs)
+
+
+# TODO: 支持对 access_token 和 refresh_token 保存到本地，就像 cookies 一样
 class P115OpenClient(ClientRequestMixin):
     """115 的客户端对象
 
@@ -1764,24 +1986,23 @@ class P115OpenClient(ClientRequestMixin):
 
         https://www.yuque.com/115yun/open
 
-    :param app_id_or_refresh_token: 申请到的 AppID 或 refresh_token
-
-        - 如果是 int，视为 AppID
-        - 如果是 str，如果可以解析为数字，则视为 AppID，否则视为 refresh_token
-
-    :param console_qrcode: 当输入为 AppID 时，进行扫码。如果为 True，则在命令行输出二维码，否则在浏览器中打开
+    :param access_token: 访问令牌
+    :param refresh_token: 刷新令牌
+    :param app_id: 授权的 open 应用的 AppID
+    :param console_qrcode: 需要扫码登录时，是否在命令行输出二维码
     """
-    app_id: int | str
-    refresh_token: str
-
     def __init__(
         self, 
         /, 
-        app_id_or_refresh_token: int | str, 
+        access_token: str = "", 
+        refresh_token: str = "", 
+        app_id: int = 0, 
         console_qrcode: bool = True, 
     ):
         self.init(
-            app_id_or_refresh_token, 
+            access_token=access_token, 
+            refresh_token=refresh_token, 
+            app_id=app_id, 
             console_qrcode=console_qrcode, 
             instance=self, 
         )
@@ -1794,95 +2015,79 @@ class P115OpenClient(ClientRequestMixin):
 
     def __repr__(self, /) -> str:
         cls = type(self)
-        if app_id := getattr(self, "app_id", 0):
-            return f"<{cls.__module__}.{cls.__qualname__}({app_id=}) at {hex(id(self))}>"
-        else:
-            return f"<{cls.__module__}.{cls.__qualname__} at {hex(id(self))}>"
+        return f"<{cls.__module__}.{cls.__qualname__}(app_id={self.app_id}) at {hex(id(self))}>"
 
     @overload
     @classmethod
     def init(
         cls, 
         /, 
-        app_id_or_refresh_token: int | str, 
+        access_token: str = "", 
+        refresh_token: str = "", 
+        app_id: int = 0, 
         console_qrcode: bool = True, 
         instance: None | Self = None, 
         *, 
         async_: Literal[False] = False, 
         **request_kwargs, 
-    ) -> P115OpenClient:
+    ) -> Self:
         ...
     @overload
     @classmethod
     def init(
         cls, 
         /, 
-        app_id_or_refresh_token: int | str, 
+        access_token: str = "", 
+        refresh_token: str = "", 
+        app_id: int = 0, 
         console_qrcode: bool = True, 
         instance: None | Self = None, 
         *, 
         async_: Literal[True], 
         **request_kwargs, 
-    ) -> Coroutine[Any, Any, P115OpenClient]:
+    ) -> Coroutine[Any, Any, Self]:
         ...
     @classmethod
     def init(
         cls, 
         /, 
-        app_id_or_refresh_token: int | str, 
+        access_token: str = "", 
+        refresh_token: str = "", 
+        app_id: int = 0, 
         console_qrcode: bool = True, 
         instance: None | Self = None, 
         *, 
         async_: Literal[False, True] = False, 
         **request_kwargs, 
-    ) -> P115OpenClient | Coroutine[Any, Any, P115OpenClient]:
+    ) -> Self | Coroutine[Any, Any, Self]:
         def gen_step():
             if instance is None:
                 self = cls.__new__(cls)
             else:
                 self = instance
-            if isinstance(app_id_or_refresh_token, str) and (
-                app_id_or_refresh_token.startswith("0") or 
-                app_id_or_refresh_token.strip(digits)
-            ):
-                resp = yield self.login_refresh_token_open(
-                    app_id_or_refresh_token, 
-                    async_=async_, 
-                    **request_kwargs, 
-                )
-            else:
-                app_id = self.app_id = app_id_or_refresh_token
-                resp = yield self.login_with_app_id(
-                    app_id, 
-                    console_qrcode=console_qrcode, 
-                    async_=async_, 
-                    **request_kwargs, 
-                )
-            check_response(resp)
-            data = resp["data"]
-            self.refresh_token = data["refresh_token"]
-            self.access_token = data["access_token"]
+            self.app_id = app_id
+            self.access_token = access_token
+            self.refresh_token = refresh_token
+            if not access_token:
+                if refresh_token:
+                    resp = yield self.login_refresh_token_open(
+                        refresh_token, 
+                        async_=async_, 
+                        **request_kwargs, 
+                    )
+                else:
+                    resp = yield self.login_with_app_id(
+                        app_id or 100195125, 
+                        console_qrcode=console_qrcode, 
+                        async_=async_, 
+                        **request_kwargs, 
+                    )
+                check_response(resp)
+                data = resp["data"]
+                self.refresh_token = data["refresh_token"]
+                self.access_token  = data["access_token"]
             return self
         return run_gen_step(gen_step, async_)
-
-    @classmethod
-    def from_token(cls, /, access_token: str, refresh_token: str) -> P115OpenClient:
-        self = cls.__new__(cls)
-        self.access_token = access_token
-        self.refresh_token = refresh_token
-        return self
-
-    @property
-    def access_token(self, /) -> str:
-        try:
-            return self.__dict__["access_token"]
-        except KeyError as e:
-            raise AttributeError("access_token") from e
-
-    @access_token.setter
-    def access_token(self, token, /):
-        self.headers["authorization"] = "Bearer " + token
-        self.__dict__["access_token"] = token
 
     @locked_cacheproperty
     def pickcode_stable_point(self, /) -> str:
@@ -1891,24 +2096,28 @@ class P115OpenClient(ClientRequestMixin):
         .. todo::
             不动点可能和用户 id 有某种联系，但目前样本不足，难以推断，以后再尝试分析
         """
-        user_id = str(self.user_id)
-        pickcode_points_json = _CACHE_DIR / "pickcode_stable_points.json"
+        from .util import get_stable_point, set_stable_point
         try:
-            cache = loads(pickcode_points_json.open("rb").read())
-        except OSError:
-            cache = {}
-        if point := cache.get(user_id):
-            return point
-        else:
+            return get_stable_point(self.user_id)
+        except KeyError:
             resp = self.fs_files({"show_dir": 1, "limit": 1, "cid": 0})
             check_response(resp)
-            info = resp["data"][0]
-            point = cache[user_id] = get_stable_point(info["pc"])
-            try:
-                pickcode_points_json.open("wb").write(dumps(cache))
-            except Exception:
-                pass
-            return point
+            if resp["data"]:
+                info = resp["data"][0]
+                pickcode = info["pc"]
+            else:
+                if hasattr(self, "upload_file_sample"):
+                    resp = self.upload_file_sample(b"", "U_120_0")
+                    check_response(resp)
+                    pickcode = resp["data"]["pick_code"]
+                else:
+                    resp = self.upload_file(b"", filename="test")
+                    pickcode = resp["data"]["pickcode"]
+                    try:
+                        self.fs_delete(self.to_id(pickcode))
+                    except Exception:
+                        pass
+            return set_stable_point(self.user_id, pickcode)
 
     @overload
     def refresh_access_token(
@@ -1941,12 +2150,20 @@ class P115OpenClient(ClientRequestMixin):
                     async_=async_, 
                     **request_kwargs, 
                 )
-            elif hasattr(self, "login_with_open") and (app_id := getattr(self, "app_id", 0)):
-                resp = yield self.login_with_open(
-                    app_id, 
-                    async_=async_, 
-                    **request_kwargs, 
-                )
+            elif app_id := self.app_id:
+                if hasattr(self, "login_with_open"):
+                    resp = yield self.login_with_open(
+                        app_id, 
+                        async_=async_, 
+                        **request_kwargs, 
+                    )
+                else:
+                    resp = yield self.login_with_app_id(
+                        app_id, 
+                        console_qrcode=True, 
+                        async_=async_, 
+                        **request_kwargs, 
+                    )
             else:
                 raise RuntimeError("no `refresh_token` or `app_id` provided")
             check_response(resp)
@@ -3635,8 +3852,8 @@ class P115OpenClient(ClientRequestMixin):
     ########## Upload API ##########
 
     @overload
-    def upload_gettoken(
-        self: None | ClientRequestMixin = None, 
+    def upload_gettoken_open(
+        self, 
         /, 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
         *, 
@@ -3645,8 +3862,8 @@ class P115OpenClient(ClientRequestMixin):
     ) -> dict:
         ...
     @overload
-    def upload_gettoken(
-        self: None | ClientRequestMixin = None, 
+    def upload_gettoken_open(
+        self, 
         /, 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
         *, 
@@ -3654,8 +3871,8 @@ class P115OpenClient(ClientRequestMixin):
         **request_kwargs, 
     ) -> Coroutine[Any, Any, dict]:
         ...
-    def upload_gettoken(
-        self: None | ClientRequestMixin = None, 
+    def upload_gettoken_open(
+        self, 
         /, 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
         *, 
@@ -3669,16 +3886,9 @@ class P115OpenClient(ClientRequestMixin):
         .. admonition:: Reference
 
             https://www.yuque.com/115yun/open/kzacvzl0g7aiyyn4
-
-        .. note::
-            可以作为 ``staticmethod`` 使用
         """
-        if isinstance(self, P115OpenClient):
-            api = complete_url("/open/upload/get_token", base_url)
-            return self.request(url=api, async_=async_, **request_kwargs)
-        else:
-            api = "https://uplb.115.com/3.0/gettoken.php"
-            return get_request(async_, request_kwargs, self=self)(url=api, **request_kwargs)
+        api = complete_url("/open/upload/get_token", base_url)
+        return self.request(url=api, async_=async_, **request_kwargs)
 
     @overload
     def upload_init(
@@ -4127,7 +4337,6 @@ class P115OpenClient(ClientRequestMixin):
     recyclebin_clean_open = recyclebin_clean
     recyclebin_list_open = recyclebin_list
     recyclebin_revert_open = recyclebin_revert
-    upload_gettoken_open = upload_gettoken
     upload_init_open = upload_init
     upload_resume_open = upload_resume
     user_info_open = user_info
@@ -4151,6 +4360,7 @@ class P115OpenClient(ClientRequestMixin):
 
         :param id: 可能是 id 或 pickcode
         :param prefix: 前缀
+        :param stable_point: 提取码的本征值，不同用户的值不同，你也可以直接传一个此用户的有效 pickcode
 
         :return: pickcode
         """
@@ -4167,7 +4377,7 @@ class P115Client(P115OpenClient):
     .. note::
         目前允许 1 个用户同时登录多个开放平台应用（用 AppID 区别），也允许多次授权登录同 1 个应用
 
-        同一个开放应用 id，最多同时有 3 个登入（目前可能又被调整），如果有新的登录，则自动踢掉较早的那一个
+        同一个开放应用 id，最多同时有 3 个登入，如果有新的登录，则自动踢掉较早的那一个
 
         目前不允许短时间内再次用 ``refresh_token`` 刷新 ``access_token``，但你可以用登录的方式再次授权登录以获取 ``access_token``，即可不受频率限制
 
@@ -4181,14 +4391,8 @@ class P115Client(P115OpenClient):
         - 如果是 collections.abc.Mapping，则是一堆 cookie 的名称到值的映射
         - 如果是 collections.abc.Iterable，则其中每一条都视为单个 cookie
 
-    :param check_for_relogin: 网页请求抛出异常时，判断是否要重新登录并重试
-
-        - 如果为 False，则不重试
-        - 如果为 True，则自动通过判断 HTTP 响应码为 405 时重新登录并重试
-        - 如果为 collections.abc.Callable，则调用以判断，当返回值为 bool 类型且值为 True，或者值为 405 时重新登录，然后循环此流程，直到成功或不可重试
-
-    :param ensure_cookies: 检查以确保 cookies 是有效的，如果失效，就重新登录
     :param app: 重新登录时人工扫二维码后绑定的 `app` （或者叫 `device`），如果不指定，则根据 cookies 的 UID 字段来确定，如果不能确定，则用 "qandroid"
+    :param app_id: 授权的 open 应用的 AppID
     :param console_qrcode: 在命令行输出二维码，否则在浏览器中打开
 
     -----
@@ -4251,52 +4455,29 @@ class P115Client(P115OpenClient):
     | 21    | S1       | harmony    | 115_鸿蒙端           |
     +-------+----------+------------+----------------------+
     """
-    app_id: int | str
-    refresh_token: str
-
     def __init__(
         self, 
         /, 
         cookies: None | str | PathLike | Mapping[str, str] | Iterable[Mapping | Cookie | Morsel] = None, 
-        check_for_relogin: bool | Callable[[BaseException], bool | int] = False, 
-        ensure_cookies: bool = False, 
-        app: None | str = None, 
+        app: str = "", 
+        app_id: int = 0, 
         console_qrcode: bool = True, 
     ):
         self.init(
             cookies=cookies, 
-            check_for_relogin=check_for_relogin, 
-            ensure_cookies=ensure_cookies, 
             app=app, 
+            app_id=app_id, 
             console_qrcode=console_qrcode, 
             instance=self, 
         )
 
     def __repr__(self, /) -> str:
         cls = type(self)
-        if uid := self.cookies_str.uid:
-            return f"<{cls.__module__}.{cls.__qualname__}(UID={uid!r}, app={self.login_app()!r}) at {hex(id(self))}>"
-        return f"<{cls.__module__}.{cls.__qualname__} at {hex(id(self))}>"
-
-    @locked_cacheproperty
-    def user_key(self, /) -> str:
-        user_id = str(self.user_id)
-        userkey_points_json = _CACHE_DIR / "userkey_stable_points.json"
         try:
-            cache = loads(userkey_points_json.open("rb").read())
-        except OSError:
-            cache = {}
-        if point := cache.get(user_id):
-            return point
-        else:
-            resp = self.upload_key()
-            check_response(resp)
-            point = cache[user_id] = resp["data"]["userkey"]
-            try:
-                userkey_points_json.open("wb").write(dumps(cache))
-            except Exception:
-                pass
-            return point
+            user_id = self.user_id
+        except LookupError:
+            user_id = 0
+        return f"<{cls.__module__}.{cls.__qualname__}(user_id={user_id}, app={self.login_app()!r}, app_id={self.app_id}) at {hex(id(self))}>"
 
     @overload # type: ignore
     @classmethod
@@ -4304,9 +4485,8 @@ class P115Client(P115OpenClient):
         cls, 
         /, 
         cookies: None | str | PathLike | Mapping[str, str] | Iterable[Mapping | Cookie | Morsel] = None, 
-        check_for_relogin: bool | Callable[[BaseException], bool | int] = False, 
-        ensure_cookies: bool = False, 
-        app: None | str = None, 
+        app: str = "", 
+        app_id: int = 0, 
         console_qrcode: bool = True, 
         instance: None | Self = None, 
         *, 
@@ -4320,9 +4500,8 @@ class P115Client(P115OpenClient):
         cls, 
         /, 
         cookies: None | str | PathLike | Mapping[str, str] | Iterable[Mapping | Cookie | Morsel] = None, 
-        check_for_relogin: bool | Callable[[BaseException], bool | int] = False, 
-        ensure_cookies: bool = False, 
-        app: None | str = None, 
+        app: str = "", 
+        app_id: int = 0, 
         console_qrcode: bool = True, 
         instance: None | Self = None, 
         *, 
@@ -4335,9 +4514,8 @@ class P115Client(P115OpenClient):
         cls, 
         /, 
         cookies: None | str | PathLike | Mapping[str, str] | Iterable[Mapping | Cookie | Morsel] = None, 
-        check_for_relogin: bool | Callable[[BaseException], bool | int] = False, 
-        ensure_cookies: bool = False, 
-        app: None | str = None, 
+        app: str = "", 
+        app_id: int = 0, 
         console_qrcode: bool = True, 
         instance: None | Self = None, 
         *, 
@@ -4349,30 +4527,22 @@ class P115Client(P115OpenClient):
                 self = cls.__new__(cls)
             else:
                 self = instance
+            self.app_id = app_id
             if cookies is None:
                 yield self.login(
-                    app, 
+                    app or "alipaymini", 
                     console_qrcode=console_qrcode, 
                     async_=async_, 
                     **request_kwargs, 
                 )
-            else:
-                if isinstance(cookies, PathLike):
-                    if isinstance(cookies, PurePath) and hasattr(cookies, "open"):
-                        self.cookies_path = cookies
-                    else:
-                        self.cookies_path = Path(fsdecode(cookies))
-                    self._read_cookies()
-                elif cookies:
-                    setattr(self, "cookies", cookies)
-                if ensure_cookies:
-                    yield self.login(
-                        app, 
-                        console_qrcode=console_qrcode, 
-                        async_=async_, 
-                        **request_kwargs, 
-                    )
-            setattr(self, "check_for_relogin", check_for_relogin)
+            elif isinstance(cookies, PathLike):
+                if isinstance(cookies, PurePath) and hasattr(cookies, "open"):
+                    self.cookies_path = cookies
+                else:
+                    self.cookies_path = Path(fsdecode(cookies))
+                self._read_cookies()
+            elif cookies:
+                self.update_cookies(cookies)
             return self
         return run_gen_step(gen_step, async_)
 
@@ -4381,34 +4551,21 @@ class P115Client(P115OpenClient):
         cls, 
         /, 
         path: bytes | str | PathLike = Path("~/115-cookies.txt").expanduser(), 
-        check_for_relogin: bool | Callable[[BaseException], bool | int] = False, 
+        app_id: int = 0, 
     ) -> P115Client:
         if not isinstance(path, PurePath):
             path = Path(fsdecode(path))
-        return cls(path, check_for_relogin=check_for_relogin)
+        return cls(path, app_id=app_id)
 
     @locked_cacheproperty
-    def request_lock(self, /) -> Lock:
-        return Lock()
-
-    @locked_cacheproperty
-    def request_alock(self, /) -> AsyncLock:
-        return AsyncLock()
-
-    @property
-    def check_for_relogin(self, /) -> None | Callable[[BaseException], bool | int]:
-        return self.__dict__.get("check_for_relogin")
-
-    @check_for_relogin.setter
-    def check_for_relogin(self, call: None | bool | Callable[[BaseException], bool | int], /):
-        if call is None:
-            self.__dict__["check_for_relogin"] = None
-        elif call is False:
-            self.__dict__.pop("check_for_relogin", None)
-        else:
-            if call is True:
-                call = default_check_for_relogin
-            self.__dict__["check_for_relogin"] = call
+    def user_key(self, /) -> str:
+        from .util import get_user_key, set_user_key
+        try:
+            return get_user_key(self.user_id)
+        except KeyError:
+            resp = self.upload_info()
+            check_response(resp)
+            return set_user_key(self.user_id, resp["userkey"])
 
     @overload
     def login(
@@ -4536,7 +4693,7 @@ class P115Client(P115OpenClient):
                         async_=async_, 
                         **request_kwargs, 
                     )
-            setattr(self, "cookies", resp["data"]["cookie"])
+            self.update_cookies(resp["data"]["cookie"])
             return self
         return run_gen_step(gen_step, async_)
 
@@ -4713,7 +4870,7 @@ class P115Client(P115OpenClient):
     def login_info_open(
         self, 
         /, 
-        app_id: int | str = 100195125, 
+        app_id: int = 0, 
         *, 
         async_: Literal[False] = False, 
         **request_kwargs, 
@@ -4723,7 +4880,7 @@ class P115Client(P115OpenClient):
     def login_info_open(
         self, 
         /, 
-        app_id: int | str = 100195125, 
+        app_id: int = 0, 
         *, 
         async_: Literal[True], 
         **request_kwargs, 
@@ -4732,7 +4889,7 @@ class P115Client(P115OpenClient):
     def login_info_open(
         self, 
         /, 
-        app_id: int | str = 100195125, 
+        app_id: int = 0, 
         *, 
         async_: Literal[False, True] = False, 
         **request_kwargs, 
@@ -4745,6 +4902,10 @@ class P115Client(P115OpenClient):
 
         :return: 接口返回值
         """
+        if not app_id:
+            app_id = self.app_id
+        if not app_id:
+            app_id = 100195125
         def gen_step():
             resp = yield self.login_qrcode_token_open(app_id, async_=async_, **request_kwargs)
             check_response(resp)
@@ -4763,7 +4924,7 @@ class P115Client(P115OpenClient):
     def login_with_open(
         self, 
         /, 
-        app_id: int | str = 100195125, 
+        app_id: int = 0, 
         *, 
         show_warning: bool = False, 
         async_: Literal[False] = False, 
@@ -4774,7 +4935,7 @@ class P115Client(P115OpenClient):
     def login_with_open(
         self, 
         /, 
-        app_id: int | str = 100195125, 
+        app_id: int = 0, 
         *, 
         show_warning: bool = False, 
         async_: Literal[True], 
@@ -4784,7 +4945,7 @@ class P115Client(P115OpenClient):
     def login_with_open(
         self, 
         /, 
-        app_id: int | str = 100195125, 
+        app_id: int = 0, 
         *, 
         show_warning: bool = False, 
         async_: Literal[False, True] = False, 
@@ -4793,7 +4954,7 @@ class P115Client(P115OpenClient):
         """登录某个开放接口应用
 
         .. note::
-            同一个开放应用 id，最多同时有 3 个登入（目前可能又被调整），如果有新的登录，则自动踢掉较早的那一个
+            同一个开放应用 id，最多同时有 3 个登入，如果有新的登录，则自动踢掉较早的那一个
 
         :param app_id: AppID
         :param show_warning: 是否显示提示信息
@@ -4802,6 +4963,10 @@ class P115Client(P115OpenClient):
 
         :return: 接口返回值
         """
+        if not app_id:
+            app_id = self.app_id
+        if not app_id:
+            app_id = 100195125
         def gen_step():
             resp = yield self.login_qrcode_token_open(app_id, async_=async_, **request_kwargs)
             check_response(resp)
@@ -4821,7 +4986,6 @@ class P115Client(P115OpenClient):
         /, 
         app: None | str = None, 
         replace: bool | Self = False, 
-        check_for_relogin: bool | Callable[[BaseException], bool | int] = False, 
         show_warning: bool = False, 
         *, 
         async_: Literal[False] = False, 
@@ -4834,7 +4998,6 @@ class P115Client(P115OpenClient):
         /, 
         app: None | str = None, 
         replace: bool | Self = False, 
-        check_for_relogin: bool | Callable[[BaseException], bool | int] = False, 
         show_warning: bool = False, 
         *, 
         async_: Literal[True], 
@@ -4846,7 +5009,6 @@ class P115Client(P115OpenClient):
         /, 
         app: None | str = None, 
         replace: bool | Self = False, 
-        check_for_relogin: bool | Callable[[BaseException], bool | int] = False, 
         show_warning: bool = False, 
         *, 
         async_: Literal[False, True] = False, 
@@ -4867,12 +5029,6 @@ class P115Client(P115OpenClient):
             - 如果为 ``P115Client``, 则更新到此对象
             - 如果为 True，则更新到 `self`
             - 如果为 False，否则返回新的 ``P115Client`` 对象
-
-        :param check_for_relogin: 网页请求抛出异常时，判断是否要重新登录并重试
-
-            - 如果为 False，则不重试
-            - 如果为 True，则自动通过判断 HTTP 响应码为 405 时重新登录并重试
-            - 如果为 collections.abc.Callable，则调用以判断，当返回值为 bool 类型且值为 True，或者值为 405 时重新登录，然后循环此流程，直到成功或不可重试
 
         :param show_warning: 是否显示提示信息
         :param async_: 是否异步
@@ -4955,12 +5111,12 @@ class P115Client(P115OpenClient):
             ssoent = self.login_ssoent
             if isinstance(replace, P115Client):
                 inst = replace
-                setattr(inst, "cookies", cookies)
+                inst.update_cookies(cookies)
             elif replace:
                 inst = self
-                setattr(inst, "cookies", cookies)
+                inst.update_cookies(cookies)
             else:
-                inst = type(self)(cookies, check_for_relogin=check_for_relogin)
+                inst = type(self)(cookies)
             if self is not inst and ssoent == inst.login_ssoent:
                 warn(f"login with the same ssoent {ssoent!r}, {self!r} will expire within 60 seconds", category=P115Warning)
             return inst
@@ -4970,34 +5126,10 @@ class P115Client(P115OpenClient):
     def login_another_open(
         self, 
         /, 
-        app_id: int | str = 100195125, 
-        *, 
-        replace: Literal[True] | Self, 
+        app_id: int = 0, 
+        replace: bool | P115OpenClient = False, 
         show_warning: bool = False, 
-        async_: Literal[False] = False, 
-        **request_kwargs, 
-    ) -> Self:
-        ...
-    @overload
-    def login_another_open(
-        self, 
-        /, 
-        app_id: int | str = 100195125, 
         *, 
-        replace: Literal[True] | Self, 
-        show_warning: bool = False, 
-        async_: Literal[True], 
-        **request_kwargs, 
-    ) -> Coroutine[Any, Any, Self]:
-        ...
-    @overload
-    def login_another_open(
-        self, 
-        /, 
-        app_id: int | str = 100195125, 
-        *, 
-        replace: Literal[False] = False, 
-        show_warning: bool = False, 
         async_: Literal[False] = False, 
         **request_kwargs, 
     ) -> P115OpenClient:
@@ -5006,10 +5138,10 @@ class P115Client(P115OpenClient):
     def login_another_open(
         self, 
         /, 
-        app_id: int | str = 100195125, 
-        *, 
-        replace: Literal[False] = False, 
+        app_id: int = 0, 
+        replace: bool | P115OpenClient = False, 
         show_warning: bool = False, 
+        *, 
         async_: Literal[True], 
         **request_kwargs, 
     ) -> Coroutine[Any, Any, P115OpenClient]:
@@ -5017,17 +5149,17 @@ class P115Client(P115OpenClient):
     def login_another_open(
         self, 
         /, 
-        app_id: int | str = 100195125, 
-        *, 
-        replace: bool | Self = False, 
+        app_id: int = 0, 
+        replace: bool | P115OpenClient = False, 
         show_warning: bool = False, 
+        *, 
         async_: Literal[False, True] = False, 
         **request_kwargs, 
-    ) -> P115OpenClient | Coroutine[Any, Any, P115OpenClient] | Self | Coroutine[Any, Any, Self]:
+    ) -> P115OpenClient | Coroutine[Any, Any, P115OpenClient]:
         """登录某个开放接口应用
 
         .. note::
-            同一个开放应用 id，最多同时有 3 个登入（目前可能又被调整），如果有新的登录，则自动踢掉较早的那一个
+            同一个开放应用 id，最多同时有 3 个登入，如果有新的登录，则自动踢掉较早的那一个
 
         :param app_id: AppID
         :param replace: 替换某个 client 对象的 `access_token` 和 `refresh_token`
@@ -5042,6 +5174,10 @@ class P115Client(P115OpenClient):
 
         :return: 客户端实例
         """
+        if not app_id:
+            app_id = self.app_id
+        if not app_id:
+            app_id = 100195125
         def gen_step():
             resp = yield self.login_with_open(
                 app_id, 
@@ -5052,14 +5188,14 @@ class P115Client(P115OpenClient):
             check_response(resp)
             data = resp["data"]
             if replace is False:
-                inst: P115OpenClient | Self = P115OpenClient.from_token(data["access_token"], data["refresh_token"])
+                inst: P115OpenClient = P115OpenClient(data["access_token"], data["refresh_token"])
             else:
                 if replace is True:
                     inst = self
                 else:
                     inst = replace
                 inst.refresh_token = data["refresh_token"]
-                inst.access_token = data["access_token"]
+                inst.access_token  = data["access_token"]
             inst.app_id = app_id
             return inst
         return run_gen_step(gen_step, async_)
@@ -5071,7 +5207,6 @@ class P115Client(P115OpenClient):
         /, 
         uid: str, 
         app: str = "alipaymini", 
-        check_for_relogin: bool | Callable[[BaseException], bool | int] = False, 
         *, 
         async_: Literal[False] = False, 
         **request_kwargs, 
@@ -5084,7 +5219,6 @@ class P115Client(P115OpenClient):
         /, 
         uid: str, 
         app: str = "alipaymini", 
-        check_for_relogin: bool | Callable[[BaseException], bool | int] = False, 
         *, 
         async_: Literal[True], 
         **request_kwargs, 
@@ -5096,7 +5230,6 @@ class P115Client(P115OpenClient):
         /, 
         uid: str, 
         app: str = "alipaymini", 
-        check_for_relogin: bool | Callable[[BaseException], bool | int] = False, 
         *, 
         async_: Literal[False, True] = False, 
         **request_kwargs, 
@@ -5110,12 +5243,6 @@ class P115Client(P115OpenClient):
 
         :param uid: 登录二维码的 uid
         :param app: 待绑定的设备名称
-        :param check_for_relogin: 网页请求抛出异常时，判断是否要重新登录并重试
-
-            - 如果为 False，则不重试
-            - 如果为 True，则自动通过判断 HTTP 响应码为 405 时重新登录并重试
-            - 如果为 collections.abc.Callable，则调用以判断，当返回值为 bool 类型且值为 True，或者值为 405 时重新登录，然后循环此流程，直到成功或不可重试
-
         :param async_: 是否异步
         :param request_kwargs: 其余请求参数
 
@@ -5190,371 +5317,7 @@ class P115Client(P115OpenClient):
             )
             check_response(resp)
             cookies = resp["data"]["cookie"]
-            return cls(cookies, check_for_relogin=check_for_relogin)
-        return run_gen_step(gen_step, async_)
-
-    def request(
-        self, 
-        /, 
-        url: str, 
-        method: str = "GET", 
-        payload: Any = None, 
-        *, 
-        ecdh_encrypt: bool = False, 
-        fetch_cert_headers: None | Callable[..., Mapping] | Callable[..., Awaitable[Mapping]] = None, 
-        revert_cert_headers: None | Callable[[Mapping], Any] = None, 
-        request: None | Callable = None, 
-        async_: Literal[False, True] = False, 
-        **request_kwargs, 
-    ):
-        """执行网络请求
-
-        :param url: HTTP 的请求链接
-        :param method: HTTP 的请求方法
-        :param payload: HTTP 的请求载体（如果 `method` 是 "POST"，则作为请求体，否则作为查询参数）
-        :param ecdh_encrypt: 是否使用 ecdh 算法进行加密（返回值需要解密）
-        :param fetch_cert_headers: 调用以获取认证信息头
-        :param revert_cert_headers: 调用以退还认证信息头
-        :param request: HTTP 请求调用，如果为 None，则用默认设置
-            如果传入调用，则必须至少能接受以下几个关键词参数：
-
-            - url:     HTTP 的请求链接
-            - method:  HTTP 的请求方法
-            - params:  HTTP 的请求链接附加的查询参数
-            - data:    HTTP 的请求体
-            - json:    JSON 数据（往往未被序列化）作为请求体
-            - files:   要用 multipart 上传的若干文件
-            - headers: HTTP 的请求头
-            - follow_redirects: 是否跟进重定向，默认值为 True
-            - raise_for_status: 是否对响应码 >= 400 时抛出异常
-            - cookies: 至少能接受 ``http.cookiejar.CookieJar`` 和 ``http.cookies.BaseCookie``，会因响应头的 "set-cookie" 而更新
-            - parse:   解析 HTTP 响应的方法，默认会构建一个 Callable，会把响应的字节数据视为 JSON 进行反序列化解析
-
-                - 如果为 None，则直接把响应对象返回
-                - 如果为 ...(Ellipsis)，则把响应对象关闭后将其返回
-                - 如果为 True，则根据响应头来确定把响应得到的字节数据解析成何种格式（反序列化），请求也会被自动关闭
-                - 如果为 False，则直接返回响应得到的字节数据，请求也会被自动关闭
-                - 如果为 Callable，则使用此调用来解析数据，接受 1-2 个位置参数，并把解析结果返回给 `request` 的调用者，请求也会被自动关闭
-                    - 如果只接受 1 个位置参数，则把响应对象传给它
-                    - 如果能接受 2 个位置参数，则把响应对象和响应得到的字节数据（响应体）传给它
-
-        :param async_: 是否异步
-        :param request_kwargs: 其余请求参数
-
-        :return: 直接返回 `request` 执行请求后的返回值
-
-        .. note:: 
-            `request` 可以由不同的请求库来提供，下面是封装了一些模块
-
-            1. `httpcore_request <https://pypi.org/project/httpcore_request/>`_，由 `httpcore <https://pypi.org/project/httpcore/>`_ 封装，支持同步和异步请求
-
-                .. code:: python
-
-                    from httpcore_request import request
-
-            2. `httpx_request <https://pypi.org/project/httpx_request/>`_，由 `httpx <https://pypi.org/project/httpx/>`_ 封装，支持同步和异步请求
-
-                .. code:: python
-
-                    from httpx_request import request
-
-            3. `http_client_request <https://pypi.org/project/http_client_request/>`_，由 `http.client <https://docs.python.org/3/library/http.client.html>`_ 封装，支持同步请求
-
-                .. code:: python
-
-                    from http_client_request import request
-
-            4. `python-urlopen <https://pypi.org/project/python-urlopen/>`_，由 `urllib.request.urlopen <https://docs.python.org/3/library/urllib.request.html#urllib.request.urlopen>`_ 封装，支持同步请求
-
-                .. code:: python
-
-                    from urlopen import request
-
-            5. `urllib3_request <https://pypi.org/project/urllib3_request/>`_，由 `urllib3 <https://pypi.org/project/urllib3/>`_ 封装，支持同步请求
-
-                .. code:: python
-
-                    from urllib3_request import request
-
-            6. `requests_request <https://pypi.org/project/requests_request/>`_，由 `requests <https://pypi.org/project/requests/>`_ 封装，支持同步请求
-
-                .. code:: python
-
-                    from requests_request import request
-
-            7. `aiohttp_client_request <https://pypi.org/project/aiohttp_client_request/>`_，由 `aiohttp <https://pypi.org/project/aiohttp/>`_ 封装，支持异步请求
-
-                .. code:: python
-
-                    from aiohttp_client_request import request
-
-            8. `blacksheep_client_request <https://pypi.org/project/blacksheep_client_request/>`_，由 `blacksheep <https://pypi.org/project/blacksheep/>`_ 封装，支持异步请求
-
-                .. code:: python
-
-                    from blacksheep_client_request import request
-
-            9. `asks_request <https://pypi.org/project/asks_request/>`_，由 `asks <https://pypi.org/project/asks/>`_ 封装，支持异步请求
-
-                .. code:: python
-
-                    from asks_request import request
-
-            10. `pycurl_request <https://pypi.org/project/pycurl_request/>`_，由 `pycurl <https://pypi.org/project/pycurl/>`_ 封装，支持同步请求
-
-                .. code:: python
-
-                    from pycurl_request import request
-
-            11. `curl_cffi_request <https://pypi.org/project/curl_cffi_request/>`_，由 `curl_cffi <https://pypi.org/project/curl_cffi/>`_ 封装，支持同步和异步请求
-
-                .. code:: python
-
-                    from curl_cffi_request import request
-
-            12. `aiosonic_request <https://pypi.org/project/aiosonic_request/>`_，由 `aiosonic <https://pypi.org/project/aiosonic/>`_ 封装，支持异步请求
-
-                .. code:: python
-
-                    from aiosonic_request import request
-
-            13. `tornado_client_request <https://pypi.org/project/tornado_client_request/>`_，由 `tornado <https://www.tornadoweb.org/en/latest/httpclient.html>`_ 封装，支持同步和异步请求
-
-                .. code:: python
-
-                    from tornado_client_request import request
-
-            14. `urllib3_future_request <https://pypi.org/project/urllib3_future_request/>`_，由 `urllib3.future <https://urllib3future.readthedocs.io/en/latest/>`_ 封装，支持同步和异步请求
-
-                .. code:: python
-
-                    from urllib3_future_request import request
-
-            15. `niquests_request <https://pypi.org/project/niquests_request/>`_，由 `niquests <https://niquests.readthedocs.io/en/latest/>`_ 封装，支持同步和异步请求
-
-                .. code:: python
-
-                    from niquests_request import request
-        """
-        is_open_api = url.startswith("https://proapi.115.com/open/")
-        if is_open_api:
-            ecdh_encrypt = False
-        if payload is not None:
-            if method.upper() == "POST":
-                request_kwargs.setdefault("data", payload)
-            else:
-                request_kwargs.setdefault("params", payload)
-        if isinstance((params := request_kwargs.get("params")), dict):
-            params.setdefault("app_ver", "99.99.99")
-        request_kwargs["request"] = request
-        request = get_request(async_, request_kwargs)
-        check_for_relogin = self.check_for_relogin
-        headers = dict(request_kwargs.get("headers") or ())
-        need_to_check = callable(check_for_relogin)
-        if need_to_check and fetch_cert_headers is None:
-            if is_open_api:
-                need_to_check = "authorization" not in headers
-            else:
-                need_to_check = "cookie" not in headers
-        headers = request_kwargs["headers"] = dict_key_to_lower_merge(headers, self.headers)
-        if is_open_api:
-            headers["cookie"] = ""
-        else:
-            request_kwargs.setdefault("cookies", self.cookies)
-        if url.startswith(("http://f.115.com", "https://f.115.com", "http://n.115.com", "https://n.115.com")):
-            headers["origin"] = url[:(url+"/").find("/", 8)]
-        if ecdh_encrypt:
-            url = make_url(url, params=_default_k_ec)
-            if data := request_kwargs.get("data"):
-                if not isinstance(data, (Buffer, str, UserString)):
-                    data = urlencode(data)
-                request_kwargs["data"] = ecdh_aes_encrypt(ensure_bytes(data) + b"&")
-                headers["content-type"] = "application/x-www-form-urlencoded"
-        need_fetch_cert_first = False
-        if fetch_cert_headers is not None:
-            fetch_cert_headers_argcount = argcount(fetch_cert_headers)
-            if async_:
-                fetch_cert_headers = ensure_async(fetch_cert_headers)
-            if fetch_cert_headers_argcount:
-                fetch_cert_headers = cast(Callable, fetch_cert_headers)(async_)
-            if revert_cert_headers is not None and async_:
-                revert_cert_headers = ensure_async(revert_cert_headers)
-            if is_open_api:
-                need_fetch_cert_first = "authorization" not in headers
-            else:
-                need_fetch_cert_first = "cookie" not in headers
-        def gen_step():
-            cert_headers: None | Mapping = None
-            if need_fetch_cert_first:
-                cert_headers = yield cast(Callable, fetch_cert_headers)()
-                headers.update(cert_headers)
-            if async_:
-                lock: Lock | AsyncLock = self.request_alock
-            else:
-                lock = self.request_lock
-            if is_open_api:
-                if "authorization" not in headers:
-                    yield lock.acquire()
-                    try:
-                        yield self.login_another_open(
-                            async_=async_, # type: ignore
-                        )
-                    finally:
-                        lock.release()
-            elif "cookie" not in headers:
-                headers["cookie"] = self.cookies_str
-            for i in count(0):
-                try:
-                    if fetch_cert_headers is None:
-                        if is_open_api:
-                            if "authorization" not in headers:
-                                if cookies := headers.get("cookies") or self.cookies_str:
-                                    yield self.login_another_open(replace=True, async_=async_, headers={"cookie": cookies})
-                                    headers["authorization"] = self.headers["authorization"]
-                                elif getattr(self, "refresh_token", ""):
-                                    yield self.refresh_access_token(async_=async_)
-                                    headers["authorization"] = self.headers["authorization"]
-                            cert: str = headers["authorization"]
-                        else:
-                            cert = headers["cookie"]
-                    resp = yield cast(Callable, request)(
-                        url=url, 
-                        method=method, 
-                        **request_kwargs, 
-                    )
-                    if (
-                        is_open_api and 
-                        need_to_check and 
-                        isinstance(resp, dict) and 
-                        resp.get("code") in (40140123, 40140124, 40140125, 40140126)
-                    ):
-                        check_response(resp)
-                except BaseException as e:
-                    is_auth_error = isinstance(e, (P115AuthenticationError, P115LoginError))
-                    not_access_token_error = not isinstance(e, P115AccessTokenError)
-                    if (
-                        cert_headers is not None and 
-                        revert_cert_headers is not None and 
-                        not is_auth_error and
-                        get_status_code(e) != 405
-                    ):
-                        yield revert_cert_headers(cert_headers)
-                    if not need_to_check:
-                        raise
-                    if not_access_token_error:
-                        res = yield cast(Callable, check_for_relogin)(e)
-                        if not res if isinstance(res, bool) else res != 405:
-                            raise
-                    if fetch_cert_headers is not None:
-                        cert_headers = yield fetch_cert_headers()
-                        headers.update(cert_headers)
-                    elif is_open_api:
-                        yield lock.acquire()
-                        try:
-                            access_token = self.access_token
-                            if cert.capitalize().removeprefix("Bearer ") == access_token:
-                                if i or is_auth_error or not_access_token_error:
-                                    raise
-                                warn(f"relogin to refresh token", category=P115Warning)
-                                yield self.refresh_access_token(async_=async_)
-                                cert = headers["authorization"] = "Bearer " + self.access_token
-                            else:
-                                cert = headers["authorization"] = "Bearer " + access_token
-                        finally:
-                            lock.release()
-                    else:
-                        yield lock.acquire()
-                        try:
-                            cookies_new: str = self.cookies_str
-                            if cert == cookies_new:
-                                if self.__dict__.get("cookies_path"):
-                                    cookies_new = self._read_cookies() or ""
-                                    if cert != cookies_new:
-                                        headers["cookie"] = cookies_new
-                                        continue
-                                if i or is_auth_error:
-                                    raise
-                                m = CRE_COOKIES_UID_search(cert)
-                                uid = "" if m is None else m[0]
-                                if not uid:
-                                    raise
-                                warn(f"relogin to refresh cookies: UID={uid!r} app={self.login_app()!r}", category=P115Warning)
-                                yield self.login_another_app(
-                                    replace=True, 
-                                    async_=async_, # type: ignore
-                                )
-                                cert = headers["cookie"] = self.cookies_str
-                            else:
-                                cert = headers["cookie"] = cookies_new
-                        finally:
-                            lock.release()
-                else:
-                    if cert_headers is not None and revert_cert_headers is not None:
-                        yield revert_cert_headers(cert_headers)
-                    return resp
-        return run_gen_step(gen_step, async_)
-
-    def open(
-        self, 
-        url: int | str | Sequence[str] | Mapping | Callable[[], str], 
-        /, 
-        start: int | str = 0, 
-        *, 
-        async_: Literal[False, True] = False, 
-        **request_kwargs, 
-    ):
-        """打开下载链接，返回类文件对象
-
-        :param url: 可以是 下载链接、id、pickcode、path、sha1 等
-        :param start: 开始索引
-        :param async_: 是否异步
-        :param request_kwargs: 其它请求参数
-
-        :return: 类文件对象
-        """
-        headers = request_kwargs["headers"] = dict(request_kwargs.get("headers") or ())
-        headers.setdefault("cookie", self.cookies_str)
-        headers.setdefault("user-agent", "")
-        if isinstance(start, str):
-            if not start.startswith("bytes="):
-                start = "bytes=" + start
-        elif start >= 0:
-            start = f"bytes={start}-"
-        else:
-            start = f"bytes={start}"
-        headers["range"] = start
-        def gen_step():
-            nonlocal url
-            from urllib3_future_request import request
-
-            if callable(url):
-                url = url()
-                if async_ and isawaitable(url):
-                    url = yield url
-            elif not (isinstance(url, str) and url.startswith(("http://", "https://"))):
-                from .exception import P115AccessError
-                from .tool import get_id
-
-                fid = yield get_id(self, url, ensure_file=True, async_=async_)
-                pickcode = self.to_pickcode(fid)
-                try:
-                    url = yield self.download_url(pickcode, app="android", async_=async_)
-                except P115AccessError:
-                    size = getattr(fid, "size", -1)
-                    if size < 0:
-                        resp = yield self.fs_file_skim(fid, async_=async_)
-                        check_response(resp)
-                        size = int(resp["data"][0]["file_size"])
-                    if size > 1024 * 1024 * 200:
-                        raise
-                    url = yield self.download_url(pickcode, app="web", async_=async_)
-            if isinstance(url, P115URL):
-                headers.update(url.get("headers") or ())
-            return request(
-                url, 
-                async_=async_, # type: ignore
-                **request_kwargs, 
-            )
+            return cls(cookies)
         return run_gen_step(gen_step, async_)
 
     ########## Activity API ##########
@@ -6075,196 +5838,6 @@ class P115Client(P115OpenClient):
         if isinstance(payload, str):
             payload = {"ids": payload}
         return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
-
-    ########## App API ##########
-
-    @overload
-    def app_area_list(
-        self: None | ClientRequestMixin = None, 
-        /, 
-        base_url: str | Callable[[], str] = "https://cdnres.115.com", 
-        *, 
-        async_: Literal[False] = False, 
-        **request_kwargs
-    ) -> dict:
-        ...
-    @overload
-    def app_area_list(
-        self: None | ClientRequestMixin = None, 
-        /, 
-        base_url: str | Callable[[], str] = "https://cdnres.115.com", 
-        *, 
-        async_: Literal[True], 
-        **request_kwargs
-    ) -> Coroutine[Any, Any, dict]:
-        ...
-    def app_area_list(
-        self: None | ClientRequestMixin = None, 
-        /, 
-        base_url: str | Callable[[], str] = "https://cdnres.115.com", 
-        *, 
-        async_: Literal[False, True] = False, 
-        **request_kwargs
-    ) -> dict | Coroutine[Any, Any, dict]:
-        """获取地区编码列表
-
-        GET https://cdnres.115.com/my/m_r/setting_new/js/ylmf_area.js
-
-        .. note::
-            可以作为 ``staticmethod`` 使用
-        """
-        api = complete_url("/my/m_r/setting_new/js/ylmf_area.js", base_url=base_url)
-        def iter_area(data: dict, /) -> Iterator[tuple[int, str]]:
-            for code, detail in data.items():
-                if isinstance(code, str):
-                    continue
-                if isinstance(detail, dict):
-                    yield code, detail["n"]
-                    for key in ("c", "t"):
-                        if key in detail and detail[key]:
-                            yield from iter_area(detail[key])
-                            break
-                else:
-                    yield code, detail
-        def parse(_, content, /):
-            data_str = cast(Match[str], CRE_AREA_DATA_search(content.decode("utf-8")))[0]
-            data = eval(data_str, {"n": "n", "c": "c", "t": "t", "l": "l"})
-            return {"state": True, "data": list(iter_area(data))}
-        request_kwargs.setdefault("parse", parse)
-        return get_request(async_, request_kwargs, self=self)(url=api, **request_kwargs)
-
-    @overload
-    def app_publick_key(
-        self: None | ClientRequestMixin = None, 
-        /, 
-        app: str = "web", 
-        base_url: str | Callable[[], str] = "https://passportapi.115.com", 
-        *, 
-        async_: Literal[False] = False, 
-        **request_kwargs
-    ) -> dict:
-        ...
-    @overload
-    def app_publick_key(
-        self: None | ClientRequestMixin = None, 
-        /, 
-        app: str = "web", 
-        base_url: str | Callable[[], str] = "https://passportapi.115.com", 
-        *, 
-        async_: Literal[True], 
-        **request_kwargs
-    ) -> Coroutine[Any, Any, dict]:
-        ...
-    def app_publick_key(
-        self: None | ClientRequestMixin = None, 
-        /, 
-        app: str = "web", 
-        base_url: str | Callable[[], str] = "https://passportapi.115.com", 
-        *, 
-        async_: Literal[False, True] = False, 
-        **request_kwargs
-    ) -> dict | Coroutine[Any, Any, dict]:
-        """获取 RSA 加密公钥，用于某些情况下的加密
-
-        GET https://passportapi.115.com/app/1.0/{app}/1.0/login/getKey
-
-        .. note::
-            可以作为 ``staticmethod`` 使用
-
-            返回的公钥是签名证书，并经过 BASE64 处理，可用下面步骤还原
-
-            .. code::
-
-                from base64 import b64decode
-                from p115client import P115Client
-
-                resp = P115Client.app_publick_key()
-                perm = b64decode(resp["data"]["key"])
-
-                # pip install pycryptodome
-                from Crypto.PublicKey import RSA
-
-                pubkey = RSA.import_key(perm)
-                print(repr(pubkey))
-        """
-        api = complete_url(f"/app/1.0/{app}/1.0/login/getKey", base_url=base_url)
-        return get_request(async_, request_kwargs, self=self)(url=api, **request_kwargs)
-
-    @overload
-    def app_version_list(
-        self: None | ClientRequestMixin = None, 
-        /, 
-        base_url: str | Callable[[], str] = "https://appversion.115.com", 
-        *, 
-        async_: Literal[False] = False, 
-        **request_kwargs
-    ) -> dict:
-        ...
-    @overload
-    def app_version_list(
-        self: None | ClientRequestMixin = None, 
-        /, 
-        base_url: str | Callable[[], str] = "https://appversion.115.com", 
-        *, 
-        async_: Literal[True], 
-        **request_kwargs
-    ) -> Coroutine[Any, Any, dict]:
-        ...
-    def app_version_list(
-        self: None | ClientRequestMixin = None, 
-        /, 
-        base_url: str | Callable[[], str] = "https://appversion.115.com", 
-        *, 
-        async_: Literal[False, True] = False, 
-        **request_kwargs
-    ) -> dict | Coroutine[Any, Any, dict]:
-        """获取当前各平台最新版 115 app 下载链接
-
-        GET https://appversion.115.com/1.0/web/1.0/api/chrome
-
-        .. note::
-            可以作为 ``staticmethod`` 使用
-        """
-        api = complete_url("/1.0/web/1.0/api/chrome", base_url=base_url)
-        return get_request(async_, request_kwargs, self=self)(url=api, **request_kwargs)
-
-    @overload
-    def app_version_list2(
-        self: None | ClientRequestMixin = None, 
-        /, 
-        base_url: str | Callable[[], str] = "https://appversion.115.com", 
-        *, 
-        async_: Literal[False] = False, 
-        **request_kwargs
-    ) -> dict:
-        ...
-    @overload
-    def app_version_list2(
-        self: None | ClientRequestMixin = None, 
-        /, 
-        base_url: str | Callable[[], str] = "https://appversion.115.com", 
-        *, 
-        async_: Literal[True], 
-        **request_kwargs
-    ) -> Coroutine[Any, Any, dict]:
-        ...
-    def app_version_list2(
-        self: None | ClientRequestMixin = None, 
-        /, 
-        base_url: str | Callable[[], str] = "https://appversion.115.com", 
-        *, 
-        async_: Literal[False, True] = False, 
-        **request_kwargs
-    ) -> dict | Coroutine[Any, Any, dict]:
-        """获取当前各平台最新版 115 app 下载链接
-
-        GET https://appversion.115.com/1.0/web/1.0/api/getMultiVer
-
-        .. note::
-            可以作为 ``staticmethod`` 使用
-        """
-        api = complete_url("/1.0/web/1.0/api/getMultiVer", base_url=base_url)
-        return get_request(async_, request_kwargs, self=self)(url=api, **request_kwargs)
 
     ########## Captcha System API ##########
 
@@ -7266,6 +6839,7 @@ class P115Client(P115OpenClient):
 
         :payload:
             - pickcode: str 💡 提取码
+            - share_id: int | str 💡 共享 id
         """
         api = complete_url("/folder/downfolder", base_url=base_url, app=app)
         if isinstance(payload, str):
@@ -7575,18 +7149,24 @@ class P115Client(P115OpenClient):
             尽量不要尝试对已经删除的文件获取下载链接，不仅会失败，还容易触发风控
 
         :payload:
-            - pickcode: str 💡 如果 `app` 为 "chrome"，则可以接受多个，多个用逗号 "," 隔开
+            - pickcode: str  💡 如果 `app` 为 "chrome"，则可以接受多个，多个用逗号 "," 隔开
+            - pick_code: str 💡 如果不用 ``pickcode``，那就用 ``pick_code``
+            - share_id: int = <default> 💡 共享 id
+            - user_id: int = <default>
         """
         if app in ("", "chrome"):
             api = complete_url("/app/chrome/downurl", base_url)
             if isinstance(payload, str):
                 payload = {"pickcode": payload}
+            elif "pickcode" not in payload:
+                payload["pickcode"] = payload["pick_code"]
         else:
             api = complete_url("/2.0/ufile/download", base_url=base_url, app=app)
             if isinstance(payload, str):
                 payload = {"pick_code": payload}
-            else:
-                payload = {"pick_code": payload["pickcode"]}
+            elif "pick_code" not in payload:
+                payload["pick_code"] = payload["pickcode"]
+        payload.setdefault("user_id", self.user_id)
         headers = request_kwargs["headers"] = dict(request_kwargs.get("headers") or ())
         if user_agent is None:
             headers.setdefault("user-agent", "")
@@ -7666,11 +7246,11 @@ class P115Client(P115OpenClient):
                 if isinstance(resp.headers, Mapping):
                     match = CRE_SET_COOKIE.search(resp.headers["Set-Cookie"])
                     if match is not None:
-                        headers["Cookie"] = match[0]
+                        headers["cookie"] = match[0]
                 else:
                     for k, v in reversed(resp.headers.items()):
                         if k == "Set-Cookie" and CRE_SET_COOKIE.match(v) is not None:
-                            headers["Cookie"] = v
+                            headers["cookie"] = v
                             break
             json["headers"] = headers
             return json
@@ -7731,17 +7311,22 @@ class P115Client(P115OpenClient):
             headers["user-agent"] = user_agent
         def parse(resp, _: bytes, /) -> dict:
             if resp.status != 302:
-                return {"state": False, "response": {"status": resp.status, "headers": dict(resp.headers)}}
+                return {
+                    "state": False, 
+                    "errno": 31003, 
+                    "message": "文件不存在或者是目录", 
+                    "response": {"status": resp.status, "headers": dict(resp.headers)}, 
+                }
             json = {"state": True, "url": resp.headers["location"]}
             if "Set-Cookie" in resp.headers:
                 if isinstance(resp.headers, Mapping):
                     match = CRE_SET_COOKIE.search(resp.headers["Set-Cookie"])
                     if match is not None:
-                        headers["Cookie"] = match[0]
+                        headers["cookie"] = match[0]
                 else:
                     for k, v in reversed(resp.headers.items()):
                         if k == "Set-Cookie" and CRE_SET_COOKIE.match(v) is not None:
-                            headers["Cookie"] = v
+                            headers["cookie"] = v
                             break
             json["headers"] = headers
             return json
@@ -8039,11 +7624,11 @@ class P115Client(P115OpenClient):
                 if isinstance(resp.headers, Mapping):
                     match = CRE_SET_COOKIE.search(resp.headers["Set-Cookie"])
                     if match is not None:
-                        headers["Cookie"] = match[0]
+                        headers["cookie"] = match[0]
                 else:
                     for k, v in reversed(resp.headers.items()):
                         if k == "Set-Cookie" and CRE_SET_COOKIE.match(v) is not None:
-                            headers["Cookie"] = v
+                            headers["cookie"] = v
                             break
             json["headers"] = headers
             return json
@@ -12177,7 +11762,7 @@ class P115Client(P115OpenClient):
                 - 播放视频: 3
                 - 上传: 4
                 - ？？: 5
-                - ？？: 6（似乎是一些在离线、转存等过程中有重名的目录）
+                - ？？: 6（大概和名称冲突有关）
                 - 接收: 7
                 - 移动: 8
 
@@ -12329,7 +11914,7 @@ class P115Client(P115OpenClient):
                 - 播放视频: 3
                 - 上传: 4
                 - ？？: 5
-                - ？？: 6（似乎是一些在离线、转存等过程中有重名的目录）
+                - ？？: 6（大概和名称冲突有关）
                 - 接收: 7
                 - 移动: 8
 
@@ -12388,7 +11973,7 @@ class P115Client(P115OpenClient):
                 - 播放视频: 3
                 - 上传: 4
                 - ？？: 5
-                - ？？: 6（似乎是一些在离线、转存等过程中有重名的目录）
+                - ？？: 6（大概和名称冲突有关）
                 - 接收: 7
                 - 移动: 8
         """
@@ -12448,7 +12033,7 @@ class P115Client(P115OpenClient):
                 - 播放视频: 3
                 - 上传: 4
                 - ？？: 5
-                - ？？: 6（似乎是一些在离线、转存等过程中有重名的目录）
+                - ？？: 6（大概和名称冲突有关）
                 - 接收: 7
                 - 移动: 8
         """
@@ -16334,7 +15919,7 @@ class P115Client(P115OpenClient):
 
         :payload:
             - pickcode: str 💡 提取码
-            - share_id: int | str = <default> 💡 分享 id
+            - share_id: int | str = <default> 💡 共享 id
             - local: 0 | 1 = <default> 💡 是否本地，如果为 1，则不包括 m3u8
         """
         api = complete_url("/files/video", base_url=base_url)
@@ -16382,7 +15967,7 @@ class P115Client(P115OpenClient):
 
         :payload:
             - pickcode: str 💡 提取码
-            - share_id: int | str = <default> 💡 分享 id
+            - share_id: int | str = <default> 💡 共享 id
             - local: 0 | 1 = 0 💡 是否本地，如果为 1，则不包括 m3u8
             - user_id: int | str = <default> 💡 用户 id
         """
@@ -18447,7 +18032,7 @@ class P115Client(P115OpenClient):
     def login_ssoent(self, /) -> str:
         """获取当前的登录设备 ssoent，如果为空，说明未能获得（会直接获取 Cookies 中名为 UID 字段的值，所以即使能获取，也不能说明登录未失效）
         """
-        return self.cookies_str.login_ssoent
+        return self.cookies_str.UID.ssoent
 
     ########## Logout API ##########
 
@@ -25093,8 +24678,9 @@ class P115Client(P115OpenClient):
                 return resp
             request_kwargs.setdefault("parse", parse)
             payload = {"data": rsa_encrypt(dumps(payload)).decode()}
-        return get_request(async_, request_kwargs, self=self)(
+        request, request_kwargs = get_request(
             url=api, method="POST", data=payload, **request_kwargs)
+        return request(async_=async_, **request_kwargs)
 
     @overload
     def share_skip_login_download_url_web(
@@ -25144,8 +24730,9 @@ class P115Client(P115OpenClient):
             payload = self
         else:
             assert payload is not None
-        return get_request(async_, request_kwargs, self=self)(
+        request, request_kwargs = get_request(
             url=api, method="POST", data=payload, **request_kwargs)
+        return request(async_=async_, **request_kwargs)
 
     @overload
     def share_skip_login_down_first(
@@ -25303,8 +24890,8 @@ class P115Client(P115OpenClient):
         else:
             assert payload is not None
         payload = {"cid": 0, "limit": 32, "offset": 0, **payload}
-        return get_request(async_, request_kwargs, self=self)(
-            url=api, params=payload, **request_kwargs)
+        request, request_kwargs = get_request(url=api, params=payload, **request_kwargs)
+        return request(async_=async_, **request_kwargs)
 
     @overload
     def share_snap_app(
@@ -26258,6 +25845,9 @@ class P115Client(P115OpenClient):
         .. caution::
             通过扩展名来识别，仅支持以下格式图片(jpg,jpeg,png,gif,svg,webp,heic,bmp,dng)
 
+        .. note::
+            `target` 随便设置，例如 "U_4_-1"、"U_5_-2"
+
         :param filename: 文件名，默认为一个新的 uuid4 对象的字符串表示
         :param pid: 上传文件到此目录的 id 或 pickcode，或者指定的 target（格式为 f"U_{aid}_{pid}" 或 f"S_{share_id}_{pid}"）
         :param share_id: 共享 id
@@ -26338,86 +25928,6 @@ class P115Client(P115OpenClient):
         if filesize >= 0:
             payload["filesize"] = filesize
         return self.upload_sample_init(payload, async_=async_, base_url=base_url, **request_kwargs)
-
-    @overload # type: ignore
-    def upload_gettoken(
-        self: None | ClientRequestMixin = None, 
-        /, 
-        base_url: str | Callable[[], str] = "https://uplb.115.com", 
-        *, 
-        async_: Literal[False] = False, 
-        **request_kwargs, 
-    ) -> dict:
-        ...
-    @overload
-    def upload_gettoken(
-        self: None | ClientRequestMixin = None, 
-        /, 
-        base_url: str | Callable[[], str] = "https://uplb.115.com", 
-        *, 
-        async_: Literal[True], 
-        **request_kwargs, 
-    ) -> Coroutine[Any, Any, dict]:
-        ...
-    def upload_gettoken(
-        self: None | ClientRequestMixin = None, 
-        /, 
-        base_url: str | Callable[[], str] = "https://uplb.115.com", 
-        *, 
-        async_: Literal[False, True] = False, 
-        **request_kwargs, 
-    ) -> dict | Coroutine[Any, Any, dict]:
-        """获取阿里云 OSS 的 token（上传凭证）
-
-        GET https://uplb.115.com/3.0/gettoken.php
-
-        .. note::
-            可以作为 ``staticmethod`` 使用
-        """
-        api = complete_url("/3.0/gettoken.php", base_url=base_url)
-        return get_request(async_, request_kwargs, self=self)(url=api, **request_kwargs)
-
-    @overload
-    def upload_url(
-        self: None | ClientRequestMixin = None, 
-        /, 
-        base_url: str | Callable[[], str] = "https://uplb.115.com", 
-        *, 
-        async_: Literal[False] = False, 
-        **request_kwargs, 
-    ) -> dict:
-        ...
-    @overload
-    def upload_url(
-        self: None | ClientRequestMixin = None, 
-        /, 
-        base_url: str | Callable[[], str] = "https://uplb.115.com", 
-        *, 
-        async_: Literal[True], 
-        **request_kwargs, 
-    ) -> Coroutine[Any, Any, dict]:
-        ...
-    def upload_url(
-        self: None | ClientRequestMixin = None, 
-        /, 
-        base_url: str | Callable[[], str] = "https://uplb.115.com", 
-        *, 
-        async_: Literal[False, True] = False, 
-        **request_kwargs, 
-    ) -> dict | Coroutine[Any, Any, dict]:
-        """获取用于上传的一些 http 接口，此接口具有一定幂等性，请求一次，然后把响应记下来即可
-
-        GET https://uplb.115.com/3.0/getuploadinfo.php
-
-        .. note::
-            可以作为 ``staticmethod`` 使用
-
-        :response:
-            - endpoint: 此接口用于上传文件到阿里云 OSS 
-            - gettokenurl: 上传前需要用此接口获取 token
-        """
-        api = complete_url("/3.0/getuploadinfo.php", base_url=base_url)
-        return get_request(async_, request_kwargs, self=self)(url=api, **request_kwargs)
 
     # NOTE: 下列是关于上传功能的封装方法
 
@@ -26562,6 +26072,9 @@ class P115Client(P115OpenClient):
 
         .. caution::
             不支持秒传，但也不必传文件大小和 sha1，最大支持上传 50 MB 的文件
+
+        .. note::
+            `target` 随便设置，例如 "U_4_-1"、"U_5_-2"
 
         :param file: 待上传的文件
         :param pid: 上传文件到此目录的 id 或 pickcode，或者指定的 target（格式为 f"U_{aid}_{pid}" 或 f"S_{share_id}_{pid}"）
@@ -27066,45 +26579,6 @@ class P115Client(P115OpenClient):
         return self.request(url=api, async_=async_, **request_kwargs)
 
     @overload
-    def user_face_code(
-        self: None | ClientRequestMixin = None, 
-        /, 
-        base_url: str | Callable[[], str] = "https://my.115.com", 
-        *, 
-        async_: Literal[False] = False, 
-        **request_kwargs, 
-    ) -> dict:
-        ...
-    @overload
-    def user_face_code(
-        self: None | ClientRequestMixin = None, 
-        /, 
-        base_url: str | Callable[[], str] = "https://my.115.com", 
-        *, 
-        async_: Literal[True], 
-        **request_kwargs, 
-    ) -> Coroutine[Any, Any, dict]:
-        ...
-    def user_face_code(
-        self: None | ClientRequestMixin = None, 
-        /, 
-        base_url: str | Callable[[], str] = "https://my.115.com", 
-        *, 
-        async_: Literal[False, True] = False, 
-        **request_kwargs, 
-    ) -> dict | Coroutine[Any, Any, dict]:
-        """获取表情包
-
-        GET https://my.115.com/api/face_code.js
-
-        .. note::
-            可以作为 ``staticmethod`` 使用
-        """
-        api = complete_url("/api/face_code.js", base_url=base_url)
-        request_kwargs.setdefault("parse", lambda _, b, /: default_parse(_, b[25:-1]))
-        return get_request(async_, request_kwargs, self=self)(url=api, **request_kwargs)
-
-    @overload
     def user_fingerprint(
         self, 
         /, 
@@ -27201,8 +26675,8 @@ class P115Client(P115OpenClient):
         elif isinstance(payload, str):
             payload = {"method": payload}
         payload.setdefault("method", "user_info")
-        return get_request(async_, request_kwargs, self=self)(
-            url=api, params=payload, **request_kwargs)
+        request, request_kwargs = get_request(url=api, params=payload, **request_kwargs)
+        return request(async_=async_, **request_kwargs)
 
     @overload
     def user_info2(
@@ -28761,6 +28235,226 @@ class P115Client(P115OpenClient):
         return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
 
     @overload
+    def usershare_download_url(
+        self, 
+        pickcode: str, 
+        /, 
+        share_id: int | str, 
+        strict: bool = True, 
+        user_agent: None | str = None, 
+        app: str = "chrome", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> P115URL:
+        ...
+    @overload
+    def usershare_download_url(
+        self, 
+        pickcode: str, 
+        /, 
+        share_id: int | str, 
+        strict: bool = True, 
+        user_agent: None | str = None, 
+        app: str = "chrome", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, P115URL]:
+        ...
+    def usershare_download_url(
+        self, 
+        pickcode: str, 
+        /, 
+        share_id: int | str, 
+        strict: bool = True, 
+        user_agent: None | str = None, 
+        app: str = "chrome", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> P115URL | Coroutine[Any, Any, P115URL]:
+        """获取文件的下载链接，此接口是对 `download_url_app` 的封装
+
+        .. note::
+            获取的直链中，部分查询参数的解释：
+
+            - ``t``: 过期时间戳
+            - ``u``: 用户 id
+            - ``c``: 允许同时打开次数，如果为 0，则是无限次数
+            - ``f``: 请求时要求携带请求头
+                - 如果为空，则无要求
+                - 如果为 1，则需要 user-agent（和请求直链时的一致）
+                - 如果为 3，则需要 user-agent（和请求直链时的一致） 和 Cookie（由请求直链时的响应所返回的 Set-Cookie 响应头）
+
+        :param pickcode: 提取码
+        :param share_id: 共享 id
+        :param strict: 如果为 True，当目标是目录时，会抛出 IsADirectoryError 异常
+        :param user_agent: 如果不为 None，则作为请求头 "user-agent" 的值
+        :param app: 使用此设备的接口
+        :param async_: 是否异步
+        :param request_kwargs: 其余请求参数
+
+        :return: 下载链接
+        """
+        def gen_step():
+            if app in ("web", "desktop"):
+                resp = yield self.usershare_download_url_web(
+                    {"share_id": share_id, "pick_code": pickcode}, 
+                    user_agent=user_agent, 
+                    async_=async_, 
+                    **request_kwargs, 
+                )
+                resp["pickcode"] = pickcode
+                try:
+                    check_response(resp)
+                except IsADirectoryError:
+                    if strict:
+                        raise
+                return P115URL(
+                    resp.get("file_url", ""), 
+                    id=int(resp["file_id"]), 
+                    pickcode=pickcode, 
+                    name=resp["file_name"], 
+                    size=int(resp["file_size"]), 
+                    is_dir=not resp["state"], 
+                    headers=resp["headers"], 
+                )
+            else:
+                resp = yield self.download_url_app(
+                    {"share_id": share_id, "pick_code": pickcode}, 
+                    user_agent=user_agent, 
+                    app=app, 
+                    async_=async_, 
+                    **request_kwargs, 
+                )
+                resp["pickcode"] = pickcode
+                check_response(resp)
+                if "url" in resp["data"]:
+                    url = resp["data"]["url"]
+                    return P115URL(
+                        url, 
+                        pickcode=pickcode, 
+                        name=unquote(urlsplit(url).path.rsplit("/", 1)[-1]), 
+                        is_dir=False, 
+                        headers=resp["headers"], 
+                    )
+                for fid, info in resp["data"].items():
+                    url = info["url"]
+                    if strict and not url:
+                        throw(
+                            errno.EISDIR, 
+                            f"{fid} is a directory, with response {resp}", 
+                        )
+                    return P115URL(
+                        url["url"] if url else "", 
+                        id=int(fid), 
+                        pickcode=info["pick_code"], 
+                        name=info["file_name"], 
+                        size=int(info["file_size"]), 
+                        sha1=info["sha1"], 
+                        is_dir=not url, 
+                        headers=resp["headers"], 
+                    )
+                throw(
+                    errno.ENOENT, 
+                    f"no such pickcode: {pickcode!r}, with response {resp}", 
+                )
+        return run_gen_step(gen_step, async_)
+
+    @overload
+    def usershare_download_urls(
+        self, 
+        pickcodes: str | Iterable[str], 
+        /, 
+        share_id: int | str, 
+        strict: bool = True, 
+        user_agent: None | str = None, 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict[int, P115URL]:
+        ...
+    @overload
+    def usershare_download_urls(
+        self, 
+        pickcodes: str | Iterable[str], 
+        /, 
+        share_id: int | str, 
+        strict: bool = True, 
+        user_agent: None | str = None, 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict[int, P115URL]]:
+        ...
+    def usershare_download_urls(
+        self, 
+        pickcodes: str | Iterable[str], 
+        /, 
+        share_id: int | str, 
+        strict: bool = True, 
+        user_agent: None | str = None, 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict[int, P115URL] | Coroutine[Any, Any, dict[int, P115URL]]:
+        """批量获取文件的下载链接，此接口是对 `download_url_app` 的封装
+
+        .. note::
+            获取的直链中，部分查询参数的解释：
+
+            - ``t``: 过期时间戳
+            - ``u``: 用户 id
+            - ``c``: 允许同时打开次数，如果为 0，则是无限次数
+            - ``f``: 请求时要求携带请求头
+                - 如果为空，则无要求
+                - 如果为 1，则需要 user-agent（和请求直链时的一致）
+                - 如果为 3，则需要 user-agent（和请求直链时的一致） 和 Cookie（由请求直链时的响应所返回的 Set-Cookie 响应头）
+
+        :param pickcodes: 提取码，多个用逗号 "," 隔开
+        :param share_id: 共享 id
+        :param strict: 如果为 True，当目标是目录时，会直接忽略
+        :param user_agent: 如果不为 None，则作为请求头 "user-agent" 的值
+        :param async_: 是否异步
+        :param request_kwargs: 其余请求参数
+
+        :return: 一批下载链接
+        """
+        if not isinstance(pickcodes, str):
+            pickcodes = ",".join(pickcodes)
+        def gen_step():
+            resp = yield self.download_url_app(
+                {"pickcode": pickcodes, "share_id": share_id}, 
+                user_agent=user_agent, 
+                async_=async_, 
+                **request_kwargs, 
+            )
+            resp["pickcode"] = pickcodes
+            urls: dict[int, P115URL] = {}
+            if not resp["state"]:
+                if resp.get("errno") != 50003:
+                    check_response(resp)
+            else:
+                for fid, info in resp["data"].items():
+                    url = info["url"]
+                    if strict and not url:
+                        continue
+                    fid = int(fid)
+                    urls[fid] = P115URL(
+                        url["url"] if url else "", 
+                        id=fid, 
+                        pickcode=info["pick_code"], 
+                        name=info["file_name"], 
+                        size=int(info["file_size"]), 
+                        sha1=info["sha1"], 
+                        is_dir=not url, 
+                        headers=resp["headers"], 
+                    )
+            return urls
+        return run_gen_step(gen_step, async_)
+
+    @overload
     def usershare_download_url_web(
         self, 
         payload: dict, 
@@ -28799,7 +28493,7 @@ class P115Client(P115OpenClient):
         POST https://webapi.115.com/usershare/download
 
         .. note::
-            最大允许下载 200 MB 的文件，即使文件违规，或者 `aid=12`，也可以正常下载
+            下载的文件大小没有 200 MB 的限制
 
         :payload:
             - share_id: int | str
@@ -28818,11 +28512,11 @@ class P115Client(P115OpenClient):
                 if isinstance(resp.headers, Mapping):
                     match = CRE_SET_COOKIE.search(resp.headers["Set-Cookie"])
                     if match is not None:
-                        headers["Cookie"] = match[0]
+                        headers["cookie"] = match[0]
                 else:
                     for k, v in reversed(resp.headers.items()):
                         if k == "Set-Cookie" and CRE_SET_COOKIE.match(v) is not None:
-                            headers["Cookie"] = v
+                            headers["cookie"] = v
                             break
             json["headers"] = headers
             return json

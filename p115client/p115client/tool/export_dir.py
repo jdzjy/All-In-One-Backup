@@ -406,7 +406,7 @@ def export_dir_start(
     :return: 返回任务 id，可用 `P115Client.fs_export_dir_status` 查询进度
     """
     if not isinstance(client, P115Client):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if isinstance(target, int):
         target = f"U_1_{target}"
     elif not target.startswith("U_"):
@@ -479,7 +479,7 @@ def export_dir_status(
             }
     """
     if not isinstance(client, P115Client):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if app in ("", "web", "desktop", "aps"):
         export_dir_status: Callable = client.fs_export_dir_status
     else:
@@ -557,7 +557,7 @@ def export_dir_result(
             }
     """
     if not isinstance(client, P115Client):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if app in ("", "web", "desktop", "aps"):
         export_dir_status: Callable = client.fs_export_dir_status
     else:
@@ -649,7 +649,7 @@ def export_dir_parse_iter(
     :return: 解析目录树文件的迭代器
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if isinstance(parse_iter, str):
         parse_iter = cast(Callable, globals()["export_dir_parse_iter_" + parse_iter])
     def gen_step():
@@ -771,7 +771,7 @@ def export_dir(
     :return: 解析目录树文件的迭代器
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if isinstance(parse_iter, str):
         parse_iter = cast(Callable, globals()["export_dir_parse_iter_" + parse_iter])
     request_kwargs["app"] = app

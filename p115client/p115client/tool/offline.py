@@ -79,7 +79,7 @@ def offline_iter(
     :return: 迭代器，返回任务信息
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if page_start < 1:
         page_start = 1
     if page_stop > 0:
@@ -170,7 +170,7 @@ def offline_restart_iter(
     :return: 迭代器，逐个任务返回执行重试后的响应
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     def gen_step():
         left_no_space: list[dict] = []
         add_task = left_no_space.append

@@ -49,7 +49,7 @@ def make_application(
     id_to_dirnode: SqliteTableDict
     querydb: P115QueryDB
     if not isinstance(client, P115Client):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
 
     app = Application(router=Router(), show_error_details=debug)
     app.services.register(P115Client, instance=client)

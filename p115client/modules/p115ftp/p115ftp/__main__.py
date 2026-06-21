@@ -35,7 +35,6 @@ cookies 文件保存路径，默认为当前工作目录下的 115-cookies.txt
     p115dav --cookies-path <(echo "$COOKIES")
 
 """)
-parser.add_argument("-cl", "--check-for-relogin", action="store_true", help="当风控时，自动重新扫码登录")
 parser.add_argument("-ll", "--log-level", default="ERROR", help=f"指定日志级别，可以是数字或名称，不传此参数则不输出日志，默认值: 'ERROR'")
 parser.add_argument("-l", "--license", action="store_true", help="输出授权信息")
 parser.add_argument("-v", "--version", action="store_true", help="输出版本号")
@@ -76,7 +75,7 @@ def main(argv: None | list[str] | Namespace = None, /):
     host = args.host or "0.0.0.0"
     port = args.port or 7115
     cookies_path = Path(args.cookies_path or "115-cookies.txt")
-    client = P115Client(cookies_path, check_for_relogin=args.check_for_relogin)
+    client = P115Client(cookies_path)
     P115FS.run_forever(client, host, port)
 
 

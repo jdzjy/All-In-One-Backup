@@ -106,7 +106,7 @@ def iter_history_once(
     :return: 迭代器，产生 115 的历史记录数据字典
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if app in ("", "web", "desktop", "aps"):
         history_list = partial(client.fs_history_list, **request_kwargs)
     else:
@@ -225,7 +225,7 @@ def iter_history(
     :return: 迭代器，产生 115 的历史记录数据字典
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if from_id and not from_time:
         from_time = -1
     def gen_step():
@@ -336,7 +336,7 @@ def iter_history_list(
     :return: 迭代器，产生 115 的历史记录数据字典
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if from_id and not from_time:
         from_time = -1
     def gen_step():

@@ -450,7 +450,7 @@ class P115FS:
         readdir_ttl: float = 60, 
     ):
         if not isinstance(client, P115Client):
-            client = P115Client(client, check_for_relogin=True)
+            client = P115Client(client)
         _P115FTPHandler.client = client
         _P115FTPHandler.fs = client.get_fs(id_to_readdir=TTLDict(readdir_ttl))
         if authorizer is None:

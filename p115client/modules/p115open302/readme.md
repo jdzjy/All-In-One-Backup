@@ -20,7 +20,7 @@ from uvicorn import run
 # 授权登录
 cookies = "UID=...; CID=...; SEID=...; KID=..."
 app_id = 100195125
-client = P115Client(cookies, ensure_cookies=True, check_for_relogin=True)
+client = P115Client(cookies, ensure_cookies=True)
 client.login_another_open(replace=True)
 # 或者直接用 refresh_token
 refresh_token = "..."

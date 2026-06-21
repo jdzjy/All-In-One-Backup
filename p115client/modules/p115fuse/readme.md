@@ -57,8 +57,6 @@ options:
                             COOKIES='UID=...; CID=..., SEID=...'
                             p115dav --cookies-path <(echo "$COOKIES")
                         
-  -cl, --check-for-relogin
-                        当风控时，自动重新扫码登录
   -fo, --fuse-option option [option ...]
                         fuse 挂载选项，支持如下几种格式：
                             - name         设置 name 选项

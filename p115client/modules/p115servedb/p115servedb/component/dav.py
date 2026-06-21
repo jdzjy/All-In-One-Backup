@@ -110,7 +110,7 @@ def make_application(
         root_path="/%3Cstatic", 
         fallback_document="index.html", 
     )
-    client = P115Client(cookies_path, app="alipaymini", check_for_relogin=True) if cookies_path else None
+    client = P115Client(cookies_path, app="alipaymini") if cookies_path else None
     con: Connection
     con_file: Connection
 

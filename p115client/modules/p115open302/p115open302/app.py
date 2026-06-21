@@ -322,7 +322,7 @@ if __name__ == "__main__":
     from p115client import P115Client
     from uvicorn import run
 
-    client = P115Client(Path("115-cookies.txt"), ensure_cookies=True, check_for_relogin=True)
+    client = P115Client(Path("115-cookies.txt"), ensure_cookies=True)
     client.login_another_open(replace=True)
     run(
         make_application(client, debug=True), 

@@ -67,7 +67,7 @@ def main(argv: None | list[str] | Namespace = None, /):
             cookies = Path(cookies_path)
         else:
             cookies = Path("115-cookies.txt")
-    client = P115Client(cookies, check_for_relogin=True)
+    client = P115Client(cookies)
 
     do_request: None | Callable
     match args.use_request:

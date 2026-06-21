@@ -46,7 +46,7 @@ def open_deauth(
     :param request_kwargs: 其它请求参数
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     def gen_step():
         resp = yield client.login_open_auth_list(
             async_=async_, 
@@ -148,7 +148,7 @@ def open_app_name(
     :return: 名字，如果为 None，说明此应用不可用
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     def gen_step():
         if app_id < 0 or app_id % 2 == 0:
             return None

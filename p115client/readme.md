@@ -69,7 +69,7 @@ client = P115Client.from_path()
 如果想要调用接口返回时自动捕获 [405](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status/405) HTTP 响应码，然后进行自动的扫码登录，并把更新后的 <kbd>cookies</kbd> 写回文件，然后重试接口调用
 
 ```python
-client = P115Client(Path("~/115-cookies.txt").expanduser(), check_for_relogin=True)
+client = P115Client(Path("~/115-cookies.txt").expanduser())
 ```
 
 所以综上，推荐的初始化代码为
@@ -78,7 +78,7 @@ client = P115Client(Path("~/115-cookies.txt").expanduser(), check_for_relogin=Tr
 from p115client import P115Client
 from pathlib import Path
 
-client = P115Client(Path("~/115-cookies.txt").expanduser(), check_for_relogin=True)
+client = P115Client(Path("~/115-cookies.txt").expanduser())
 ```
 
 #### 2. 用 AppID 创建实例
@@ -120,7 +120,7 @@ client_open = P115OpenClient(app_id)
 from p115client import P115Client, P115OpenClient
 from pathlib import Path
 
-client = P115Client(Path("~/115-cookies.txt").expanduser(), check_for_relogin=True)
+client = P115Client(Path("~/115-cookies.txt").expanduser())
 client_open = client.login_another_open()
 ```
 

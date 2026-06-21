@@ -127,16 +127,16 @@ def main(argv: None | list[str] | Namespace = None, /):
     refresh_token = args.refresh_token
 
     if cookies := args.cookies.strip():
-        client = P115Client(cookies, check_for_relogin=True)
+        client = P115Client(cookies)
     else:
         cookies_path = args.cookies_path
         if not (cookies_path or refresh_token):
             cookies_path = "115-cookies.txt"
         if cookies_path:
             from pathlib import Path
-            client = P115Client(Path(cookies_path), check_for_relogin=True)
+            client = P115Client(Path(cookies_path))
         else:
-            client = P115Client("", check_for_relogin=True)
+            client = P115Client("")
     if refresh_token:
         client.refresh_token = refresh_token
         client.refresh_access_token()

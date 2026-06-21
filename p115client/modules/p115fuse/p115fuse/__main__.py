@@ -35,7 +35,6 @@ cookies 文件保存路径，默认为当前工作目录下的 115-cookies.txt
     p115dav --cookies-path <(echo "$COOKIES")
 
 """)
-parser.add_argument("-cl", "--check-for-relogin", action="store_true", help="当风控时，自动重新扫码登录")
 parser.add_argument(
     "-fo", "--fuse-option", dest="fuse_options", metavar="option", nargs="+", 
     help="""fuse 挂载选项，支持如下几种格式：
@@ -99,10 +98,7 @@ def main(argv: None | list[str] | Namespace = None, /):
                     options.pop(name, None)
             else:
                 options[option] = True
-    P115FuseOperations(P115Client(
-        Path(args.cookies_path or "115-cookies.txt"), 
-        check_for_relogin=args.check_for_relogin, 
-    )).run_forever(**options)
+    P115FuseOperations(P115Client(Path(args.cookies_path or "115-cookies.txt"))).run_forever(**options)
 
 
 if __name__ == "__main__":

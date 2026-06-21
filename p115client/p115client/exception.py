@@ -7,7 +7,7 @@ __all__ = [
     "P115OperationalError", "P115FileTooBig", "P115ExceededError", 
     "P115InvalidArgumentError", "P115NoSpaceError", "P115NotSupportedError", 
     "P115LoginError", "P115AccessTokenError", "P115OpenAppAuthLimitExceeded", 
-    "error", "throw", "errno2error"
+    "P115BadDownloadUrl", "P115BadFile", "error", "throw", "errno2error", 
 ]
 __doc__ = "各种异常类和相关的帮助函数"
 
@@ -125,6 +125,21 @@ class P115OpenAppAuthLimitExceeded(P115AuthenticationError):
     """
 
 
+class P115BadDownloadUrl(P115OSError):
+    """获得了一个不可用的下载链接
+    """
+    @classmethod
+    def raise_for_bad[Url: str](cls, url: Url, /) -> Url:
+        if url.startswith(("https:///", "http:///")):
+            raise cls(errno.EFAULT, url)
+        return url
+
+
+class P115BadFile(P115OSError):
+    """发现了一个有问题的文件，和文件信息不一致，例如 sha1 或 size 不同
+    """
+
+
 def error(*args, **kwds) -> BaseException:
     """构建异常
 
@@ -172,6 +187,7 @@ errno2error: dict[errno, type[P115Error]] = {
     errno.ENOSPC: P115NoSpaceError, 
     errno.ENOTSUP: P115NotSupportedError, 
     errno.ENOSYS: P115NotSupportedError, 
+    errno.EBADF: P115BadFile, 
 }
 
 _modns = globals()

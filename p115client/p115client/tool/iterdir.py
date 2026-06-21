@@ -442,7 +442,7 @@ def ensure_attr_path[D: dict](
     :return: 迭代器
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if id_to_dirnode is None:
         id_to_dirnode = ID_TO_DIRNODE_CACHE[client.user_id]
     elif id_to_dirnode is ...:
@@ -542,7 +542,7 @@ def ensure_attr_path_using_star_event[D: dict](
     :return: 返回这一组文件信息
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if id_to_dirnode is None:
         id_to_dirnode = ID_TO_DIRNODE_CACHE[client.user_id]
     elif id_to_dirnode is ...:
@@ -615,7 +615,7 @@ def _iter_fs_files(
     ensure_file: None | bool = None, 
     hold_top: bool = True, 
     escape: None | bool | Callable[[str], str] = True, 
-    app: str = "android", 
+    app: str = "web", 
     cooldown: None | float = None, 
     max_workers: None | int = 0, 
     *, 
@@ -636,7 +636,7 @@ def _iter_fs_files(
     ensure_file: None | bool = None, 
     hold_top: bool = True, 
     escape: None | bool | Callable[[str], str] = True, 
-    app: str = "android", 
+    app: str = "web", 
     cooldown: None | float = None, 
     max_workers: None | int = 0, 
     *, 
@@ -656,7 +656,7 @@ def _iter_fs_files(
     ensure_file: None | bool = None, 
     hold_top: bool = True, 
     escape: None | bool | Callable[[str], str] = True, 
-    app: str = "android", 
+    app: str = "web", 
     cooldown: None | float = None, 
     max_workers: None | int = 0, 
     *, 
@@ -696,7 +696,7 @@ def _iter_fs_files(
     :return: 迭代器，返回此目录内的文件信息（文件和目录）
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if isinstance(payload, (int, str)):
         payload = {"cid": to_id(payload)}
     suffix = payload.get("suffix")
@@ -802,7 +802,7 @@ def iterdir(
     ensure_file: None | bool = None, 
     hold_top: bool = False, 
     escape: None | bool | Callable[[str], str] = True, 
-    app: str = "android", 
+    app: str = "web", 
     cooldown: None | float = None, 
     max_workers: None | int = 0, 
     *, 
@@ -828,7 +828,7 @@ def iterdir(
     ensure_file: None | bool = None, 
     hold_top: bool = False, 
     escape: None | bool | Callable[[str], str] = True, 
-    app: str = "android", 
+    app: str = "web", 
     cooldown: None | float = None, 
     max_workers: None | int = 0, 
     *, 
@@ -853,7 +853,7 @@ def iterdir(
     ensure_file: None | bool = None, 
     hold_top: bool = False, 
     escape: None | bool | Callable[[str], str] = True, 
-    app: str = "android", 
+    app: str = "web", 
     cooldown: None | float = None, 
     max_workers: None | int = 0, 
     *, 
@@ -941,7 +941,7 @@ def iterdir_traverse(
     normalize_attr: Callable[[dict], dict] = normalize_attr, 
     id_to_dirnode: None | EllipsisType | MutableMapping[int, tuple[str, int]] = None, 
     raise_for_changed_count: bool = False, 
-    app: str = "android", 
+    app: str = "web", 
     cooldown: None | float = None, 
     *, 
     async_: Literal[False] = False, 
@@ -960,7 +960,7 @@ def iterdir_traverse(
     normalize_attr: Callable[[dict], dict] = normalize_attr, 
     id_to_dirnode: None | EllipsisType | MutableMapping[int, tuple[str, int]] = None, 
     raise_for_changed_count: bool = False, 
-    app: str = "android", 
+    app: str = "web", 
     cooldown: None | float = None, 
     *, 
     async_: Literal[True], 
@@ -978,7 +978,7 @@ def iterdir_traverse(
     normalize_attr: Callable[[dict], dict] = normalize_attr, 
     id_to_dirnode: None | EllipsisType | MutableMapping[int, tuple[str, int]] = None, 
     raise_for_changed_count: bool = False, 
-    app: str = "android", 
+    app: str = "web", 
     cooldown: None | float = None, 
     *, 
     async_: Literal[False, True] = False, 
@@ -1050,7 +1050,7 @@ def iterdir_walk(
     normalize_attr: Callable[[dict], dict] = normalize_attr, 
     id_to_dirnode: None | EllipsisType | MutableMapping[int, tuple[str, int]] = None, 
     raise_for_changed_count: bool = False, 
-    app: str = "android", 
+    app: str = "web", 
     cooldown: None | float = None, 
     *, 
     async_: Literal[False] = False, 
@@ -1068,7 +1068,7 @@ def iterdir_walk(
     normalize_attr: Callable[[dict], dict] = normalize_attr, 
     id_to_dirnode: None | EllipsisType | MutableMapping[int, tuple[str, int]] = None, 
     raise_for_changed_count: bool = False, 
-    app: str = "android", 
+    app: str = "web", 
     cooldown: None | float = None, 
     *, 
     async_: Literal[True], 
@@ -1085,7 +1085,7 @@ def iterdir_walk(
     normalize_attr: Callable[[dict], dict] = normalize_attr, 
     id_to_dirnode: None | EllipsisType | MutableMapping[int, tuple[str, int]] = None, 
     raise_for_changed_count: bool = False, 
-    app: str = "android", 
+    app: str = "web", 
     cooldown: None | float = None, 
     *, 
     async_: Literal[False, True] = False, 
@@ -1156,8 +1156,8 @@ def iter_stared(
     raise_for_changed_count: bool = False, 
     ensure_file: None | bool = None, 
     app: str = "android", 
-    cooldown: None | float = None, 
-    max_workers: None | int = 0, 
+    cooldown: None | float = 0.5, 
+    max_workers: None | int = None, 
     *, 
     async_: Literal[False] = False, 
     **request_kwargs, 
@@ -1178,8 +1178,8 @@ def iter_stared(
     raise_for_changed_count: bool = False, 
     ensure_file: None | bool = None, 
     app: str = "android", 
-    cooldown: None | float = None, 
-    max_workers: None | int = 0, 
+    cooldown: None | float = 0.5, 
+    max_workers: None | int = None, 
     *, 
     async_: Literal[True], 
     **request_kwargs, 
@@ -1199,8 +1199,8 @@ def iter_stared(
     raise_for_changed_count: bool = False, 
     ensure_file: None | bool = None, 
     app: str = "android", 
-    cooldown: None | float = None, 
-    max_workers: None | int = 0, 
+    cooldown: None | float = 0.5, 
+    max_workers: None | int = None, 
     *, 
     async_: Literal[False, True] = False, 
     **request_kwargs, 
@@ -1270,7 +1270,7 @@ def iter_dirs(
     cid: int | str | Mapping = 0, 
     id_to_dirnode: None | EllipsisType | MutableMapping[int, tuple[str, int]] = None, 
     app: str = "android", 
-    max_workers: None | int = 0, 
+    max_workers: None | int = None, 
     max_dirs: int = 0, 
     *, 
     async_: Literal[False] = False, 
@@ -1283,7 +1283,7 @@ def iter_dirs(
     cid: int | str | Mapping = 0, 
     id_to_dirnode: None | EllipsisType | MutableMapping[int, tuple[str, int]] = None, 
     app: str = "android", 
-    max_workers: None | int = 0, 
+    max_workers: None | int = None, 
     max_dirs: int = 0, 
     *, 
     async_: Literal[True], 
@@ -1295,7 +1295,7 @@ def iter_dirs(
     cid: int | str | Mapping = 0, 
     id_to_dirnode: None | EllipsisType | MutableMapping[int, tuple[str, int]] = None, 
     app: str = "android", 
-    max_workers: None | int = 0, 
+    max_workers: None | int = None, 
     max_dirs: int = 0, 
     *, 
     async_: Literal[False, True] = False, 
@@ -1320,9 +1320,9 @@ def iter_dirs(
         cid, 
         files=False, 
         id_to_dirnode=id_to_dirnode, 
-        app=app, 
+        app=app,  
         max_workers=max_workers, 
-        max_page=max_dirs and -(-max_dirs // 3000), 
+        max_page=max_dirs > 0 and -(-max_dirs // 3000), 
         async_=async_, # type: ignore
         **request_kwargs, 
     )
@@ -1396,7 +1396,7 @@ def iter_dirs_with_path(
     if isinstance(cid, Mapping):
         cid = cast(int | str, get_first(cid, "id", "pickcode"))
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if id_to_dirnode is None:
         id_to_dirnode = ID_TO_DIRNODE_CACHE[client.user_id]
     elif id_to_dirnode is ...:
@@ -1415,7 +1415,7 @@ def iter_dirs_with_path(
             id_to_dirnode=id_to_dirnode, 
             app=app, 
             max_workers=max_workers, 
-            max_page=max_dirs and -(-max_dirs // 3000), 
+            max_page=max_dirs > 0 and -(-max_dirs // 3000), 
             async_=async_, # type: ignore
             **request_kwargs, 
         ))
@@ -1449,8 +1449,8 @@ def iter_files(
     use_media_api: bool = False, 
     raise_for_changed_count: bool = False, 
     app: str = "android", 
-    cooldown: None | float = None, 
-    max_workers: None | int = 0, 
+    cooldown: None | float = 0.5, 
+    max_workers: None | int = None, 
     *, 
     async_: Literal[False] = False, 
     **request_kwargs, 
@@ -1472,8 +1472,8 @@ def iter_files(
     use_media_api: bool = False, 
     raise_for_changed_count: bool = False, 
     app: str = "android", 
-    cooldown: None | float = None, 
-    max_workers: None | int = 0, 
+    cooldown: None | float = 0.5, 
+    max_workers: None | int = None, 
     *, 
     async_: Literal[True], 
     **request_kwargs, 
@@ -1494,8 +1494,8 @@ def iter_files(
     use_media_api: bool = False, 
     raise_for_changed_count: bool = False, 
     app: str = "android", 
-    cooldown: None | float = None, 
-    max_workers: None | int = 0, 
+    cooldown: None | float = 0.5, 
+    max_workers: None | int = None, 
     *, 
     async_: Literal[False, True] = False, 
     **request_kwargs, 
@@ -1703,7 +1703,7 @@ def iter_files_with_path(
     if not (type or suffix):
         raise ValueError("please set the non-zero value of suffix or type")
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if isinstance(escape, bool):
         if escape:
             from posixpatht import escape
@@ -1773,8 +1773,8 @@ def iter_files_with_path(
                     files=False, 
                     id_to_dirnode=id_to_dirnode, 
                     max_workers=None, 
-                    max_page=max_dirs and -(-max_dirs // 3000), 
-                    app=app, 
+                    max_page=max_dirs > 0 and -(-max_dirs // 3000), 
+                    app="os_windows", 
                     async_=async_, 
                     **request_kwargs, 
                 ))
@@ -2035,7 +2035,7 @@ def iter_files_frament(
     use_media_api: bool = False, 
     raise_for_changed_count: bool = False, 
     app: str = "web", 
-    cooldown: None | float = None, 
+    cooldown: None | float = 0.5, 
     max_workers: None | int = None, 
     *, 
     async_: Literal[False] = False, 
@@ -2060,7 +2060,7 @@ def iter_files_frament(
     use_media_api: bool = False, 
     raise_for_changed_count: bool = False, 
     app: str = "web", 
-    cooldown: None | float = None, 
+    cooldown: None | float = 0.5, 
     max_workers: None | int = None, 
     *, 
     async_: Literal[True], 
@@ -2084,7 +2084,7 @@ def iter_files_frament(
     use_media_api: bool = False, 
     raise_for_changed_count: bool = False, 
     app: str = "web", 
-    cooldown: None | float = None, 
+    cooldown: None | float = 0.5, 
     max_workers: None | int = None, 
     *, 
     async_: Literal[False, True] = False, 
@@ -2138,7 +2138,7 @@ def iter_files_frament(
     if suffix:
         suffix = "." + suffix.lower()
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if id_to_dirnode is None:
         id_to_dirnode = ID_TO_DIRNODE_CACHE[client.user_id]
     elif id_to_dirnode is ... and (with_ancestors or with_path):
@@ -2236,7 +2236,7 @@ def traverse_tree(
     client: str | PathLike | P115Client, 
     cid: int | str | Mapping = 0, 
     id_to_dirnode: None | EllipsisType | MutableMapping[int, tuple[str, int]] = None, 
-    app: str = "android", 
+    app: str = "chrome", 
     max_workers: None | int = None, 
     max_files: int = 0, 
     max_dirs: int = 0, 
@@ -2250,7 +2250,7 @@ def traverse_tree(
     client: str | PathLike | P115Client, 
     cid: int | str | Mapping = 0, 
     id_to_dirnode: None | EllipsisType | MutableMapping[int, tuple[str, int]] = None, 
-    app: str = "android", 
+    app: str = "chrome", 
     max_workers: None | int = None, 
     max_files: int = 0, 
     max_dirs: int = 0, 
@@ -2263,7 +2263,7 @@ def traverse_tree(
     client: str | PathLike | P115Client, 
     cid: int | str | Mapping = 0, 
     id_to_dirnode: None | EllipsisType | MutableMapping[int, tuple[str, int]] = None, 
-    app: str = "android", 
+    app: str = "chrome", 
     max_workers: None | int = None, 
     max_files: int = 0, 
     max_dirs: int = 0, 
@@ -2286,7 +2286,7 @@ def traverse_tree(
     :return: 迭代器，返回此目录内的文件或目录节点的信息
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if id_to_dirnode is None:
         id_to_dirnode = ID_TO_DIRNODE_CACHE[client.user_id]
     elif id_to_dirnode is ...:
@@ -2307,7 +2307,7 @@ def traverse_tree(
             id_to_dirnode=id_to_dirnode, 
             app=app, 
             max_workers=max_workers, 
-            max_page=max_files and -(-max_files // 3000), 
+            max_page=max_files > 0 and -(-max_files // 3000), 
             async_=async_, 
             **request_kwargs, 
         )
@@ -2317,9 +2317,9 @@ def traverse_tree(
                 cid, 
                 files=False, 
                 id_to_dirnode=id_to_dirnode, 
-                app=app, 
+                app="os_windows", 
                 max_workers=max_workers, 
-                max_page=max_dirs and -(-max_dirs // 3000), 
+                max_page=max_dirs > 0 and -(-max_dirs // 3000), 
                 async_=async_, 
                 **request_kwargs, 
             )))
@@ -2340,7 +2340,7 @@ def traverse_tree_with_path(
     with_ancestors: bool = False, 
     escape: None | bool | Callable[[str], str] = True, 
     id_to_dirnode: None | EllipsisType | MutableMapping[int, tuple[str, int]] = None, 
-    app: str = "android", 
+    app: str = "chrome", 
     max_workers: None | int = None, 
     max_files: int = 0, 
     max_dirs: int = 0, 
@@ -2356,7 +2356,7 @@ def traverse_tree_with_path(
     with_ancestors: bool = False, 
     escape: None | bool | Callable[[str], str] = True, 
     id_to_dirnode: None | EllipsisType | MutableMapping[int, tuple[str, int]] = None, 
-    app: str = "android", 
+    app: str = "chrome", 
     max_workers: None | int = None, 
     max_files: int = 0, 
     max_dirs: int = 0, 
@@ -2371,7 +2371,7 @@ def traverse_tree_with_path(
     with_ancestors: bool = False, 
     escape: None | bool | Callable[[str], str] = True, 
     id_to_dirnode: None | EllipsisType | MutableMapping[int, tuple[str, int]] = None, 
-    app: str = "android", 
+    app: str = "chrome", 
     max_workers: None | int = None, 
     max_files: int = 0, 
     max_dirs: int = 0, 
@@ -2404,7 +2404,7 @@ def traverse_tree_with_path(
     if isinstance(cid, Mapping):
         cid = cast(int | str, get_first(cid, "id", "pickcode"))
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if id_to_dirnode is None:
         id_to_dirnode = ID_TO_DIRNODE_CACHE[client.user_id]
     elif id_to_dirnode is ...:
@@ -2425,7 +2425,7 @@ def traverse_tree_with_path(
             id_to_dirnode=id_to_dirnode, 
             app=app, 
             max_workers=max_workers, 
-            max_page=max_files and -(-max_files // 3000), 
+            max_page=max_files > 0 and -(-max_files // 3000), 
             async_=async_, 
             **request_kwargs, 
         )
@@ -2530,7 +2530,7 @@ def iter_nodes(
     :return: 迭代器，产生详细的信息
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if id_to_dirnode is None:
         id_to_dirnode = ID_TO_DIRNODE_CACHE[client.user_id]
     def project(resp: dict, /) -> None | dict:
@@ -2603,7 +2603,7 @@ def iter_nodes_skim(
     :return: 迭代器，获取节点的简略信息
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     def get_nodes(resp: dict, /) -> list[dict]:
         if resp.get("error") == "文件不存在":
             return []
@@ -2679,7 +2679,7 @@ def iter_nodes_by_pickcode(
     :return: 迭代器，产生详细的信息
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if id_to_dirnode is None:
         id_to_dirnode = ID_TO_DIRNODE_CACHE[client.user_id]
     methods: list[Callable] = []
@@ -2776,7 +2776,7 @@ def iter_nodes_using_update(
     :return: 迭代器，产生详细的信息
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if id_to_dirnode is None:
         id_to_dirnode = ID_TO_DIRNODE_CACHE[client.user_id]
     def project(resp: dict, /) -> None | dict:
@@ -2855,7 +2855,7 @@ def iter_nodes_using_info(
     :return: 迭代器，产生详细的信息
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if id_to_dirnode is None:
         id_to_dirnode = ID_TO_DIRNODE_CACHE[client.user_id]
     get_method: Callable[[], Callable]
@@ -2992,7 +2992,7 @@ def iter_nodes_using_event(
             }
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if id_to_dirnode is None:
         id_to_dirnode = ID_TO_DIRNODE_CACHE[client.user_id]
     if type == "doc":
@@ -3071,7 +3071,7 @@ def iter_dir_nodes_using_star(
     id_to_dirnode: None | EllipsisType | MutableMapping[int, tuple[str, int]] = None, 
     raise_for_changed_count: bool = False, 
     app: str = "android", 
-    cooldown: None | float = None, 
+    cooldown: None | float = 0.5, 
     max_workers: None | int = 0, 
     already_stared: bool = False, 
     *, 
@@ -3086,7 +3086,7 @@ def iter_dir_nodes_using_star(
     id_to_dirnode: None | EllipsisType | MutableMapping[int, tuple[str, int]] = None, 
     raise_for_changed_count: bool = False, 
     app: str = "android", 
-    cooldown: None | float = None, 
+    cooldown: None | float = 0.5, 
     max_workers: None | int = 0, 
     already_stared: bool = False, 
     *, 
@@ -3100,7 +3100,7 @@ def iter_dir_nodes_using_star(
     id_to_dirnode: None | EllipsisType | MutableMapping[int, tuple[str, int]] = None, 
     raise_for_changed_count: bool = False, 
     app: str = "android", 
-    cooldown: None | float = None, 
+    cooldown: None | float = 0.5, 
     max_workers: None | int = 0, 
     already_stared: bool = False, 
     *, 
@@ -3129,7 +3129,7 @@ def iter_dir_nodes_using_star(
     :return: 迭代器，产生详细的信息
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     def gen_step():
         nonlocal ids
         ts = int(time())
@@ -3208,7 +3208,7 @@ def iter_parents(
     :return: 迭代器，产生 id 和 最近 3 级目录名的元组的 2 元组
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     def fix_overflow(t: tuple[str, ...], /) -> tuple[str, ...]:
         try:
             start = t.index("文件") + 1
@@ -3619,7 +3619,7 @@ def iter_media_files(
         attr["name"] = attr["file_name"]
         return attr
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if page_size <= 0:
         page_size = 8192
     elif page_size < 16:
@@ -3743,7 +3743,7 @@ def search_iter(
     if isinstance(cid, Mapping):
         cid = cast(int | str, get_first(cid, "id", "pickcode"))
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if not isinstance(client, P115Client) or app == "open":
         fs_search: Callable = client.fs_search_open
     elif app in ("", "web", "desktop", "aps"):
@@ -3880,7 +3880,7 @@ def share_iterdir(
     if client is None:
         client = P115Client("")
     elif isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if app in ("", "web", "desktop", "aps"):
         share_snap: Callable = client.share_snap
     else:
@@ -4229,7 +4229,7 @@ def share_iter_files(
     if isinstance(cid, Mapping):
         cid = cast(int, cid["id"])
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if app in ("", "web", "desktop", "aps"):
         share_downlist: Callable = client.share_downlist
     else:
@@ -4367,7 +4367,7 @@ def share_search_iter(
     if isinstance(cid, Mapping):
         cid = cast(int, cid["id"])
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if offset < 0:
         offset = 0
     elif offset >= 10_000:
@@ -4469,7 +4469,7 @@ def extract_iterdir(
     if isinstance(path, Mapping):
         path = cast(str, path["path"])
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     pickcode = client.to_pickcode(pickcode)
     def gen_step():
         next_marker = ""
@@ -4768,7 +4768,7 @@ def extract_iter_files(
     if isinstance(path, Mapping):
         path = cast(str, path["path"])
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     pickcode = client.to_pickcode(pickcode)
     if app in ("", "web", "desktop", "aps"):
         extract_folders: Callable = client.extract_folders

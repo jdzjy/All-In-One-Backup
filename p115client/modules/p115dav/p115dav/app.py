@@ -95,7 +95,6 @@ def make_application(
     cache_url: bool = False, 
     cache_size: int = 65536, 
     debug: bool = False, 
-    check_for_relogin: bool = False, 
     # TODO: 可以指定前端文件地址，如果为 None，则展示默认
     frontend_dir = None, 
 ) -> Application:
@@ -112,7 +111,6 @@ def make_application(
     :param cache_size: 缓存数量（内部的每个字典都限制为此规模，而不是所有的字典总共限制为此规模），<= 0 时无限
     :param debug: 是否启用调试
     :param wsgidav_config: WebDAV 配置信息，具体请参考：https://wsgidav.readthedocs.io/en/latest/user_guide_configure.html
-    :param check_for_relogin: 是否在登录失效后，尝试重新登录
 
     :return: blacksheep 应用
     """
@@ -258,7 +256,6 @@ def make_application(
         client = P115Client(
             cookies_path, 
             app="alipaymini", 
-            check_for_relogin=check_for_relogin, 
         )
         if app_id is None:
             get_base_url = cycle((

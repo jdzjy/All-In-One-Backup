@@ -91,8 +91,6 @@ options:
                         
   -H HOST, --host HOST  ip 或 hostname，默认值：'0.0.0.0'
   -P PORT, --port PORT  端口号，默认值：8000，如果为 0 则自动确定
-  -cl, --check-for-relogin
-                        当风控时，自动重新扫码登录
   -cu, --cache-url      缓存下载链接
   -d, --debug           启用 debug 模式，输出详细的错误信息
   -ass, --load-libass   加载 libass.js，实现 ass/ssa 字幕特效

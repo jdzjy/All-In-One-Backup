@@ -31,7 +31,6 @@ cookies 文件保存路径，默认为当前工作目录下的 115-cookies.txt
     p115dav --cookies-path <(echo "$COOKIES")
 
 """)
-parser.add_argument("-cl", "--check-for-relogin", action="store_true", help="当风控时，自动重新扫码登录")
 parser.add_argument("-nt", "--no-thumbs", action="store_true", help="不要为请求图片链接提供缩略图")
 parser.add_argument("-o", "--origin-302", help="设置 302 请求转发。如果为空，则由此模块提供；特别的，如果缺省此参数，则视为缓存链接；如果为空字符串 ''，则不缓存")
 parser.add_argument("-wc", "--wsgidav-config-path", help="""WsgiDAV 启动时的配置文件路径，支持 JSON、YAML 或 TOML 格式，会根据扩展名确定，不能确定时视为 JSON
@@ -94,10 +93,9 @@ def main(argv: None | list[str] | Namespace = None, /):
     if not origin_302:
         origin_302 = origin_302 is None
     provider = P115FileSystemProvider(
-        P115Client(cookies_path, check_for_relogin=args.check_for_relogin), 
+        P115Client(cookies_path), 
         origin_302=origin_302, 
         use_thumbs=not args.no_thumbs, 
-        check_for_relogin=args.check_for_relogin, 
     )
     provider.run_forever(run_config)
 

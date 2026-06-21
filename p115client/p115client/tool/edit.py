@@ -84,7 +84,7 @@ def update_abstract(
     :param request_kwargs: 其它请求参数
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     def gen_step():
         setter = partial(getattr(client, method), async_=async_, **request_kwargs)
         def call(batch, /):
@@ -221,7 +221,7 @@ def update_star(
     :param request_kwargs: 其它请求参数
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if app == "open" or not isinstance(client, P115Client):
         method = "fs_star_set_open"
     elif app in ("", "web", "desktop", "aps"):
@@ -603,7 +603,7 @@ def update_name(
     :return: 成功命名的 {id: name} 的字典
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if app in ("", "web", "desktop", "aps"):
         method: Callable = client.fs_rename
     else:
@@ -678,7 +678,7 @@ def batch_unstar(
     :param request_kwargs: 其它请求参数
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     def get_id(info: dict, /) -> int:
         for k in ("file_id", "category_id", "fid", "cid"):
             if k in info:
@@ -797,7 +797,7 @@ def post_event(
     :param request_kwargs: 其它请求参数
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if type == "doc":
         post = client.life_behavior_doc_post_app
     else:
@@ -869,7 +869,7 @@ def makedir(
     :return: 目录 id
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if app == "open" or not isinstance(client, P115Client):
         if contain_dir:
             raise ValueError("115 Open does not support one-shot multiple-level directories creation")
@@ -958,7 +958,7 @@ def iter_batch_makedir(
     :return: 迭代器，产生 (**每项输入**, **相应的接口响应**) 的 2 元组
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     pid = to_id(pid)
     if app == "open" or not isinstance(client, P115Client):
         if contain_dir:
@@ -1062,7 +1062,7 @@ def batch_makedir(
         def take(it, /):
             for _ in it: pass
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if (isinstance(pairs, str) or 
         isinstance(pairs, tuple) and 
         len(pairs) == 2 and 
@@ -1159,7 +1159,7 @@ def batch_copy(
     :param request_kwargs: 其它请求参数
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if app == "open" or not isinstance(client, P115Client):
         fs_copy: Callable = client.fs_copy_open
     elif app in ("", "web", "desktop", "aps"):
@@ -1227,7 +1227,7 @@ def batch_delete(
     :param request_kwargs: 其它请求参数
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if app == "open" or not isinstance(client, P115Client):
         fs_delete: Callable = client.fs_delete_open
     elif app in ("", "web", "desktop", "aps"):
@@ -1298,7 +1298,7 @@ def batch_move(
     :param request_kwargs: 其它请求参数
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if app == "open" or not isinstance(client, P115Client):
         fs_move: Callable = client.fs_move_open
     elif app in ("", "web", "desktop", "aps"):
@@ -1370,7 +1370,7 @@ def batch_recyclebin_clean(
     :param request_kwargs: 其它请求参数
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if app == "open" or not isinstance(client, P115Client):
         recyclebin_clean: Callable = client.recyclebin_clean_open
     elif app in ("", "web", "desktop", "aps"):
@@ -1441,7 +1441,7 @@ def batch_recyclebin_revert(
     :param request_kwargs: 其它请求参数
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if app == "open" or not isinstance(client, P115Client):
         recyclebin_revert: Callable = client.recyclebin_revert_open
     elif app in ("", "web", "desktop", "aps"):
@@ -1508,7 +1508,7 @@ def batch_hide(
     :param request_kwargs: 其它请求参数
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if app in ("", "web", "desktop", "aps"):
         fs_hide: Callable = client.fs_hide
     else:
@@ -1579,7 +1579,7 @@ def copyfile(
     :return: 接口响应信息
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if app == "open" or not isinstance(client, P115Client):
         get_url: Callable = client.download_url_open
         fs_copy: Callable = client.fs_copy_open
@@ -1699,7 +1699,7 @@ def renamefile(
     :return: 接口响应信息
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if app == "open" or not isinstance(client, P115Client):
         get_url: Callable = client.download_url_open
         fs_move: Callable = client.fs_move_open
@@ -1836,9 +1836,9 @@ def transferfile(
     :return: 接口响应信息
     """
     if isinstance(client_from, (str, PathLike)):
-        client_from = P115Client(client_from, check_for_relogin=True)
+        client_from = P115Client(client_from)
     if isinstance(client_to, (str, PathLike)):
-        client_to = P115Client(client_to, check_for_relogin=True)
+        client_to = P115Client(client_to)
     if not isinstance(client_from, P115Client) or app == "open":
         get_url: Callable = client_from.download_url_open
     else:

@@ -66,7 +66,7 @@ def generate_auth_factory(
     :return: 函数，调用以返回一个字典，包含 authorization 请求头
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     login = client.login_with_open
     get_app_id = cycle(app_ids).__next__
     def make_cookies(async_: bool = False):
@@ -105,7 +105,7 @@ def generate_cookies_factory(
     :return: 函数，调用以返回一个字典，包含 cookie 请求头
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if isinstance(app, str):
         if app:
             if app == client.login_app():
@@ -159,7 +159,7 @@ def generate_client_factory(
     :return: 函数，调用以返回一个 client
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     cls = type(client)
     call = generate_cookies_factory(client, app, **request_kwargs)
     def make_client(async_: bool = False):

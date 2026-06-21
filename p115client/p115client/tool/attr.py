@@ -674,7 +674,7 @@ def get_attr(
     :return: 文件或目录的信息
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     id = to_id(id)
     def gen_step():
         from dictattr import AttrDict
@@ -788,7 +788,7 @@ def get_info(
     :return: 文件或目录的信息
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if id_to_dirnode is None:
         id_to_dirnode = ID_TO_DIRNODE_CACHE[client.user_id]
     try:
@@ -883,7 +883,7 @@ def iter_list(
     :return: 迭代器，每迭代一次执行一次分页拉取请求（就像瀑布流）
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if id_to_dirnode is None:
         id_to_dirnode = ID_TO_DIRNODE_CACHE[client.user_id]
     cid = to_id(cid)
@@ -973,7 +973,7 @@ def get_ancestors(
             }
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if id_to_dirnode is None:
         id_to_dirnode = ID_TO_DIRNODE_CACHE[client.user_id]
     def get_resp_by_info(id: int, /):
@@ -1436,7 +1436,7 @@ def get_id_to_path(
     :return: 文件或目录的 id
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if id_to_dirnode is None:
         id_to_dirnode = ID_TO_DIRNODE_CACHE[client.user_id]
     error = FileNotFoundError(errno.ENOENT, f"no such path: {path!r}")
@@ -1626,7 +1626,7 @@ def get_id_to_sha1(
     sha1 = sha1.upper()
     assert size or sha1 == "DA39A3EE5E6B4B0D3255BFEF95601890AFD80709"
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     def gen_step():
         search: None | Callable = None
         if not isinstance(client, P115Client) or app == "open":
@@ -1721,7 +1721,7 @@ def get_id_to_name(
     """
     assert name
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     def gen_step():
         if not isinstance(client, P115Client) or app == "open":
             search: Callable = client.fs_search_open
@@ -1985,7 +1985,7 @@ def share_get_id_to_path(
     :return: 文件或目录的 id
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     def gen_step():
         nonlocal ensure_file, cid, id_to_dirnode
         payload = cast(dict, share_extract_payload(share_code))
@@ -2148,7 +2148,7 @@ def share_get_id_to_name(
     """
     assert share_code and name
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     def gen_step():
         search = client.share_search
         payload = cast(dict, share_extract_payload(share_code))
@@ -2235,7 +2235,7 @@ def get_file_count(
     :return: 目录内的文件总数（不包括目录）
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     def gen_step(cid: int = to_id(cid), /):
         if not cid:
             resp = yield client.fs_space_summury(async_=async_, **request_kwargs)
@@ -2345,7 +2345,7 @@ def get_url(
     :return: 文件的下载链接
     """
     if not isinstance(client, (P115Client, P115OpenClient)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     if share_code:
         def gen_step():
             assert isinstance(client, P115Client)
