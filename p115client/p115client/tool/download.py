@@ -1541,7 +1541,7 @@ def iter_download_nodes(
         else:
             q = Queue(max_workers)
             lock = Lock()
-        get, put, put_nowait = q.get, q.put, q.put_nowait
+        get, put = q.get, q.put
         task_list: list = []
         task_page: list[int] = []
         task_ids: set[int] = set()
@@ -1549,8 +1549,6 @@ def iter_download_nodes(
         def countdown(task_id, /):
             task_list[task_id] = None
             discard_task_id(task_id)
-            if not task_ids:
-                put_nowait(sentinel)
         def set_max_page(page: int, /):
             nonlocal max_page
             if 0 < max_page <= page:
@@ -1621,13 +1619,15 @@ def iter_download_nodes(
                 pass
             except BaseException as e:
                 running = False
-                put_nowait(e)
+                put(e)
                 for i, task in enumerate(task_list):
                     if task:
                         task.cancel()
                         countdown(i)
             finally:
                 countdown(task_id)
+                if not task_ids:
+                    yield put(sentinel)
         def gen_step():
             nonlocal running
             if async_:
@@ -1836,28 +1836,25 @@ def _iter_download_nodes_multi(
         else:
             q = Queue(max_workers)
             lock = Lock()
-        get, put, put_nowait = q.get, q.put, q.put_nowait
+        get, put = q.get, q.put
         task_list: list = []
         task_page: list[tuple[str, int]] = []
         task_ids: set[int] = set()
         discard_task_id = task_ids.discard
-        max_page_reached: set[str] = set()
         def countdown(task_id, /):
             task_list[task_id] = None
             discard_task_id(task_id)
-            if not task_ids:
-                put_nowait(sentinel)
         page_max: dict[str, int] = {}
         def set_max_page(pickcode: str, page: int, /):
-            if not (0 < page_max.get(pickcode, 0) <= page):
-                page_max[pickcode] = page
-                max_page_reached.add(pickcode)
-                if len(page_max) == len(page_idx):
-                    for i, (pc, p) in enumerate(task_page):
-                        task = task_list[i]
-                        if task and pc == pickcode and p > page:
-                            task.cancel()
-                            countdown(i)
+            if 0 < page_max.get(pickcode, 0) <= page:
+                return
+            page_max[pickcode] = page
+            if len(page_max) == len(page_idx):
+                for i, (pc, p) in enumerate(task_page):
+                    task = task_list[i]
+                    if task and pc == pickcode and p > page:
+                        task.cancel()
+                        countdown(i)
         def next_pickcode_page_iter():
             while True:
                 i = 0
@@ -1893,13 +1890,15 @@ def _iter_download_nodes_multi(
                 pass
             except BaseException as e:
                 running = False
-                put_nowait(e)
+                put(e)
                 for i, task in enumerate(task_list):
                     if task:
                         task.cancel()
                         countdown(i)
             finally:
                 countdown(task_id)
+                if not task_ids:
+                    yield put(sentinel)
     def gen_step():
         if pickcodes:
             for pc in pickcodes:

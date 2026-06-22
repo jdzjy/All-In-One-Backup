@@ -4,11 +4,11 @@
 from __future__ import annotations
 
 __author__ = "ChenyangGao <https://chenyanggao.github.io>"
-__version__ = (0, 0, 3)
+__version__ = (0, 0, 4)
 __license__ = "GPLv3 <https://www.gnu.org/licenses/gpl-3.0.txt>"
 __all__ = ["FileResource", "FolderResource", "P115FileSystemProvider"]
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, MutableMapping
 from functools import cached_property
 from mimetypes import guess_type
 from os import PathLike
@@ -474,7 +474,7 @@ class P115FileSystemProvider(DAVProvider):
         self.client = client
         self.origin_302 = ""
         if not origin_302:
-            self._url_cache = None
+            self._url_cache: None | MutableMapping = None
         elif isinstance(origin_302, str):
             self.origin_302 = origin_302
         elif origin_302 is True or origin_302 < 0:

@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "p115wsgidav"
-version = "0.0.3.4"
+version = "0.0.4"
 description = "Python 115 WsgiDAV"
 authors = ["ChenyangGao <wosiwujm@gmail.com>"]
 license = "MIT"
@@ -28,7 +28,7 @@ include = [
 [tool.poetry.dependencies]
 python = "^3.12"
 cachedict = ">=0.0.7"
-p115client = ">=0.0.7.7"
+p115client = ">=0.0.8.9.7.1"
 pyyaml = "*"
 wsgidav = "*"
 yarl = "*"

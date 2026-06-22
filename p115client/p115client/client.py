@@ -17260,6 +17260,8 @@ class P115Client(P115OpenClient):
             - total_count: int = <default> 💡 列表所有项数
             - type: int = <default> 💡 类型
         """
+        if app in ("", "desktop", "chrome", "aps"):
+            app = "web"
         api = complete_url(f"/api/1.0/{app}/1.0/life/life_list", base_url=base_url)
         if isinstance(payload, (int, str)):
             payload = {"start": payload}

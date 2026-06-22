@@ -8,8 +8,9 @@ __all__ = [
 __doc__ = "这个模块提供了一些和 115 生活操作事件有关的函数"
 
 from asyncio import sleep as async_sleep
-from collections.abc import AsyncIterator, Container, Coroutine, Iterator
+from collections.abc import AsyncIterator, Callable, Container, Coroutine, Iterator
 from functools import partial
+from itertools import cycle
 from os import PathLike
 from time import time, sleep
 from typing import overload, Any, Final, Literal
@@ -17,6 +18,12 @@ from typing import overload, Any, Final, Literal
 from iterutils import run_gen_step_iter, with_iter_next, Yield
 
 from ..client import check_response, P115Client
+
+
+get_webapi_origin: Final = cycle((
+    "https://webapi.115.com", "http://web.api.115.com", 
+    "https://115cdn.com/webapi", "https://115vod.com/webapi", 
+)).__next__
 
 
 # 115 生活操作事件，默认在迭代时会被忽略的一些事件（都是一些浏览而不是改动的操作）
@@ -127,7 +134,13 @@ def iter_life_list(
     if isinstance(client, (str, PathLike)):
         client = P115Client(client)
     life_list = partial(client.life_list, app=app, **request_kwargs)
-    life_behavior_detail = partial(client.life_behavior_detail_app, **request_kwargs)
+    if app in ("", "web", "desktop", "chrome", "aps"):
+        life_behavior_detail: Callable = partial(
+            client.life_behavior_detail, 
+            **{**request_kwargs, "base_url": get_webapi_origin}, 
+        )
+    else:
+        life_behavior_detail = partial(client.life_behavior_detail_app, app=app, **request_kwargs)
     def gen_step():
         nonlocal start_time
         end_time = int(time())
@@ -185,8 +198,10 @@ def iter_life_behavior_once(
     from_time: float = 0, 
     type: str = "", 
     ignore_types: None | Container[int] = IGNORE_BEHAVIOR_TYPES, 
+    yield_latest: bool = True, 
     date: str = "", 
     first_batch_size = 0, 
+    offset: int = 0, 
     app: str = "web", 
     cooldown: float = 0, 
     *, 
@@ -201,8 +216,10 @@ def iter_life_behavior_once(
     from_time: float = 0, 
     type: str = "", 
     ignore_types: None | Container[int] = IGNORE_BEHAVIOR_TYPES, 
+    yield_latest: bool = True, 
     date: str = "", 
     first_batch_size = 0, 
+    offset: int = 0, 
     app: str = "web", 
     cooldown: float = 0, 
     *, 
@@ -216,8 +233,10 @@ def iter_life_behavior_once(
     from_time: float = 0, 
     type: str = "", 
     ignore_types: None | Container[int] = IGNORE_BEHAVIOR_TYPES, 
+    yield_latest: bool = True, 
     date: str = "", 
     first_batch_size = 0, 
+    offset: int = 0, 
     app: str = "web", 
     cooldown: float = 0, 
     *, 
@@ -230,6 +249,9 @@ def iter_life_behavior_once(
         当你指定有 ``from_id != 0`` 时，如果 from_time 为 0，则自动重设为 -1
 
     .. caution::
+        如果 app="web"，只能获取前 10,000 条数据
+
+    .. caution::
         115 并没有收集 复制文件 和 文件改名 的事件，以及第三方上传可能会没有 上传事件 ("upload_image_file" 和 "upload_file")
 
         也没有从回收站的还原文件或目录的事件，但是只要你还原了，以前相应的删除事件就会消失
@@ -239,8 +261,10 @@ def iter_life_behavior_once(
     :param from_time: 开始时间（含），若为 0 则从当前时间开始，若 < 0 则从最早开始
     :param type: 指定拉取的操作事件名称，若不指定则是全部
     :param ignore_types: 一组要被忽略的操作事件类型代码，仅当 `type` 为空时生效
+    :param yield_latest: 同一个文件 id，是否只输出最新的
     :param date: 日期，格式为 YYYY-MM-DD，若指定则只拉取这一天的数据
     :param first_batch_size: 首批的拉取数目
+    :param offset: 开始索引，从 0 开始
     :param app: 使用某个 app （设备）的接口
     :param cooldown: 冷却时间，大于 0 时，两次接口调用之间至少间隔这么多秒
     :param async_: 是否异步
@@ -250,7 +274,7 @@ def iter_life_behavior_once(
     """
     if isinstance(client, (str, PathLike)):
         client = P115Client(client)
-    if app in ("", "web", "desktop", "aps"):
+    if app in ("", "web", "desktop", "chrome", "aps"):
         life_behavior_detail = partial(client.life_behavior_detail, **request_kwargs)
     else:
         life_behavior_detail = partial(client.life_behavior_detail_app, app=app, **request_kwargs)
@@ -259,14 +283,15 @@ def iter_life_behavior_once(
     if from_id and not from_time:
         from_time = -1
     def gen_step():
+        nonlocal offset
         payload = {"type": type, "date": date, "limit": first_batch_size, "offset": 0}
-        seen: set[str] = set()
-        seen_add = seen.add
+        if yield_latest:
+            seen: set[str] = set()
+            seen_add = seen.add
         ts_last_call = time()
         resp = yield life_behavior_detail(payload, async_=async_)
         events = check_response(resp)["data"]["list"]
         payload["limit"] = 1000
-        offset = 0
         while events:
             for event in events:
                 if (from_id and int(event["id"]) <= from_id or 
@@ -275,11 +300,15 @@ def iter_life_behavior_once(
                     return
                 event_type = event["type"]
                 fid = event["file_id"]
-                if fid not in seen:
-                    if type or not ignore_types or event_type not in ignore_types:
-                        event["event_name"] = BEHAVIOR_TYPE_TO_NAME.get(event_type, "")
-                        yield Yield(event)
-                    seen_add(fid)
+                if yield_latest:
+                    if fid not in seen:
+                        if type or not ignore_types or event_type not in ignore_types:
+                            event["event_name"] = BEHAVIOR_TYPE_TO_NAME.get(event_type, "")
+                            yield Yield(event)
+                        seen_add(fid)
+                elif type or not ignore_types or event_type not in ignore_types:
+                    event["event_name"] = BEHAVIOR_TYPE_TO_NAME.get(event_type, "")
+                    yield Yield(event)
             offset += len(events)
             if offset >= int(resp["data"]["count"]):
                 return
@@ -302,6 +331,7 @@ def iter_life_behavior(
     from_time: float = 0, 
     type: str = "", 
     ignore_types: None | Container[int] = IGNORE_BEHAVIOR_TYPES, 
+    yield_latest: bool = True, 
     app: str = "web", 
     cooldown: float = 0, 
     interval: int | float = 0, 
@@ -317,6 +347,7 @@ def iter_life_behavior(
     from_time: float = 0, 
     type: str = "", 
     ignore_types: None | Container[int] = IGNORE_BEHAVIOR_TYPES, 
+    yield_latest: bool = True, 
     app: str = "web", 
     cooldown: float = 0, 
     interval: int | float = 0, 
@@ -331,6 +362,7 @@ def iter_life_behavior(
     from_time: float = 0, 
     type: str = "", 
     ignore_types: None | Container[int] = IGNORE_BEHAVIOR_TYPES, 
+    yield_latest: bool = True, 
     app: str = "web", 
     cooldown: float = 0, 
     interval: int | float = 0, 
@@ -344,6 +376,9 @@ def iter_life_behavior(
         当你指定有 ``from_id != 0`` 时，如果 from_time 为 0，则自动重设为 -1
 
     .. caution::
+        如果 app="web"，只能获取前 10,000 条数据
+
+    .. caution::
         115 并没有收集 复制文件 和 文件改名 的事件，以及第三方上传可能会没有 上传事件 ("upload_image_file" 和 "upload_file")
 
         也没有从回收站的还原文件或目录的事件，但是只要你还原了，以前相应的删除事件就会消失
@@ -353,6 +388,7 @@ def iter_life_behavior(
     :param from_time: 开始时间（含），若为 0 则从当前时间开始，若 < 0 则从最早开始
     :param type: 指定拉取的操作事件名称
     :param ignore_types: 一组要被忽略的操作事件类型代码，仅当 `type` 为空时生效
+    :param yield_latest: 同一个文件 id，是否只输出最新的
     :param cooldown: 冷却时间，大于 0 时，两次接口调用之间至少间隔这么多秒
     :param interval: 两个批量拉取之间的睡眠时间间隔，如果小于等于 0，则不睡眠
     :param app: 使用某个 app （设备）的接口
@@ -383,6 +419,7 @@ def iter_life_behavior(
                 from_id=from_id, 
                 from_time=from_time, 
                 type=type, 
+                yield_latest=yield_latest, 
                 app=app, 
                 cooldown=cooldown, 
                 async_=async_, 
@@ -411,6 +448,7 @@ def iter_life_behavior_list(
     from_time: float = 0, 
     type: str = "", 
     ignore_types: None | Container[int] = IGNORE_BEHAVIOR_TYPES, 
+    yield_latest: bool = True, 
     app: str = "web", 
     cooldown: float = 0, 
     *, 
@@ -425,6 +463,7 @@ def iter_life_behavior_list(
     from_time: float = 0, 
     type: str = "", 
     ignore_types: None | Container[int] = IGNORE_BEHAVIOR_TYPES, 
+    yield_latest: bool = True, 
     app: str = "web", 
     cooldown: float = 0, 
     *, 
@@ -438,6 +477,7 @@ def iter_life_behavior_list(
     from_time: float = 0, 
     type: str = "", 
     ignore_types: None | Container[int] = IGNORE_BEHAVIOR_TYPES, 
+    yield_latest: bool = True, 
     app: str = "web", 
     cooldown: float = 0, 
     *, 
@@ -450,6 +490,9 @@ def iter_life_behavior_list(
         当你指定有 ``from_id != 0`` 时，如果 from_time 为 0，则自动重设为 -1
 
     .. caution::
+        如果 app="web"，只能获取前 10,000 条数据
+
+    .. caution::
         115 并没有收集 复制文件 和 文件改名 的事件，以及第三方上传可能会没有 上传事件 ("upload_image_file" 和 "upload_file")
 
         也没有从回收站的还原文件或目录的事件，但是只要你还原了，以前相应的删除事件就会消失
@@ -459,6 +502,7 @@ def iter_life_behavior_list(
     :param from_time: 开始时间（含），若为 0 则从当前时间开始，若 < 0 则从最早开始
     :param type: 指定拉取的操作事件名称
     :param ignore_types: 一组要被忽略的操作事件类型代码，仅当 `type` 为空时生效
+    :param yield_latest: 同一个文件 id，是否只输出最新的
     :param app: 使用某个 app （设备）的接口
     :param cooldown: 冷却时间，大于 0 时，两次接口调用之间至少间隔这么多秒
     :param async_: 是否异步
@@ -482,6 +526,7 @@ def iter_life_behavior_list(
                 from_id=from_id, 
                 from_time=from_time, 
                 type=type, 
+                yield_latest=yield_latest, 
                 app=app, 
                 cooldown=cooldown, 
                 async_=async_, 

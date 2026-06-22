@@ -35,7 +35,7 @@ get_webapi_origin: Final = cycle((
     "https://115cdn.com/webapi", "https://115vod.com/webapi", 
     "https://f.115.com/api/proxy/115", "https://n.115.com/api/proxy/115", 
 )).__next__
-#get_proapi_origin: Final = cycle(("https://proapi.115.com", "https://pro.api.115.com")).__next__
+#get_proapi_origin: Final = cycle(("https://proapi.115.com", "http://pro.api.115.com")).__next__
 get_proapi_origin: Final = "https://proapi.115.com"
 
 

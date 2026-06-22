@@ -1322,7 +1322,7 @@ def iter_dirs(
         id_to_dirnode=id_to_dirnode, 
         app=app,  
         max_workers=max_workers, 
-        max_page=max_dirs > 0 and -(-max_dirs // 3000), 
+        max_page=max_dirs > 0 and -(-max_dirs // 5000), 
         async_=async_, # type: ignore
         **request_kwargs, 
     )
@@ -1415,7 +1415,7 @@ def iter_dirs_with_path(
             id_to_dirnode=id_to_dirnode, 
             app=app, 
             max_workers=max_workers, 
-            max_page=max_dirs > 0 and -(-max_dirs // 3000), 
+            max_page=max_dirs > 0 and -(-max_dirs // 5000), 
             async_=async_, # type: ignore
             **request_kwargs, 
         ))
@@ -1773,7 +1773,7 @@ def iter_files_with_path(
                     files=False, 
                     id_to_dirnode=id_to_dirnode, 
                     max_workers=None, 
-                    max_page=max_dirs > 0 and -(-max_dirs // 3000), 
+                    max_page=max_dirs > 0 and -(-max_dirs // 5000), 
                     app="os_windows", 
                     async_=async_, 
                     **request_kwargs, 
@@ -2307,7 +2307,7 @@ def traverse_tree(
             id_to_dirnode=id_to_dirnode, 
             app=app, 
             max_workers=max_workers, 
-            max_page=max_files > 0 and -(-max_files // 3000), 
+            max_page=max_files > 0 and -(-max_files // 5000), 
             async_=async_, 
             **request_kwargs, 
         )
@@ -2319,7 +2319,7 @@ def traverse_tree(
                 id_to_dirnode=id_to_dirnode, 
                 app="os_windows", 
                 max_workers=max_workers, 
-                max_page=max_dirs > 0 and -(-max_dirs // 3000), 
+                max_page=max_dirs > 0 and -(-max_dirs // 5000), 
                 async_=async_, 
                 **request_kwargs, 
             )))
@@ -2332,7 +2332,6 @@ def traverse_tree(
     return run_gen_step_iter(gen_step, async_)
 
 
-# TODO: 需要优化到 10 万条 2 秒内
 @overload
 def traverse_tree_with_path(
     client: str | PathLike | P115Client, 
@@ -2425,7 +2424,7 @@ def traverse_tree_with_path(
             id_to_dirnode=id_to_dirnode, 
             app=app, 
             max_workers=max_workers, 
-            max_page=max_files > 0 and -(-max_files // 3000), 
+            max_page=max_files > 0 and -(-max_files // 5000), 
             async_=async_, 
             **request_kwargs, 
         )
@@ -2437,7 +2436,6 @@ def traverse_tree_with_path(
                 with_ancestors=with_ancestors, 
                 escape=escape, 
                 id_to_dirnode=id_to_dirnode, 
-                app=app, 
                 max_workers=max_workers, 
                 max_dirs=max_dirs, 
                 async_=async_, # type: ignore
