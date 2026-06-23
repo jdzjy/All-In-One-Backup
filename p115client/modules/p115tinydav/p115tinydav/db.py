@@ -139,7 +139,7 @@ async def updatedb_life(
                 "parent_id": int(event.get("parent_id", 0)), 
                 "name": event["file_name"], 
                 "sha1": event.get("sha1", ""), 
-                "size": event.get("size", 0), 
+                "size": event.get("file_size", 0), 
                 "is_alive": 0, 
             })
         else:
@@ -149,7 +149,7 @@ async def updatedb_life(
                 "parent_id": pid, 
                 "name": event["file_name"], 
                 "sha1": event.get("sha1", ""), 
-                "size": event.get("size", 0), 
+                "size": event.get("file_size", 0), 
                 "is_alive": 1, 
             })
             if pid:

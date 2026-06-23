@@ -382,6 +382,9 @@ def call_wrap_with_pool(get_cert_headers: Callable, /, func: Callable) -> Callab
     return update_wrapper(wrapper, func)
 
 
-# TODO: 需要完整的类型签名
-# TODO: 池子可以被导出，下次继续使用
-# TODO: 支持多个不同设备的 cookies 组成池，以及刷新（自己刷新自己，或者由另一个 cookies 辅助刷新）
+# TODO: 还要支持对开放接口的连接池
+# TODO: 池子可以被导出，以便下次继续使用
+# TODO: 使用流程还应该被再次简化
+# TODO: 因为目前策略的调整，这个模块应该可以接管 request 方法，在内部自行决定处理的策略和时机
+# TODO: 也可以支持多个不同设备的 cookies 组成池，以及刷新（自己刷新自己，或者由另一个 cookies 辅助刷新，毕竟一个被风控的 cookies 刷新得到的另一个 cookies 可能继续被风控，但也可能他们是根据 cookie 的取得事件来决定批量风控的影响范围）
+

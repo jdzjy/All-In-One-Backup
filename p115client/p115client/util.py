@@ -164,7 +164,8 @@ def complete_url(
         - `https://f.115.com/api/proxy/115?domain={domain}&path={path}&{query}`
         - `https://n.115.com/api/proxy/115?domain={domain}&path={path}&{query}`
 
-        其中 `https://f.115.com` 和 `https://n.115.com` 可以拼接查询参数 `domain`，默认值是 "webapi"，请求时需要携带 "origin" 头
+        其中 `https://f.115.com` 和 `https://n.115.com` 可以拼接查询参数 `domain`，默认值是 "webapi"，请求时需要携带 "origin" 头。
+        而曾经的 `http://anxia.com` 和 `http://v.anxia.com` 已经不可用了。
     """
     if callable(path):
         path = path()
@@ -174,6 +175,7 @@ def complete_url(
         app = app()
     if callable(domain):
         domain = domain()
+    # NOTE: 曾经有测试地址 https://f.115.com/storage/allfiles 和 https://n.115.com/storage/allfiles
     if base_url.startswith(("http://f.115.com/api/proxy/115", "https://f.115.com/api/proxy/115", "http://n.115.com/api/proxy/115", "https://n.115.com/api/proxy/115")):
         as_query = True
     else:

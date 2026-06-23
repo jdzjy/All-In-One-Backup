@@ -217,6 +217,9 @@ def check_response(resp: dict | Awaitable[dict], /) -> dict | Coroutine[Any, Any
                 # {"state": false, "errno": 20001, "error": "目录名称不能为空"}
                 case 20001:
                     throw(errno.EINVAL, resp)
+                # {"state": false, "errno": 20002, "error": "目录名称不能超出20个字。"}
+                case 20002:
+                    throw(errno.EINVAL, resp)
                 # {"state": false, "errno": 20003, "error": "文件名不能包含以下任意字符之一 “ " < > ”。"}
                 case 20003:
                     throw(errno.EINVAL, resp)
@@ -251,6 +254,12 @@ def check_response(resp: dict | Awaitable[dict], /) -> dict | Coroutine[Any, Any
                 # {"state": false, "errno": 50038, "error": "下载失败，含违规内容"}
                 case 50038:
                     throw(errno.EACCES, resp)
+                # {"state": false, "errno": 51011, "error": "不允许转存空文件夹"}
+                case 51011:
+                    raise P115OperationalError(errno.EPERM, resp)
+                # {"state": false, "errno": 51012, "error": "已有文件正在解压中，请稍后再试"}
+                case 51012:
+                    throw(errno.EBUSY, resp)
                 # {"state": false, "errno": 91002, "error": "不能将文件复制到自身或其子目录下。"}
                 case 91002:
                     throw(errno.ENOTSUP, resp)
@@ -2783,7 +2792,7 @@ class P115OpenClient(ClientRequestMixin):
             https://www.yuque.com/115yun/open/qur839kyx9cgxpxi
 
         :payload:
-            - file_name: str 💡 新建目录名称，限制255个字符
+            - file_name: str     💡 新建目录名称，限制 255 个字符
             - pid: int | str = 0 💡 新建目录所在的父目录ID (根目录的ID为0)
         """
         api = complete_url("/open/folder/add", base_url)
@@ -7371,6 +7380,13 @@ class P115Client(P115OpenClient):
 
         POST https://webapi.115.com/files/add_extract_file
 
+        .. caution::
+            【解压到】任务不可并发、不可中止，空目录不会被导出，不会产生 life 操作事件。
+            目录层级最多 25 级（不算文件节点），对于超出此限制的路径，会直接把最终的文件保存到第 25 级之下，如果因此造成同名，会在扩展名前加 (1)，数字逐次增加，以此类推。
+            但如果文件名是类似 ".name" 的格式，会被视为 ".name.name" 处理，也就是名字翻倍，然后处理成 ".name(1).name"、".name(2).name"、... 这样累计下去，此时整个名字最多 510 字节（按 utf-8 编码算，即 255 * 2），此时扩展名不会变，只会截断当它充当文件名时尾部的一部分。
+            名字里面如果有 <>" 这 3 个字符，则会被替换为下划线 _。
+            文件名最多 75 个字符（不包括扩展名部分），超出部分会被截断。扩展名部分，不算前缀点号 . 时，最多 254 个字节（按 utf-8 编码算），但如果所有字符都相同的中文字，却最多只有 75 个（为什么呢？）。
+
         :payload:
             - pick_code: str
             - extract_file: str = ""
@@ -7421,6 +7437,13 @@ class P115Client(P115OpenClient):
         """解压缩到某个目录，推荐直接用封装函数 `extract_file`
 
         POST https://proapi.115.com/{app}/2.0/ufile/add_extract_file
+
+        .. caution::
+            【解压到】任务不可并发、不可中止，空目录不会被导出，不会产生 life 操作事件。
+            目录层级最多 25 级（不算文件节点），对于超出此限制的路径，会直接把最终的文件保存到第 25 级之下，如果因此造成同名，会在扩展名前加 (1)，数字逐次增加，以此类推。
+            但如果文件名是类似 ".name" 的格式，会被视为 ".name.name" 处理，也就是名字翻倍，然后处理成 ".name(1).name"、".name(2).name"、... 这样累计下去，此时整个名字最多 510 字节（按 utf-8 编码算，即 255 * 2），此时扩展名不会变，只会截断当它充当文件名时尾部的一部分。
+            名字里面如果有 <>" 这 3 个字符，则会被替换为下划线 _。
+            文件名最多 75 个字符（不包括扩展名部分），超出部分会被截断。扩展名部分，不算前缀点号 . 时，最多 254 个字节（按 utf-8 编码算），但如果所有字符都相同的中文字，却最多只有 75 个（为什么呢？）。
 
         :payload:
             - pick_code: str
@@ -7679,6 +7702,68 @@ class P115Client(P115OpenClient):
         **request_kwargs, 
     ) -> dict | Coroutine[Any, Any, dict]:
         """解压缩到某个目录，此方法是对 `extract_add_file` 的封装，推荐使用
+
+        .. caution::
+            【解压到】任务不可并发、不可中止，空目录不会被导出，不会产生 life 操作事件。
+            目录层级最多 25 级（不算文件节点），对于超出此限制的路径，会直接把最终的文件保存到第 25 级之下，如果因此造成同名，会在扩展名前加 (1)，数字逐次增加，以此类推。
+            但如果文件名是类似 ".name" 的格式，会被视为 ".name.name" 处理，也就是名字翻倍，然后处理成 ".name(1).name"、".name(2).name"、... 这样累计下去，此时整个名字最多 510 字节（按 utf-8 编码算，即 255 * 2），此时扩展名不会变，只会截断当它充当文件名时尾部的一部分。
+            名字里面如果有 <>" 这 3 个字符，则会被替换为下划线 _。
+            文件名最多 75 个字符（不包括扩展名部分），超出部分会被截断。扩展名部分，不算前缀点号 . 时，最多 254 个字节（按 utf-8 编码算），但如果所有字符都相同的中文字，却最多只有 75 个（为什么呢？）。
+
+        .. note::
+            一次解压任务，似乎最多 1 万个文件，而且会排除空目录。但你完全可以利用这一点，来批量创建一个目录结构。
+            虽然分次也能解压极大的压缩包，但相应的云解压的耗时也会同步大量增加，处理起来也更为复杂，我建议每次最好限制在 1 万条叶子节点以下。
+
+            1. 首先创建一个压缩包 zip 文件，把目录结构写进去，且为每个目录创建一个空文件，以避免被视为空目录（为了提高效率，请先把所有非叶子节点过滤掉）
+
+                .. code:: python
+
+                    from io import BytesIO
+                    from zipfile import ZipFile
+
+                    f = BytesIO()
+                    with ZipFile(f, "w") as z:
+                        for dir in dirs:
+                            z.writestr(dir + "/.placeholder", "")
+
+            2. 把所创建的 zip 压缩包上传到网盘
+
+                .. code:: python
+
+                    from p115client import check_response, P115Client
+
+                    client = P115Client.from_path()
+                
+                    resp = client.upload_file_sample(f.getbuffer(), filename='a.zip')
+                    check_response(resp)
+                    pickcode = resp["data"]["pick_code"]
+
+            3. 将压缩包云解压
+
+                .. code:: python
+
+                    client.extract_push(pickcode)
+                    # 查看进度用：client.extract_push_progress(pickcode)
+
+            4. 等待云解压完成后，把压缩包解压到网盘（耗时较长，且不可并发）
+
+                .. code:: python
+
+                    client.extract_file(pickcode)
+
+            5. 解压完成后，把里面所有的 .placeholder 占位文件找出来删了，这里假设顶层目录 id 是 ``pid``
+
+                .. code:: python
+
+                    from p115client.tool import batch_delete, iter_download_files
+
+                    empty_file_hash = "DA39A3EE5E6B4B0D3255BFEF95601890AFD80709"
+                    files = (
+                        info["pc"]
+                        for info in iter_download_nodes(client, pid, app="android", get_raw=True) 
+                        if info["sha1"] == empty_file_hash
+                    )
+                    batch_delete(client, files)
 
         :param pickcode: 压缩文件的提取码
         :param files:    待解压缩的文件路径（相对于 ``dirname``），如果以 "/" 结尾，则视为目录
@@ -9653,6 +9738,9 @@ class P115Client(P115OpenClient):
 
         POST https://webapi.115.com/files/export_dir
 
+        .. caution::
+            【导出目录树】任务不可并发、不可中止，空目录不会被导出，输出的文件不会产生 life 操作事件
+
         :payload:
             - file_ids: int | str   💡 多个用逗号 "," 隔开
             - target: str = "U_1_0" 💡 导出目录树到这个目录
@@ -9701,6 +9789,9 @@ class P115Client(P115OpenClient):
         """导出目录树
 
         POST https://proapi.115.com/{app}/2.0/ufile/export_dir
+
+        .. caution::
+            【导出目录树】任务不可并发、不可中止，空目录不会被导出，输出的文件不会产生 life 操作事件
 
         :payload:
             - file_ids: int | str   💡 多个用逗号 "," 隔开
@@ -13325,8 +13416,8 @@ class P115Client(P115OpenClient):
             3. 单个目录内最多 5 万个文件（用网页上传、创建 Office 文档此限制）
 
         :payload:
-            - cname: str
-            - pid: int | str = 0
+            - cname: str         💡 新建目录名称，限制 255 个字符
+            - pid: int | str = 0 💡 上级目录的 id
         """
         api = complete_url("/files/add", base_url=base_url)
         if isinstance(payload, str):
@@ -13374,7 +13465,7 @@ class P115Client(P115OpenClient):
         """新建目录，此接口是对 `fs_folder_update_app` 的封装
 
         :payload:
-            - name: str    💡 名字
+            - name: str          💡 新建目录名称，限制 255 个字符
             - pid: int | str = 0 💡 上级目录的 id
         """
         if isinstance(payload, str):
@@ -14493,6 +14584,143 @@ class P115Client(P115OpenClient):
         return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
 
     @overload
+    def fs_office_check_complete(
+        self, 
+        payload: int | str | dict, 
+        /, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def fs_office_check_complete(
+        self, 
+        payload: int | str | dict, 
+        /, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def fs_office_check_complete(
+        self, 
+        payload: int | str | dict, 
+        /, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """检查 office 保存任务完成情况
+
+        POST https://webapi.115.com/files/office?act=check_complete
+
+        :payload:
+            - office_id: int | str
+        """
+        api = complete_url("/files/office", base_url=base_url, query={"act": "check_complete"})
+        if isinstance(payload, (int, str)):
+            payload = {"office_id": payload}
+        return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
+
+    @overload
+    def fs_office_init(
+        self, 
+        payload: str | dict, 
+        /, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def fs_office_init(
+        self, 
+        payload: str | dict, 
+        /, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def fs_office_init(
+        self, 
+        payload: str | dict, 
+        /, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """初始化 office
+
+        POST https://webapi.115.com/files/office?act=office_init
+
+        :payload:
+            - pickcode: str
+        """
+        api = complete_url("/files/office", base_url=base_url, query={"act": "office_init"})
+        if isinstance(payload, str):
+            payload = {"pickcode": payload}
+        return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
+
+    @overload
+    def fs_office_save(
+        self, 
+        payload: int | str | dict, 
+        /, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def fs_office_save(
+        self, 
+        payload: int | str | dict, 
+        /, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def fs_office_save(
+        self, 
+        payload: int | str | dict, 
+        /, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """保存 office，即提交一个 office 的保存任务
+
+        POST https://webapi.115.com/files/office?act=save
+
+        .. todo::
+            临时数据需要经过 AES-128 加密，并用 WPS 的（类似如下）接口提交，以后等需要用到了再进行破解
+
+            https://kmon.kdocs.cn/api/relay/store/57QKSwAPhwr/log
+
+        .. caution::
+            用 office 来编辑文件，可以在 id 不变的情况下，修改文件数据，打破了文件一旦上传完成，内容就不会改变的固有认知
+
+        :payload:
+            - office_id: int | str
+        """
+        api = complete_url("/files/office", base_url=base_url, query={"act": "save"})
+        if isinstance(payload, (int, str)):
+            payload = {"office_id": payload}
+        return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
+
+    @overload
     def fs_order_set(
         self, 
         payload: str | dict, 
@@ -14647,6 +14875,7 @@ class P115Client(P115OpenClient):
 
         :payload:
             - pickcode: str 💡 提取码
+            - share_id: int | str = <default>
         """
         api = complete_url("/files/preview", base_url=base_url)
         if isinstance(payload, str):
@@ -20331,6 +20560,7 @@ class P115Client(P115OpenClient):
             - cid: int = 0      💡 分类 id：0:全部 -10:云收藏 -15:消息备忘
             - only_public: 0 | 1 = <default>
             - msg_note: 0 | 1 = <default>
+            - has_picknews: 0 | 1 = <default>
         """
         api = complete_url("/api/2.0/api.php", base_url=base_url, query={"ac": "note_list"})
         if isinstance(payload, int):
@@ -26218,6 +26448,23 @@ class P115Client(P115OpenClient):
 
         .. note::
             只要上传后的 `aid` 或 `area_id` 不为 1，则不占用空间，这是 `upload_file` 所不能的（因为即使指定了 "U_{aid}_{pid}"，也会忽略其中的 `aid`，强行视为 1）
+
+        .. note::
+            如果我们把文件名分成两部分，名字 + 扩展名（含前缀点号 .），那么就有以下限制：
+
+            1. 如果只有名字，最长 255 字节，超出则截掉尾部
+            2. 如果只有扩展名，最长 255 字节，超出则截掉尾部
+            3. 如果两者皆有，则情况比较复杂：
+
+                1. （😯 这属于通常情况了）如果扩展名长度 <= 253 字节，则总长度不超过 255 字节，名字的超出部分会被替换为两个点号 ..，占用 2 个字节
+                2. （😂 特意构造或者误断）如果扩展名长度 > 253 字节，允许的长度上限至少是 512 字节，又会有几套限制规则（具体会是哪一个，我目前还比较迷糊）：
+
+                    1. 总长不超过 552 字节，超出部分会直接截掉名字的尾部，仍然不够则再截掉扩展名的尾部，此时只有 552 字节的扩展名部分
+                    2. 总长不超过 512 字节，超出部分会直接截掉名字的尾部
+                    3. 总长不超过 512 字节，超出部分会直接截掉名字的尾部并替换为 2 个点号 ..，仍然不够则再截掉扩展名的尾部，极端情况下，扩展名为 510 字节，名字部分变成两个点号 ..，占 2 字节
+                    4. 总长不超过 512 字节，只要超过 255 字节，名字就被整体替换为 2 个点号 ..，仍然不够则再截掉扩展名的尾部
+                    5. 总长不超过 512 字节，只要超过 255 字节，只会把名字的最后两个字符替换为 2 个点号 ..
+                    6. ... (其它未被发现的规则，例如我还未测试仅含中文的场景)
 
         .. note::
             通过 ``pid``，支持随意指定上传目标。特别是当格式为 f"U_{aid}_{pid}"，允许其中的 ``aid != 1`` 和 ``pid < 0``（可能有特殊指代）。

@@ -4,8 +4,8 @@
 __all__ = [
     "get_pic_url", "batch_get_url", "iter_url_batches", "iter_files_with_url", 
     "iter_images_with_url", "iter_subtitles_with_url", "iter_subtitle_batches", 
-    "make_strm", "iter_download_nodes", "iter_download_files", 
-    "get_remaining_open_count", "download_file", 
+    "iter_download_nodes", "iter_download_files", "get_remaining_open_count", 
+    "download_file", 
 ]
 __doc__ = "这个模块提供了一些和下载有关的函数"
 
@@ -15,32 +15,23 @@ from asyncio import (
     Queue as AsyncQueue, TaskGroup, 
 )
 from base64 import b32decode
-from collections import defaultdict
 from collections.abc import (
     AsyncIterable, AsyncIterator, Buffer, Callable, Coroutine, 
     Iterable, Iterator, Mapping, MutableMapping, Sequence, 
 )
 from concurrent.futures import CancelledError, ThreadPoolExecutor
-from contextlib import contextmanager
-from datetime import datetime
 from functools import partial
 from inspect import isawaitable
 from itertools import batched, chain, count, repeat
-from os import (
-    cpu_count, fsdecode, makedirs, remove, rmdir, scandir, 
-    DirEntry, PathLike, 
-)
-from os.path import abspath, dirname, join as joinpath, normpath, splitext, getsize
+from os import cpu_count, makedirs, PathLike
+from os.path import dirname, getsize
 from queue import Queue
 from re import compile as re_compile
-from sqlite3 import Connection, Cursor
 from string import hexdigits, ascii_uppercase
 from sys import exc_info
 from threading import Lock
-from time import time
 from types import EllipsisType
 from typing import cast, overload, Any, Literal
-from urllib.parse import urlsplit
 from urllib.request import urlopen, Request
 from uuid import uuid4
 from warnings import warn
@@ -49,7 +40,6 @@ from argtools import argcount
 from asynctools import async_chain
 from concurrenttools import conmap, run_as_thread
 from dicttools import get_first
-from encode_uri import encode_uri_component_loose
 from errno2 import errno
 from filewrap import (
     bio_chunk_iter, bio_chunk_async_iter, 
@@ -69,9 +59,7 @@ from ..exception import P115Warning, P115AccessError
 from ..type import TaskResultTuple
 from ..util import reduce_image_url_layers
 from .attr import normalize_attr, normalize_attr_simple, get_attr, get_info
-from .iterdir import (
-    iterdir, iter_files, iter_files_shortcut, unescape_115_charref, 
-)
+from .iterdir import iterdir, iter_files, unescape_115_charref
 
 
 def _get_id(id: int | str | Mapping, /) -> int:
@@ -86,7 +74,7 @@ def _get_pickcode(client: P115OpenClient, pickcode: int | str | Mapping, /) -> s
     return client.to_pickcode(pickcode)
 
 
-# TODO: 支持用 note 接口
+# TODO: 目前至少有 4 个接口可用于获取图片链接，以后允许选择用哪一种
 @overload
 def get_pic_url(
     client: str | PathLike | P115Client, 
@@ -972,408 +960,6 @@ def iter_subtitle_batches(
             finally:
                 yield fs_delete(scid, async_=async_, **request_kwargs)
     return run_gen_step_iter(gen_step, async_)
-
-
-# TODO: 实现 p115updatedb 的逻辑，但多了一个 user_id 字段
-# TODO: 分成 2 部分拉取（并发），1. 拉取目录 iter_dirs 2. 拉取文件 iter_files+normalize_attr_simple
-# TODO: 支持增量更新，根据 mtime 逆序排列进行比对
-# TODO: 允许只拉取 1 级
-# TODO: 这个函数可以作为 p115dav 的基础
-# TODO: 首先判断数据库里面有没有这个id（存活），如果没有就直接并发拉，如果有则序列拉（随时终止）
-# TODO: 不需要 event 表？
-@overload
-def make_db(
-    client: str | PathLike | P115Client, 
-    dbfile: str | PathLike | Connection | Cursor = "p115updatedb.db", 
-    cid: int | str | Mapping = 0, 
-    recursive: bool = True, 
-    max_workers: None | int = None, 
-    app: str = "android", 
-    *, 
-    async_: Literal[False] = False, 
-    **request_kwargs, 
-) -> dict:
-    ...
-@overload
-def make_db(
-    client: str | PathLike | P115Client, 
-    dbfile: str | PathLike | Connection | Cursor = "p115updatedb.db", 
-    cid: int | str | Mapping = 0, 
-    recursive: bool = True, 
-    max_workers: None | int = None, 
-    app: str = "android", 
-    *, 
-    async_: Literal[True], 
-    **request_kwargs, 
-) -> Coroutine[Any, Any, dict]:
-    ...
-def make_db(
-    client: str | PathLike | P115Client, 
-    dbfile: str | PathLike | Connection | Cursor = "p115updatedb.db", 
-    cid: int | str | Mapping = 0, 
-    recursive: bool = True, 
-    max_workers: None | int = None, 
-    app: str = "android", 
-    *, 
-    async_: Literal[False, True] = False, 
-    **request_kwargs, 
-) -> dict | Coroutine[Any, Any, dict]:
-    """对某个目录执行一次拉取，以更新 SQLite 数据
-
-    :param client: 115 客户端或 cookies
-    :param dbfile: 数据库路径或连接
-    :param cid: 目录 id 或 pickcode
-    :param recursive: 如果为 True，则拉取所有以之为祖先（先驱）节点的节点信息；否则，拉取所有以之为父（前驱）节点的节点信息
-    :param max_workers: 最大并发数，如果为 None 或 < 0 则自动确定，如果为 0 则单工作者惰性执行
-    :param app: 使用指定 app（设备）的接口
-    :param async_: 是否异步
-    :param request_kwargs: 其它请求参数
-
-    :return: 一些统计信息
-    """
-    from .updatedb import _init_client
-    init_sql = """\
--- 修改日志模式为 WAL (write-ahead-log)
-PRAGMA journal_mode = WAL;
-
--- 创建表
-CREATE TABLE IF NOT EXISTS data (
-    id INTEGER NOT NULL PRIMARY KEY,      -- id
-    parent_id INTEGER NOT NULL DEFAULT 0, -- 上级目录 id
-    name TEXT NOT NULL DEFAULT '',        -- 名字
-    sha1 TEXT NOT NULL DEFAULT '',        -- 文件的 sha1 哈希值
-    size INTEGER NOT NULL DEFAULT 0,      -- 文件大小
-    pickcode TEXT NOT NULL DEFAULT '',    -- 提取码
-    ctime INTEGER NOT NULL DEFAULT 0,     -- 创建时间戳
-    mtime INTEGER NOT NULL DEFAULT 0,     -- 更新时间戳
-    is_dir INTEGER NOT NULL DEFAULT 0,    -- 是否目录
-    type INTEGER NOT NULL DEFAULT 0,      -- 文件类型，目录 <=> type=0
-    user_id INTEGER NOT NULL,             -- 用户 id
-    extra BLOB DEFAULT NULL,              -- 其它信息
-    is_alive INTEGER NOT NULL DEFAULT 1 CHECK(is_alive IN (0, 1)), -- 是否存活（存活即是不是删除状态）
-    created_at TIMESTAMP DEFAULT (unixepoch('subsec')), -- 创建时间
-    updated_at TIMESTAMP DEFAULT (unixepoch('subsec'))  -- 更新时间
-);
-
--- 创建索引
-CREATE INDEX IF NOT EXISTS idx_data_pid ON data(parent_id);
-CREATE INDEX IF NOT EXISTS idx_data_tid ON data(top_id);
-CREATE INDEX IF NOT EXISTS idx_data_mtime ON data(mtime);
-CREATE INDEX IF NOT EXISTS idx_data_utime ON data(updated_at);
-
--- data 表发生更新
-DROP TRIGGER IF EXISTS trg_data_update;
-CREATE TRIGGER trg_data_update
-AFTER UPDATE ON data
-FOR EACH ROW
-BEGIN
-    UPDATE data SET updated_at = unixepoch('subsec') WHERE id = NEW.id;
-END;"""
-    client, con = _init_client(client, dbfile, init_sql)
-    raise NotImplementedError
-
-
-# TODO: 支持只拉取 1 级
-# TODO: 需要更多的简化
-@overload
-def make_strm(
-    client: str | PathLike | P115Client, 
-    cid: int | str | Mapping = 0, 
-    save_dir: bytes | str | PathLike = ".", 
-    base_url: str = "", 
-    with_root: None | bool = None, 
-    without_suffix: bool = True, 
-    clean: bool = True, 
-    replace: bool = True, 
-    predicate: None | Literal[1, 2, 3, 4, 5, 6, 7] | str | tuple[str, ...] | Callable[[dict], bool] = 4, 
-    id_to_dirnode: None | EllipsisType | MutableMapping[int, tuple[str, int]] = None, 
-    path_already: bool = False, 
-    app: str = "android", 
-    max_workers: None | int = None, 
-    *, 
-    async_: Literal[False] = False, 
-    **request_kwargs, 
-) -> dict:
-    ...
-@overload
-def make_strm(
-    client: str | PathLike | P115Client, 
-    cid: int | str | Mapping = 0, 
-    save_dir: bytes | str | PathLike = ".", 
-    base_url: str = "", 
-    with_root: None | bool = None, 
-    without_suffix: bool = True, 
-    clean: bool = True, 
-    replace: bool = True, 
-    predicate: None | Literal[1, 2, 3, 4, 5, 6, 7] | str | tuple[str, ...] | Callable[[dict], bool] = 4, 
-    id_to_dirnode: None | EllipsisType | MutableMapping[int, tuple[str, int]] = None, 
-    path_already: bool = False, 
-    app: str = "android", 
-    max_workers: None | int = None, 
-    *, 
-    async_: Literal[True], 
-    **request_kwargs, 
-) -> Coroutine[Any, Any, dict]:
-    ...
-def make_strm(
-    client: str | PathLike | P115Client, 
-    cid: int | str | Mapping = 0, 
-    save_dir: bytes | str | PathLike = ".", 
-    base_url: str = "", 
-    with_root: None | bool = None, 
-    without_suffix: bool = True, 
-    clean: bool = True, 
-    replace: bool = True, 
-    predicate: None | Literal[1, 2, 3, 4, 5, 6, 7] | str | tuple[str, ...] | Callable[[dict], bool] = 4, 
-    id_to_dirnode: None | EllipsisType | MutableMapping[int, tuple[str, int]] = None, 
-    path_already: bool = False, 
-    app: str = "android", 
-    max_workers: None | int = None, 
-    *, 
-    async_: Literal[False, True] = False, 
-    **request_kwargs, 
-) -> dict | Coroutine[Any, Any, dict]:
-    """拉取目录树，保存到 .strm 文件
-
-    :param client: 115 客户端或 cookies
-    :param cid: 目录 id 或 pickcode
-    :param save_dir: 本地的保存目录，默认是当前工作目录
-    :param base_url: STRM 链接（或者说 302 服务）的基地址
-    :param with_root: 是否保留根
-
-        - 如果为 True，则在 ``save_dir`` 保留从根目录 / 开始的目录结构
-        - 如果为 False，则在 ``save_dir`` 保留从拉取目录开始的目录结构
-        - 如果为 None，则在 ``save_dir`` 下创建一个和 ``cid`` 目录名字相同的目录作为 ``save_dir``，然后保留从拉取目录开始的目录结构
-
-    :param without_suffix: 是否去除原来的扩展名
-
-        - 如果为 True，则去掉原来的扩展名后再拼接
-        - 如果为 False，则直接用 ".strm" 拼接到原来的路径后面
-
-    :param clean: 是否清理 ``save_dir``，如果为 True，则删除所有不包含本次更新所涉及到的 .strm 文件和相应目录
-    :param replace: 遇到路径下有 .strm 文件时是否替换
-    :param predicate: 断言，断言为真的文件才会生成 .strm 文件
-
-        - 如果为 None，则不进行筛选
-        - 如果为整数，则筛选某一类型的文件
-
-            - 1: 文档
-            - 2: 图片
-            - 3: 音频
-            - 4: 视频
-            - 5: 压缩包
-            - 6: 应用
-            - 7: 书籍
-
-        - 如果是 str 或元组，则是后缀或一组后缀，筛选这些后缀的文件
-        - 如果是 Callable，则逐个对获取到的文件信息调用它，返回值为 True 才保留
- 
-    :param id_to_dirnode: 字典，保存 id 到对应文件的 ``(name, parent_id)`` 元组的字典
-    :param path_already: 如果为 True，则说明 ``id_to_dirnode`` 中已经具备构建路径所需要的目录节点，所以不会再去拉取目录节点的信息
-    :param app: 使用指定 app（设备）的接口
-    :param max_workers: 最大并发数，用户拉取目录树，但写入本地文件仍然是单线程的（经过测试如此效率更高）
-    :param async_: 是否异步
-    :param request_kwargs: 其它请求参数
-
-    :return: 一些统计信息
-    """
-    cid = _get_id(cid)
-    if isinstance(client, (str, PathLike)):
-        client = P115Client(client)
-    user_id = client.user_id
-    base_url = base_url.rstrip("/")
-    if base_url.startswith("//"):
-        base_url = "http:" + base_url
-        is_url = True
-    else:
-        is_url = bool(urlsplit(base_url).scheme)
-    save_dir = abspath(fsdecode(save_dir))
-    mode = "w" if replace else "x"
-    prefix_length = -1
-    upserts: list[str] = []
-    ignores: list[str] = []
-    removes: list[str] = []
-    errors: list[OSError] = []
-    count_errors: dict[str, int] = defaultdict(int)
-    push = list.append
-    oserror_flag = False
-    @contextmanager
-    def collect_oserror():
-        nonlocal oserror_flag
-        oserror_flag = False
-        try:
-            yield 
-        except OSError as e:
-            oserror_flag = True
-            push(errors, e)
-            count_errors[type(e).__qualname__] += 1
-    if clean:
-        seen: set[str] = set()
-        add_to_seen = seen.add
-        def do_clean():
-            nonlocal save_dir
-            save_dir = cast(str, save_dir)
-            with collect_oserror():
-                stack = [scandir(save_dir)]
-            if oserror_flag:
-                return
-            if not stack: return
-            ancestors: list[str | PathLike] = [save_dir]
-            caches: list[list[DirEntry]] = [[]]
-            is_dir = DirEntry.is_dir
-            t = i = 0
-            b = 1
-            while i >= 0:
-                cache = caches[i]
-                for entry in stack[i]:
-                    if is_dir(entry, follow_symlinks=False):
-                        i += 1
-                        with collect_oserror():
-                            try:
-                                scanit = scandir(entry)
-                                stack[i] = scanit
-                                ancestors[i] = entry
-                                caches[i] = []
-                            except IndexError:
-                                push(stack, scanit)
-                                push(ancestors, entry)
-                                push(caches, [])
-                        if oserror_flag:
-                            t |= b
-                            continue
-                        b <<= 1
-                        break
-                    path = entry.path
-                    if path in seen:
-                        t |= b
-                    elif path.endswith(".strm"):
-                        with collect_oserror():
-                            remove(entry)
-                            push(removes, path)
-                    else:
-                        push(cache, entry)
-                else:
-                    pred = t & b
-                    if not pred:
-                        for entry in cache:
-                            with collect_oserror():
-                                remove(entry)
-                                push(removes, entry.path)
-                        with collect_oserror():
-                            rmdir(ancestors[i])
-                    t &= ~b
-                    i -= 1
-                    b >>= 1
-                    if pred:
-                        t |= b
-    def normalize_path(attr: Mapping, /) -> str:
-        nonlocal prefix_length, save_dir, clean
-        if prefix_length < 0:
-            if cid:
-                prefix_length = sum(len(a["name"]) + 1 for a in attr["top_ancestors"]) - 1
-                if with_root:
-                    save_dir = joinpath(save_dir, *(a["name"] for a in attr["top_ancestors"][1:]))
-                elif with_root is None:
-                    save_dir = joinpath(save_dir, attr["top_ancestors"][-1]["name"])
-            else:
-                prefix_length = 0
-            try:
-                rmdir(save_dir)
-                clean = False
-            except FileNotFoundError:
-                clean = False
-            except OSError:
-                pass
-        path: str = attr["path"]
-        if prefix_length:
-            path = path[prefix_length:]
-        if without_suffix:
-            path = splitext(path)[0]
-        path = joinpath(cast(str, save_dir), normpath("." + path + ".strm"))
-        if clean:
-            add_to_seen(path)
-        return path
-    params: dict = {
-        "cid": cid, 
-        "max_workers": max_workers, 
-        "with_path": True, 
-        "id_to_dirnode": id_to_dirnode, 
-        "path_already": path_already, 
-    }
-    if isinstance(predicate, (int, str)):
-        params["is_skim"] = False
-        if isinstance(predicate, int):
-            params["type"] = predicate
-        else:
-            params["suffix"] = predicate
-        predicate = None
-    elif isinstance(predicate, tuple):
-        suffixes = predicate
-        predicate = lambda attr: attr["name"].endswith(suffixes)
-    cid = to_id(cid)
-    def gen_step():
-        files: Iterator[dict] | AsyncIterator[dict] = iter_files_shortcut(
-            client, 
-            **params, 
-            app=app, 
-            async_=async_, 
-            **request_kwargs, 
-        )
-        if predicate is not None:
-            from iterutils import filter
-            files = filter(predicate, files)
-        start_t = time()
-        with with_iter_next(files) as get_next:
-            while True:
-                attr = yield get_next()
-                path = attr["path"]
-                if is_url:
-                    url = f"{base_url}/{encode_uri_component_loose(path, quote_slash=False)}?user_id={user_id}&id={attr['id']}&pickcode={attr['pickcode']}&&sha1={attr['sha1']}&size={attr['size']}"
-                else:
-                    url = base_url + path
-                path = normalize_path(attr)
-                with collect_oserror():
-                    try:
-                        file = open(path, mode, encoding="utf-8")
-                    except FileNotFoundError:
-                        makedirs(dirname(path), exist_ok=True)
-                        file = open(path, mode, encoding="utf-8")
-                    except FileExistsError:
-                        push(ignores, path)
-                        continue
-                if oserror_flag:
-                    push(ignores, path)
-                    continue
-                with file:
-                    file.write(url)
-                    push(upserts, path)
-        if clean:
-            clean_start_t = time()
-            if async_:
-                yield to_thread(do_clean)
-            else:
-                do_clean()
-        stop_t = time()
-        result = {
-            "upserts": upserts, 
-            "ignores": ignores, 
-            "removes": removes, 
-            "errors": errors, 
-            "total": len(upserts) + len(ignores) + len(removes), 
-            "count_upserts": len(upserts), 
-            "count_ignores": len(ignores), 
-            "count_removes": len(removes), 
-            "count_errors": count_errors, 
-            "start_time": start_t, 
-            "start_time_str": str(datetime.fromtimestamp(start_t)), 
-            "stop_time": stop_t, 
-            "stop_time_str": str(datetime.fromtimestamp(stop_t)), 
-            "elapsed_seconds": stop_t - start_t, 
-        }
-        if clean:
-            result["elapsed_seconds_of_cleaning"] = stop_t - clean_start_t
-        return result
-    return run_gen_step(gen_step, async_)
 
 
 @overload

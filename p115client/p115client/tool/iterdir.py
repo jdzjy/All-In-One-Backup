@@ -3344,6 +3344,7 @@ def iter_dupfiles[K](
     )
 
 
+# TODO: 优化，用一个 iter_collect 函数实现
 @overload
 def iter_dupfile_ids(
     client: str | PathLike | P115Client, 
@@ -3410,6 +3411,7 @@ def iter_dupfile_ids(
     return run_gen_step_iter(gen_step, async_)
 
 
+# TODO iter_collect 增加函数 iter_dup_keys，只用于罗列重复的 key，这样便可简化 iter_dupfile_unique_keys
 @overload
 def iter_dupfile_unique_keys(
     client: str | PathLike | P115Client, 
