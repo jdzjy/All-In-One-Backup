@@ -8,7 +8,7 @@ __all__ = [
     "get_ancestors", "get_path", "get_id", "get_id_to_path", 
     "get_id_to_sha1", "get_id_to_name", "share_get_id", 
     "share_get_id_to_path", "share_get_id_to_name", "get_file_count", 
-    "get_url", 
+    "get_dir_count", "get_url", 
 ]
 __doc__ = "这个模块提供了一些和文件或目录信息有关的函数"
 
@@ -2189,9 +2189,8 @@ def share_get_id_to_name(
 def get_file_count(
     client: str | PathLike | P115Client, 
     cid: int | str = 0, 
-    id_to_dirnode: None | EllipsisType | MutableMapping[int, tuple[str, int]] = None, 
     app: str = "web", 
-    use_fs_files: bool = False, 
+    use_fs_files: bool = True, 
     *, 
     async_: Literal[False] = False, 
     **request_kwargs, 
@@ -2201,9 +2200,8 @@ def get_file_count(
 def get_file_count(
     client: str | PathLike | P115Client, 
     cid: int | str = 0, 
-    id_to_dirnode: None | EllipsisType | MutableMapping[int, tuple[str, int]] = None, 
     app: str = "web", 
-    use_fs_files: bool = False, 
+    use_fs_files: bool = True, 
     *, 
     async_: Literal[True], 
     **request_kwargs, 
@@ -2212,9 +2210,8 @@ def get_file_count(
 def get_file_count(
     client: str | PathLike | P115Client, 
     cid: int | str = 0, 
-    id_to_dirnode: None | EllipsisType | MutableMapping[int, tuple[str, int]] = None, 
     app: str = "web", 
-    use_fs_files: bool = False, 
+    use_fs_files: bool = True, 
     *, 
     async_: Literal[False, True] = False, 
     **request_kwargs, 
@@ -2226,7 +2223,6 @@ def get_file_count(
 
     :param client: 115 客户端或 cookies
     :param cid: 目录 id 或 pickcode
-    :param id_to_dirnode: 字典，保存 id 到对应文件的 ``(name, parent_id)`` 元组的字典
     :param app: 使用指定 app（设备）的接口
     :param use_fs_files: 使用 `client.fs_files`，否则使用 `client.fs_category_get`
     :param async_: 是否异步
@@ -2236,30 +2232,34 @@ def get_file_count(
     """
     if isinstance(client, (str, PathLike)):
         client = P115Client(client)
-    def gen_step(cid: int = to_id(cid), /):
-        if not cid:
+    cid = to_id(cid)
+    def gen_step():
+        if use_fs_files:
+            if not cid and app not in ("", "web", "desktop", "chrome", "open", "aps") and isinstance(client, P115Client):
+                # NOTE: 这样即使接口被风控，也不影响使用
+                resp = yield client.fs_files_app(None, async_=async_, **request_kwargs)
+                check_response(resp)
+            else:
+                with with_iter_next(iter_list(
+                    client, 
+                    cid, 
+                    page_size=1, 
+                    payload={"hide_data": 1, "show_dir": 0, "cur": 0}, 
+                    normalize_attr=None, 
+                    app=app, 
+                    async_=async_, 
+                    **request_kwargs, 
+                )) as get_next:
+                    resp = yield get_next()
+            return int(resp["count"])
+        elif not cid:
             resp = yield client.fs_space_summury(async_=async_, **request_kwargs)
             check_response(resp)
             return sum(v["count"] for k, v in resp["type_summury"].items() if k.isupper())
-        elif use_fs_files:
-            with with_iter_next(iter_list(
-                client, 
-                cid, 
-                page_size=1, 
-                payload={"hide_data": 1, "show_dir": 0}, 
-                normalize_attr=None, 
-                id_to_dirnode=id_to_dirnode, 
-                app=app, 
-                async_=async_, 
-                **request_kwargs, 
-            )) as get_next:
-                resp = yield get_next()
-            return int(resp["count"])
         else:
             resp = yield get_info(
                 client, 
                 cid, 
-                id_to_dirnode=id_to_dirnode, 
                 app=app, 
                 async_=async_, 
                 **request_kwargs, 
@@ -2269,6 +2269,79 @@ def get_file_count(
                 raise NotADirectoryError(errno.ENOTDIR, resp)
             return int(resp["count"])
     return run_gen_step(gen_step, async_)
+
+
+@overload
+def get_dir_count(
+    client: str | PathLike | P115Client, 
+    cid: int | str = 0, 
+    app: str = "android", 
+    id_to_dirnode: None | EllipsisType | MutableMapping[int, tuple[str, int]] = None, 
+    *, 
+    async_: Literal[False] = False, 
+    **request_kwargs, 
+) -> int:
+    ...
+@overload
+def get_dir_count(
+    client: str | PathLike | P115Client, 
+    cid: int | str = 0, 
+    app: str = "android", 
+    id_to_dirnode: None | EllipsisType | MutableMapping[int, tuple[str, int]] = None, 
+    *, 
+    async_: Literal[True], 
+    **request_kwargs, 
+) -> Coroutine[Any, Any, int]:
+    ...
+def get_dir_count(
+    client: str | PathLike | P115Client, 
+    cid: int | str = 0, 
+    app: str = "android", 
+    id_to_dirnode: None | EllipsisType | MutableMapping[int, tuple[str, int]] = None, 
+    *, 
+    async_: Literal[False, True] = False, 
+    **request_kwargs, 
+) -> int | Coroutine[Any, Any, int]:
+    """获取目录总数
+
+    :param client: 115 客户端或 cookies
+    :param cid: 目录 id 或 pickcode
+    :param app: 使用指定 app（设备）的接口
+    :param id_to_dirnode: 字典，保存 id 到对应文件的 ``(name, parent_id)`` 元组的字典
+    :param async_: 是否异步
+    :param request_kwargs: 其它请求参数
+
+    :return: 目录内的目录总数（不包括文件）
+    """
+    from .download import iter_download_nodes
+    if async_:
+        async def count():
+            i = 0
+            async for _ in iter_download_nodes(
+                client, 
+                cid, 
+                files=False, 
+                get_raw=True, 
+                id_to_dirnode=id_to_dirnode, 
+                max_workers=None, 
+                app=app, 
+                async_=True, 
+                **request_kwargs, 
+            ):
+                i += 1
+            return i
+        return count()
+    else:
+        return sum(1 for _ in iter_download_nodes(
+            client, 
+            cid, 
+            files=False, 
+            get_raw=True, 
+            id_to_dirnode=id_to_dirnode, 
+            max_workers=None, 
+            app=app, 
+            **request_kwargs, 
+        ))
 
 
 @overload

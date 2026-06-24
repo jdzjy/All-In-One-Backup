@@ -29,7 +29,7 @@ from itertools import batched, cycle
 from math import inf
 from operator import itemgetter
 from os import PathLike
-from time import sleep, time
+from time import sleep, time, strptime, mktime
 from types import EllipsisType
 from typing import cast, overload, Any, Literal
 from warnings import warn
@@ -87,7 +87,12 @@ def overview_attr(info: Mapping, /) -> OverviewAttr:
         else:
             id = int(info["fid"])
             pid = int(info["cid"])
-        ctime = int(info.get("tp") or info["t"])
+        tp = info.get("tp")
+        if not tp:
+            tp = info.get("t", "0") 
+            if "-" in tp:
+                tp = mktime(strptime(tp, "%Y-%m-%d %H:%M"))
+        ctime = int(tp)
         mtime = int(info.get("te", ctime))
     elif "fn" in info:
         is_dir = info["fc"] == "0"

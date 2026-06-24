@@ -5,6 +5,7 @@ from p115client.util import *
 
 from .attr import *
 from .auth import *
+from .clouddownload import *
 from .download import *
 from .edit import *
 from .export_dir import *
@@ -13,7 +14,6 @@ from .fs_files import *
 from .history import *
 from .iterdir import *
 from .life import *
-from .offline import *
 from .pool import *
 from .updatedb import *
 from .upload import *

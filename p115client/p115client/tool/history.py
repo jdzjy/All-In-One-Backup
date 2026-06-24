@@ -10,7 +10,6 @@ __doc__ = "这个模块提供了一些和 115 的历史记录有关的函数"
 from asyncio import sleep as async_sleep
 from collections.abc import AsyncIterator, Container, Iterator
 from functools import partial
-from itertools import cycle
 from os import PathLike
 from time import time, sleep
 from typing import overload, Final, Literal
@@ -88,7 +87,7 @@ def iter_history_once(
 
         - 全部: 0
         - ？？: 1
-        - 离线下载: 2
+        - 云下载: 2
         - 播放视频: 3
         - 上传: 4
         - ？？: 5
@@ -207,7 +206,7 @@ def iter_history(
 
         - 全部: 0
         - ？？: 1
-        - 离线下载: 2
+        - 云下载: 2
         - 播放视频: 3
         - 上传: 4
         - ？？: 5
@@ -319,7 +318,7 @@ def iter_history_list(
 
         - 全部: 0
         - ？？: 1
-        - 离线下载: 2
+        - 云下载: 2
         - 播放视频: 3
         - 上传: 4
         - ？？: 5

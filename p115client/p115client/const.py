@@ -6,8 +6,9 @@ from __future__ import annotations
 __all__ = [
     "AVAILABLE_APPS", "APP_TO_SSOENT", "SSOENT_TO_APP", "CLIENT_METHOD_API_MAP", 
     "CLIENT_API_METHODS_MAP", "CLASS_TO_TYPE", "SUFFIX_TO_TYPE", "TYPE_TO_SUFFIXES", 
-    "ID_TO_DIRNODE_CACHE", "WEPAPI_PREFIXES", "AVAILABLE_WEBAPI_ORIGINS", 
-    "AVAILABLE_PROAPI_ORIGINS", "AVAILABLE_PASSPORTAPI_ORIGINS", "OPEN_APP_IDS", 
+    "ID_TO_DIRNODE_CACHE", "WEPAPI_PREFIXES", "AVAILABLE_WEBAPI_BASE_URLS", 
+    "AVAILABLE_PROAPI_BASE_URLS", "AVAILABLE_PASSPORTAPI_BASE_URLS", 
+    "AVAILABLE_CLOUDDOWNLOAD_BASE_URLS", "OPEN_APP_IDS", 
 ]
 __doc__ = "各种常量或列表"
 
@@ -267,26 +268,26 @@ WEPAPI_PREFIXES: Final = (
 )
 
 #: web 相关接口的 url 源
-AVAILABLE_WEBAPI_ORIGINS: Final[list[str]] = [
+AVAILABLE_WEBAPI_BASE_URLS: Final[list[str]] = [
     "http://webapi.115.com", 
     "https://webapi.115.com", 
     "http://web.api.115.com", 
-    # "https://115cdn.com", 
-    # "https://115vod.com", 
-    # "https://115.com", 
-    # "https://f.115.com/api/proxy/115", 
-    # "https://n.115.com/api/proxy/115", 
+    # "https://115cdn.com/webapi", 
+    # "https://115vod.com/webapi", 
+    # "https://115.com?ct=webapi", 
+    # "https://f.115.com/api/proxy/115?domain=webapi", 
+    # "https://n.115.com/api/proxy/115?domain=webapi", 
 ]
 
 #: app 相关接口的 url 源
-AVAILABLE_PROAPI_ORIGINS: Final[list[str]] = [
+AVAILABLE_PROAPI_BASE_URLS: Final[list[str]] = [
     "http://proapi.115.com", 
     "https://proapi.115.com", 
     "http://pro.api.115.com", 
 ]
 
 #: 登录相关接口的 url 源
-AVAILABLE_PASSPORTAPI_ORIGINS: Final[list[str]] = [
+AVAILABLE_PASSPORTAPI_BASE_URLS: Final[list[str]] = [
     "http://qrcodeapi.115.com", 
     "https://qrcodeapi.115.com", 
     "http://hnqrcodeapi.115.com", 
@@ -295,6 +296,14 @@ AVAILABLE_PASSPORTAPI_ORIGINS: Final[list[str]] = [
     "https://passportapi.115.com", 
     "http://hnpassportapi.115.com", 
     "https://hnpassportapi.115.com", 
+]
+
+#: 云下载相关接口的 url 源
+AVAILABLE_CLOUDDOWNLOAD_BASE_URLS: Final[list[str]] = [
+    "http://clouddownload.115.com", 
+    "https://clouddownload.115.com", 
+    "http://lixian.115.com", 
+    "https://lixian.115.com", 
 ]
 
 #: 一些可用的 open 平台 AppID

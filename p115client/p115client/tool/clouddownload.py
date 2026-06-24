@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # encoding: utf-8
 
-__all__ = ["offline_iter", "offline_restart_iter"]
-__doc__ = "这个模块提供了一些和离线下载有关的函数"
+__all__ = ["clouddownload_iter", "clouddownload_restart_iter"]
+__doc__ = "这个模块提供了一些和云下载有关的函数"
 
 from asyncio import sleep as async_sleep
 from collections.abc import AsyncIterator, Callable, Iterable, Iterator
@@ -19,7 +19,7 @@ from ..exception import throw
 
 
 @overload
-def offline_iter(
+def clouddownload_iter(
     client: str | PathLike | P115Client | P115OpenClient, 
     /, 
     page_start: int = 1, 
@@ -33,7 +33,7 @@ def offline_iter(
 ) -> Iterator[dict]:
     ...
 @overload
-def offline_iter(
+def clouddownload_iter(
     client: str | PathLike | P115Client | P115OpenClient, 
     /, 
     page_start: int = 1, 
@@ -46,7 +46,7 @@ def offline_iter(
     **request_kwargs, 
 ) -> AsyncIterator[dict]:
     ...
-def offline_iter(
+def clouddownload_iter(
     client: str | PathLike | P115Client | P115OpenClient, 
     /, 
     page_start: int = 1, 
@@ -90,9 +90,9 @@ def offline_iter(
         use_open_api = True
     def gen_step():
         if use_open_api:
-            offline_list = client.offline_list_open
+            clouddownload_list = client.clouddownload_task_list_open
         else:
-            offline_list = client.offline_list
+            clouddownload_list = client.clouddownload_task_list
         may_sleep = cooldown > 0
         if may_sleep:
             do_sleep = async_sleep if async_ else sleep
@@ -106,7 +106,7 @@ def offline_iter(
                 if last_t and (diff := last_t + cooldown - time()) > 0:
                     yield do_sleep(diff)
                 last_t = time()
-            resp = yield offline_list(page, async_=async_, **request_kwargs)
+            resp = yield clouddownload_list(page, async_=async_, **request_kwargs)
             check_response(resp)
             if use_open_api:
                 resp = resp["data"]
@@ -133,7 +133,7 @@ def offline_iter(
 
 
 @overload
-def offline_restart_iter(
+def clouddownload_restart_iter(
     client: str | PathLike | P115Client, 
     /, 
     predicate: None | Callable[[dict], bool] = None, 
@@ -143,7 +143,7 @@ def offline_restart_iter(
 ) -> Iterator[dict]:
     ...
 @overload
-def offline_restart_iter(
+def clouddownload_restart_iter(
     client: str | PathLike | P115Client, 
     /, 
     predicate: None | Callable[[dict], bool] = None, 
@@ -152,7 +152,7 @@ def offline_restart_iter(
     **request_kwargs, 
 ) -> AsyncIterator[dict]:
     ...
-def offline_restart_iter(
+def clouddownload_restart_iter(
     client: str | PathLike | P115Client, 
     /, 
     predicate: None | Callable[[dict], bool] = None, 
@@ -174,7 +174,7 @@ def offline_restart_iter(
     def gen_step():
         left_no_space: list[dict] = []
         add_task = left_no_space.append
-        with with_iter_next(offline_iter(
+        with with_iter_next(clouddownload_iter(
             client, 
             async_=async_, 
             **request_kwargs, 
@@ -186,7 +186,7 @@ def offline_restart_iter(
                 elif task["status"] == 2:
                     break
         for task in filter(predicate, left_no_space):
-            resp = yield client.offline_restart(
+            resp = yield client.clouddownload_task_restart(
                 task["info_hash"], 
                 async_=async_, 
                 **request_kwargs, 

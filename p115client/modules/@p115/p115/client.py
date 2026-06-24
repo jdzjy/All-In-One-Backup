@@ -196,12 +196,12 @@ class P115Client(Client):
 
     @cached_property
     def offline(self, /) -> P115Offline:
-        """你的离线任务列表的封装对象
+        """你的云下载任务列表的封装对象
         """
         return P115Offline(self)
 
     def get_offline(self, /, *args, **kwargs) -> P115Offline:
-        """新建你的离线任务列表的封装对象
+        """新建你的云下载任务列表的封装对象
         """
         return P115Offline(self, *args, **kwargs)
 

@@ -2182,6 +2182,342 @@ class P115OpenClient(ClientRequestMixin):
             return data
         return run_gen_step(gen_step, async_)
 
+    ########## Cloud Download API ##########
+
+    @overload
+    def clouddownload_quota_info(
+        self, 
+        /, 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def clouddownload_quota_info(
+        self, 
+        /, 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def clouddownload_quota_info(
+        self, 
+        /, 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """获取云下载配额信息
+
+        GET https://proapi.115.com/open/offline/get_quota_info
+
+        .. admonition:: Reference
+
+            https://www.yuque.com/115yun/open/gif2n3smh54kyg0p
+        """
+        api = complete_url("/open/offline/get_quota_info", base_url)
+        return self.request(url=api, async_=async_, **request_kwargs)
+
+    @overload
+    def clouddownload_task_add_bt(
+        self, 
+        payload: dict, 
+        /, 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def clouddownload_task_add_bt(
+        self, 
+        payload: dict, 
+        /, 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def clouddownload_task_add_bt(
+        self, 
+        payload: dict, 
+        /, 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """添加云下载 BT 任务
+
+        POST https://proapi.115.com/open/offline/add_task_bt 
+
+        .. admonition:: Reference
+
+            https://www.yuque.com/115yun/open/svfe4unlhayvluly
+
+        :payload:
+            - info_hash: str 💡 种子文件的 info_hash
+            - pick_code: str 💡 种子文件的提取码
+            - save_path: str 💡 保存到 `wp_path_id` 对应目录下的相对路径
+            - torrent_sha1: str 💡 种子文件的 sha1
+            - wanted: str 💡 选择文件进行下载（是数字索引，从 0 开始计数，用 "," 分隔）
+            - wp_path_id: int | str = <default> 💡 保存目标目录 id
+        """
+        api = complete_url("/open/offline/add_task_bt ", base_url)
+        return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
+
+    @overload
+    def clouddownload_task_add_urls(
+        self, 
+        payload: str | Iterable[str] | dict, 
+        /, 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def clouddownload_task_add_urls(
+        self, 
+        payload: str | Iterable[str] | dict, 
+        /, 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def clouddownload_task_add_urls(
+        self, 
+        payload: str | Iterable[str] | dict, 
+        /, 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """添加云下载链接任务
+
+        POST https://proapi.115.com/open/offline/add_task_urls
+
+        .. admonition:: Reference
+
+            https://www.yuque.com/115yun/open/zkyfq2499gdn3mty
+
+        :payload:
+            - urls: str 💡 链接，用 "\\n" 分隔，支持HTTP、HTTPS、FTP、磁力链和电驴链接
+            - wp_path_id: int | str = <default> 💡 保存到目录的 id
+        """
+        api = complete_url("/open/offline/add_task_urls", base_url)
+        if isinstance(payload, str):
+            payload = {"urls": payload.strip("\n")}
+        elif not isinstance(payload, dict):
+            payload = {"urls": ",".join(payload)}
+        return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
+
+    @overload
+    def clouddownload_task_clear(
+        self, 
+        payload: int | dict = 0, 
+        /, 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def clouddownload_task_clear(
+        self, 
+        payload: int | dict = 0, 
+        /, 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def clouddownload_task_clear(
+        self, 
+        payload: int | dict = 0, 
+        /, 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """清空云下载任务
+
+        POST https://proapi.115.com/open/offline/clear_task
+
+        .. admonition:: Reference
+
+            https://www.yuque.com/115yun/open/uu5i4urb5ylqwfy4
+
+        :payload:
+            - flag: int = 0 💡 标识，用于对应某种情况
+
+                - 0: 已完成
+                - 1: 全部
+                - 2: 已失败
+                - 3: 进行中
+                - 4: 已完成+删除源文件
+                - 5: 全部+删除源文件
+        """
+        api = complete_url("/open/offline/clear_task", base_url)
+        if isinstance(payload, int):
+            payload = {"flag": payload}
+        return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
+
+    @overload
+    def clouddownload_task_del(
+        self, 
+        payload: str | dict, 
+        /, 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def clouddownload_task_del(
+        self, 
+        payload: str | dict, 
+        /, 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def clouddownload_task_del(
+        self, 
+        payload: str | dict, 
+        /, 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """删除云下载任务
+
+        POST https://proapi.115.com/open/offline/del_task
+
+        .. admonition:: Reference
+
+            https://www.yuque.com/115yun/open/pmgwc86lpcy238nw
+
+        :payload:
+            - info_hash: str 💡 待删除任务的 info_hash
+            - del_source_file: 0 | 1 = <default> 💡 是否删除源文件 1:删除 0:不删除
+        """
+        api = complete_url("/open/offline/del_task", base_url)
+        if isinstance(payload, str):
+            payload = {"info_hash": payload}
+        return self.request(api, method="POST", data=payload, async_=async_, **request_kwargs)
+
+    @overload
+    def clouddownload_task_list(
+        self, 
+        payload: int | dict = 1, 
+        /, 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def clouddownload_task_list(
+        self, 
+        payload: int | dict = 1, 
+        /, 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def clouddownload_task_list(
+        self, 
+        payload: int | dict = 1, 
+        /, 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """获取云下载任务列表
+
+        GET https://proapi.115.com/open/offline/get_task_list
+
+        .. admonition:: Reference
+
+            https://www.yuque.com/115yun/open/av2mluz7uwigz74k
+
+        :payload:
+            - page: int = 1
+        """
+        api = complete_url("/open/offline/get_task_list", base_url)
+        if isinstance(payload, int):
+            payload = {"page": payload}
+        return self.request(url=api, params=payload, async_=async_, **request_kwargs)
+
+    @overload
+    def clouddownload_torrent(
+        self, 
+        payload: dict, 
+        /, 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def clouddownload_torrent(
+        self, 
+        payload: dict, 
+        /, 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def clouddownload_torrent(
+        self, 
+        payload: dict, 
+        /, 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """解析 BT 种子
+
+        POST https://proapi.115.com/open/offline/torrent
+
+        .. admonition:: Reference
+
+            https://www.yuque.com/115yun/open/evez3u50cemoict1
+
+        :payload:
+            - torrent_sha1: str 💡 种子文件的 sha1
+            - pick_code: str    💡 种子文件的提取码
+        """
+        api = complete_url("/open/offline/torrent", base_url)
+        return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
+
     ########## Download API ##########
 
     @overload
@@ -2540,7 +2876,7 @@ class P115OpenClient(ClientRequestMixin):
     @overload
     def fs_files(
         self, 
-        payload: int | str | dict = 0, 
+        payload: None | int | str | dict = 0, 
         /, 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
         *, 
@@ -2551,7 +2887,7 @@ class P115OpenClient(ClientRequestMixin):
     @overload
     def fs_files(
         self, 
-        payload: int | str | dict = 0, 
+        payload: None | int | str | dict = 0, 
         /, 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
         *, 
@@ -2561,7 +2897,7 @@ class P115OpenClient(ClientRequestMixin):
         ...
     def fs_files(
         self, 
-        payload: int | str | dict = 0, 
+        payload: None | int | str | dict = 0, 
         /, 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
         *, 
@@ -2662,6 +2998,8 @@ class P115OpenClient(ClientRequestMixin):
                 - >= 16: 相当于 8
         """
         api = complete_url("/open/ufile/files", base_url)
+        if payload is None:
+            return self.request(url=api, async_=async_, **request_kwargs)
         if isinstance(payload, (int, str)):
             payload = {"cid": payload}
         payload = {
@@ -3364,342 +3702,6 @@ class P115OpenClient(ClientRequestMixin):
         api = complete_url("/open/ufile/update", base_url)
         return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
 
-    ########## Offline API ##########
-
-    @overload
-    def offline_add_torrent(
-        self, 
-        payload: dict, 
-        /, 
-        base_url: str | Callable[[], str] = "https://proapi.115.com", 
-        *, 
-        async_: Literal[False] = False, 
-        **request_kwargs, 
-    ) -> dict:
-        ...
-    @overload
-    def offline_add_torrent(
-        self, 
-        payload: dict, 
-        /, 
-        base_url: str | Callable[[], str] = "https://proapi.115.com", 
-        *, 
-        async_: Literal[True], 
-        **request_kwargs, 
-    ) -> Coroutine[Any, Any, dict]:
-        ...
-    def offline_add_torrent(
-        self, 
-        payload: dict, 
-        /, 
-        base_url: str | Callable[[], str] = "https://proapi.115.com", 
-        *, 
-        async_: Literal[False, True] = False, 
-        **request_kwargs, 
-    ) -> dict | Coroutine[Any, Any, dict]:
-        """添加云下载 BT 任务
-
-        POST https://proapi.115.com/open/offline/add_task_bt 
-
-        .. admonition:: Reference
-
-            https://www.yuque.com/115yun/open/svfe4unlhayvluly
-
-        :payload:
-            - info_hash: str 💡 种子文件的 info_hash
-            - pick_code: str 💡 种子文件的提取码
-            - save_path: str 💡 保存到 `wp_path_id` 对应目录下的相对路径
-            - torrent_sha1: str 💡 种子文件的 sha1
-            - wanted: str 💡 选择文件进行下载（是数字索引，从 0 开始计数，用 "," 分隔）
-            - wp_path_id: int | str = <default> 💡 保存目标目录 id
-        """
-        api = complete_url("/open/offline/add_task_bt ", base_url)
-        return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
-
-    @overload
-    def offline_add_urls(
-        self, 
-        payload: str | Iterable[str] | dict, 
-        /, 
-        base_url: str | Callable[[], str] = "https://proapi.115.com", 
-        *, 
-        async_: Literal[False] = False, 
-        **request_kwargs, 
-    ) -> dict:
-        ...
-    @overload
-    def offline_add_urls(
-        self, 
-        payload: str | Iterable[str] | dict, 
-        /, 
-        base_url: str | Callable[[], str] = "https://proapi.115.com", 
-        *, 
-        async_: Literal[True], 
-        **request_kwargs, 
-    ) -> Coroutine[Any, Any, dict]:
-        ...
-    def offline_add_urls(
-        self, 
-        payload: str | Iterable[str] | dict, 
-        /, 
-        base_url: str | Callable[[], str] = "https://proapi.115.com", 
-        *, 
-        async_: Literal[False, True] = False, 
-        **request_kwargs, 
-    ) -> dict | Coroutine[Any, Any, dict]:
-        """添加云下载链接任务
-
-        POST https://proapi.115.com/open/offline/add_task_urls
-
-        .. admonition:: Reference
-
-            https://www.yuque.com/115yun/open/zkyfq2499gdn3mty
-
-        :payload:
-            - urls: str 💡 链接，用 "\\n" 分隔，支持HTTP、HTTPS、FTP、磁力链和电驴链接
-            - wp_path_id: int | str = <default> 💡 保存到目录的 id
-        """
-        api = complete_url("/open/offline/add_task_urls", base_url)
-        if isinstance(payload, str):
-            payload = {"urls": payload.strip("\n")}
-        elif not isinstance(payload, dict):
-            payload = {"urls": ",".join(payload)}
-        return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
-
-    @overload
-    def offline_clear(
-        self, 
-        payload: int | dict = 0, 
-        /, 
-        base_url: str | Callable[[], str] = "https://proapi.115.com", 
-        *, 
-        async_: Literal[False] = False, 
-        **request_kwargs, 
-    ) -> dict:
-        ...
-    @overload
-    def offline_clear(
-        self, 
-        payload: int | dict = 0, 
-        /, 
-        base_url: str | Callable[[], str] = "https://proapi.115.com", 
-        *, 
-        async_: Literal[True], 
-        **request_kwargs, 
-    ) -> Coroutine[Any, Any, dict]:
-        ...
-    def offline_clear(
-        self, 
-        payload: int | dict = 0, 
-        /, 
-        base_url: str | Callable[[], str] = "https://proapi.115.com", 
-        *, 
-        async_: Literal[False, True] = False, 
-        **request_kwargs, 
-    ) -> dict | Coroutine[Any, Any, dict]:
-        """清空云下载任务
-
-        POST https://proapi.115.com/open/offline/clear_task
-
-        .. admonition:: Reference
-
-            https://www.yuque.com/115yun/open/uu5i4urb5ylqwfy4
-
-        :payload:
-            - flag: int = 0 💡 标识，用于对应某种情况
-
-                - 0: 已完成
-                - 1: 全部
-                - 2: 已失败
-                - 3: 进行中
-                - 4: 已完成+删除源文件
-                - 5: 全部+删除源文件
-        """
-        api = complete_url("/open/offline/clear_task", base_url)
-        if isinstance(payload, int):
-            payload = {"flag": payload}
-        return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
-
-    @overload
-    def offline_list(
-        self, 
-        payload: int | dict = 1, 
-        /, 
-        base_url: str | Callable[[], str] = "https://proapi.115.com", 
-        *, 
-        async_: Literal[False] = False, 
-        **request_kwargs, 
-    ) -> dict:
-        ...
-    @overload
-    def offline_list(
-        self, 
-        payload: int | dict = 1, 
-        /, 
-        base_url: str | Callable[[], str] = "https://proapi.115.com", 
-        *, 
-        async_: Literal[True], 
-        **request_kwargs, 
-    ) -> Coroutine[Any, Any, dict]:
-        ...
-    def offline_list(
-        self, 
-        payload: int | dict = 1, 
-        /, 
-        base_url: str | Callable[[], str] = "https://proapi.115.com", 
-        *, 
-        async_: Literal[False, True] = False, 
-        **request_kwargs, 
-    ) -> dict | Coroutine[Any, Any, dict]:
-        """获取用户云下载任务列表
-
-        GET https://proapi.115.com/open/offline/get_task_list
-
-        .. admonition:: Reference
-
-            https://www.yuque.com/115yun/open/av2mluz7uwigz74k
-
-        :payload:
-            - page: int = 1
-        """
-        api = complete_url("/open/offline/get_task_list", base_url)
-        if isinstance(payload, int):
-            payload = {"page": payload}
-        return self.request(url=api, params=payload, async_=async_, **request_kwargs)
-
-    @overload
-    def offline_quota_info(
-        self, 
-        /, 
-        base_url: str | Callable[[], str] = "https://proapi.115.com", 
-        *, 
-        async_: Literal[False] = False, 
-        **request_kwargs, 
-    ) -> dict:
-        ...
-    @overload
-    def offline_quota_info(
-        self, 
-        /, 
-        base_url: str | Callable[[], str] = "https://proapi.115.com", 
-        *, 
-        async_: Literal[True], 
-        **request_kwargs, 
-    ) -> Coroutine[Any, Any, dict]:
-        ...
-    def offline_quota_info(
-        self, 
-        /, 
-        base_url: str | Callable[[], str] = "https://proapi.115.com", 
-        *, 
-        async_: Literal[False, True] = False, 
-        **request_kwargs, 
-    ) -> dict | Coroutine[Any, Any, dict]:
-        """获取云下载配额信息
-
-        GET https://proapi.115.com/open/offline/get_quota_info
-
-        .. admonition:: Reference
-
-            https://www.yuque.com/115yun/open/gif2n3smh54kyg0p
-        """
-        api = complete_url("/open/offline/get_quota_info", base_url)
-        return self.request(url=api, async_=async_, **request_kwargs)
-
-    @overload
-    def offline_remove(
-        self, 
-        payload: str | dict, 
-        /, 
-        base_url: str | Callable[[], str] = "https://proapi.115.com", 
-        *, 
-        async_: Literal[False] = False, 
-        **request_kwargs, 
-    ) -> dict:
-        ...
-    @overload
-    def offline_remove(
-        self, 
-        payload: str | dict, 
-        /, 
-        base_url: str | Callable[[], str] = "https://proapi.115.com", 
-        *, 
-        async_: Literal[True], 
-        **request_kwargs, 
-    ) -> Coroutine[Any, Any, dict]:
-        ...
-    def offline_remove(
-        self, 
-        payload: str | dict, 
-        /, 
-        base_url: str | Callable[[], str] = "https://proapi.115.com", 
-        *, 
-        async_: Literal[False, True] = False, 
-        **request_kwargs, 
-    ) -> dict | Coroutine[Any, Any, dict]:
-        """删除用户云下载任务
-
-        POST https://proapi.115.com/open/offline/del_task
-
-        .. admonition:: Reference
-
-            https://www.yuque.com/115yun/open/pmgwc86lpcy238nw
-
-        :payload:
-            - info_hash: str 💡 待删除任务的 info_hash
-            - del_source_file: 0 | 1 = <default> 💡 是否删除源文件 1:删除 0:不删除
-        """
-        api = complete_url("/open/offline/del_task", base_url)
-        if isinstance(payload, str):
-            payload = {"info_hash": payload}
-        return self.request(api, method="POST", data=payload, async_=async_, **request_kwargs)
-
-    @overload
-    def offline_torrent_info(
-        self, 
-        payload: dict, 
-        /, 
-        base_url: str | Callable[[], str] = "https://proapi.115.com", 
-        *, 
-        async_: Literal[False] = False, 
-        **request_kwargs, 
-    ) -> dict:
-        ...
-    @overload
-    def offline_torrent_info(
-        self, 
-        payload: dict, 
-        /, 
-        base_url: str | Callable[[], str] = "https://proapi.115.com", 
-        *, 
-        async_: Literal[True], 
-        **request_kwargs, 
-    ) -> Coroutine[Any, Any, dict]:
-        ...
-    def offline_torrent_info(
-        self, 
-        payload: dict, 
-        /, 
-        base_url: str | Callable[[], str] = "https://proapi.115.com", 
-        *, 
-        async_: Literal[False, True] = False, 
-        **request_kwargs, 
-    ) -> dict | Coroutine[Any, Any, dict]:
-        """解析 BT 种子
-
-        POST https://proapi.115.com/open/offline/torrent
-
-        .. admonition:: Reference
-
-            https://www.yuque.com/115yun/open/evez3u50cemoict1
-
-        :payload:
-            - torrent_sha1: str 💡 种子文件的 sha1
-            - pick_code: str    💡 种子文件的提取码
-        """
-        api = complete_url("/open/offline/torrent", base_url)
-        return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
-
     ########## Recyclebin API ##########
 
     @overload
@@ -4318,6 +4320,13 @@ class P115OpenClient(ClientRequestMixin):
             payload = {"open_device": payload}
         return self.request(url=api, params=payload, async_=async_, **request_kwargs)
 
+    clouddownload_quota_info_open = clouddownload_quota_info
+    clouddownload_task_add_bt_open = clouddownload_task_add_bt
+    clouddownload_task_add_urls_open = clouddownload_task_add_urls
+    clouddownload_task_clear_open = clouddownload_task_clear
+    clouddownload_task_del_open = clouddownload_task_del
+    clouddownload_task_list_open = clouddownload_task_list
+    clouddownload_torrent_open = clouddownload_torrent
     download_url_open = download_url
     download_urls_open = download_urls
     download_url_info_open = download_url_info
@@ -4336,13 +4345,6 @@ class P115OpenClient(ClientRequestMixin):
     fs_video_push_open = fs_video_push
     fs_video_subtitle_open = fs_video_subtitle
     fs_update_open = fs_update
-    offline_add_torrent_open = offline_add_torrent
-    offline_add_urls_open = offline_add_urls
-    offline_clear_open = offline_clear
-    offline_list_open = offline_list
-    offline_quota_info_open = offline_quota_info
-    offline_remove_open = offline_remove
-    offline_torrent_info_open = offline_torrent_info
     recyclebin_clean_open = recyclebin_clean
     recyclebin_list_open = recyclebin_list
     recyclebin_revert_open = recyclebin_revert
@@ -6060,6 +6062,1336 @@ class P115Client(P115OpenClient):
                 **request_kwargs, 
             )
         return run_gen_step(gen_step, async_)
+
+    ########## Cloud Download API ##########
+
+    @overload
+    def _clouddownload_web_request(
+        self, 
+        payload: dict = {}, 
+        /, 
+        action: str = "", 
+        method: str = "POST", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def _clouddownload_web_request(
+        self, 
+        payload: dict = {}, 
+        /, 
+        action: str = "", 
+        method: str = "POST", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def _clouddownload_web_request(
+        self, 
+        payload: dict = {}, 
+        /, 
+        action: str = "", 
+        method: str = "POST", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        api = complete_url("/web/", base_url=base_url)
+        if action:
+            payload["ac"] = action
+        if method.upper() == "POST":
+            request_kwargs["data"] = payload
+        else:
+            request_kwargs["params"] = payload
+        return self.request(
+            url=api, 
+            method=method, 
+            async_=async_, 
+            **request_kwargs, 
+        )
+
+    @overload
+    def _clouddownload_app_request(
+        self, 
+        payload: dict = {}, 
+        /, 
+        action: str = "", 
+        method: str = "POST", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def _clouddownload_app_request(
+        self, 
+        payload: dict = {}, 
+        /, 
+        action: str = "", 
+        method: str = "POST", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def _clouddownload_app_request(
+        self, 
+        payload: dict = {}, 
+        /, 
+        action: str = "", 
+        method: str = "POST", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        api = complete_url("/", base_url=base_url)
+        if action:
+            payload["ac"] = action
+        if method.upper() == "POST":
+            request_kwargs["data"] = payload
+            request_kwargs.setdefault("ecdh_encrypt", True)
+        else:
+            request_kwargs["params"] = payload
+        return self.request(
+            url=api, 
+            method=method, 
+            async_=async_, 
+            **request_kwargs, 
+        )
+
+    @overload
+    def _clouddownload_lixianssp_request(
+        self, 
+        payload: dict = {}, 
+        /, 
+        action: str = "", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def _clouddownload_lixianssp_request(
+        self, 
+        payload: dict = {}, 
+        /, 
+        action: str = "", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def _clouddownload_lixianssp_request(
+        self, 
+        payload: dict = {}, 
+        /, 
+        action: str = "", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        api = complete_url("/lixianssp/", base_url=base_url)
+        request_kwargs["method"] = "POST"
+        for k, v in payload.items():
+            payload[k] = str(v)
+        if action:
+            payload["ac"] = action
+        payload["app_ver"] = "99.99.99.99"
+        request_kwargs["headers"] = {
+            **(request_kwargs.get("headers") or {}), 
+            "user-agent": "Mozilla/5.0 115disk/99.99.99.99 115Browser/99.99.99.99 115wangpan_android/99.99.99.99", 
+        }
+        request_kwargs["ecdh_encrypt"] = False
+        def parse(_, content: bytes, /) -> dict:
+            json = json_loads(content)
+            if data := json.get("data"):
+                try:
+                    json["data"] = json_loads(rsa_decrypt(data))
+                except Exception:
+                    pass
+            return json
+        request_kwargs.setdefault("parse", parse)
+        return self.request(
+            url=api, 
+            data={"data": rsa_encrypt(dumps(payload)).decode("ascii")}, 
+            async_=async_, 
+            **request_kwargs, 
+        )
+
+    @overload
+    def _clouddownload_request(
+        self, 
+        payload: dict = {}, 
+        /, 
+        action: str = "", 
+        method: str = "POST", 
+        type: Literal["", "web", "ssp"] = "web", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def _clouddownload_request(
+        self, 
+        payload: dict = {}, 
+        /, 
+        action: str = "", 
+        method: str = "POST", 
+        type: Literal["", "web", "ssp"] = "web", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def _clouddownload_request(
+        self, 
+        payload: dict = {}, 
+        /, 
+        action: str = "", 
+        method: str = "POST", 
+        type: Literal["", "web", "ssp"] = "web", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        match type:
+            case "web":
+                call: Callable = self._clouddownload_web_request
+            case "ssp":
+                call = self._clouddownload_lixianssp_request
+            case _:
+                call = self._clouddownload_app_request
+        return call(
+            payload, 
+            action, 
+            method=method, 
+            base_url=base_url, 
+            async_=async_, 
+            **request_kwargs, 
+        )
+
+    @overload
+    def clouddownload_downpath(
+        self, 
+        /, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def clouddownload_downpath(
+        self, 
+        /, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def clouddownload_downpath(
+        self, 
+        /, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """获取当前默认的云下载到的目录信息（可能有多个）
+
+        GET https://webapi.115.com/offine/downpath
+        """
+        api = complete_url("/offine/downpath", base_url=base_url)
+        return self.request(url=api, async_=async_, **request_kwargs)
+
+    @overload
+    def clouddownload_downpath_set(
+        self, 
+        payload: int | str | dict, 
+        /, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def clouddownload_downpath_set(
+        self, 
+        payload: int | str | dict, 
+        /, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def clouddownload_downpath_set(
+        self, 
+        payload: int | str | dict, 
+        /, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """设置默认选择的云下载到的目录信息
+
+        POST https://webapi.115.com/offine/downpath
+
+        :payload:
+            - file_id: int | str 💡 目录 id
+        """
+        api = complete_url("/offine/downpath", base_url=base_url)
+        if isinstance(payload, (int, str)):
+            payload = {"file_id": payload}
+        return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
+
+    @overload
+    def clouddownload_get_id(
+        self, 
+        payload: dict | int = 1, 
+        /, 
+        method: str = "GET", 
+        type: Literal["", "web", "ssp"] = "web", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def clouddownload_get_id(
+        self, 
+        payload: dict | int = 1, 
+        /, 
+        method: str = "GET", 
+        type: Literal["", "web", "ssp"] = "web", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def clouddownload_get_id(
+        self, 
+        payload: dict | int = 1, 
+        /, 
+        method: str = "GET", 
+        type: Literal["", "web", "ssp"] = "web", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """获取和云下载有关的目录 id
+
+        GET https://clouddownload.115.com/?ac=get_id
+
+        .. note::
+            调用此接口后，如果相关目录不存在，则会自动创建。
+            响应数据里，"cid" 对应的是上传的种子文件的保存目录，"dest_cid" 是云下载的目录
+
+        :payload:
+            - torrent: int = 1
+        """
+        if isinstance(payload, int):
+            payload = {"torrent": payload}
+        return self._clouddownload_request(
+            payload, 
+            "get_id", 
+            method=method, 
+            type=type, 
+            base_url=base_url, 
+            async_=async_, 
+            **request_kwargs, 
+        )
+
+    @overload # type: ignore
+    def clouddownload_quota_info(
+        self, 
+        /, 
+        method: str = "GET", 
+        type: Literal["", "web", "ssp"] = "web", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def clouddownload_quota_info(
+        self, 
+        /, 
+        method: str = "GET", 
+        type: Literal["", "web", "ssp"] = "web", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def clouddownload_quota_info(
+        self, 
+        /, 
+        method: str = "GET", 
+        type: Literal["", "web", "ssp"] = "web", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """获取当前云下载配额信息（简略）
+
+        GET https://clouddownload.115.com/?ac=get_quota_info
+        """
+        return self._clouddownload_request(
+            ac="get_quota_info", 
+            method=method, 
+            type=type, 
+            base_url=base_url, 
+            async_=async_, 
+            **request_kwargs, 
+        )
+
+    @overload
+    def clouddownload_quota_package_array(
+        self, 
+        /, 
+        method: str = "GET", 
+        type: Literal["", "web", "ssp"] = "web", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def clouddownload_quota_package_array(
+        self, 
+        /, 
+        method: str = "GET", 
+        type: Literal["", "web", "ssp"] = "web", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def clouddownload_quota_package_array(
+        self, 
+        /, 
+        method: str = "GET", 
+        type: Literal["", "web", "ssp"] = "web", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """获取当前云下载配额信息（详细）
+
+        GET https://clouddownload.115.com/?ac=get_quota_package_array
+        """
+        return self._clouddownload_request(
+            ac="get_quota_package_array", 
+            method=method, 
+            type=type, 
+            base_url=base_url, 
+            async_=async_, 
+            **request_kwargs, 
+        )
+
+    @overload
+    def clouddownload_quota_package_info(
+        self, 
+        /, 
+        method: str = "GET", 
+        type: Literal["", "web", "ssp"] = "web", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def clouddownload_quota_package_info(
+        self, 
+        /, 
+        method: str = "GET", 
+        type: Literal["", "web", "ssp"] = "web", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def clouddownload_quota_package_info(
+        self, 
+        /, 
+        method: str = "GET", 
+        type: Literal["", "web", "ssp"] = "web", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """获取当前云下载配额信息（详细）
+
+        GET https://clouddownload.115.com/?ac=get_quota_package_info
+        """
+        return self._clouddownload_request(
+            ac="get_quota_package_info", 
+            method=method, 
+            type=type, 
+            base_url=base_url, 
+            async_=async_, 
+            **request_kwargs, 
+        )
+
+    @overload
+    def clouddownload_sign(
+        self, 
+        /, 
+        base_url: str | Callable[[], str] = "https://115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def clouddownload_sign(
+        self, 
+        /, 
+        base_url: str | Callable[[], str] = "https://115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def clouddownload_sign(
+        self, 
+        /, 
+        base_url: str | Callable[[], str] = "https://115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """获取 sign 和 time 字段（各个添加任务的接口需要），以及其它信息
+
+        GET https://115.com/?ct=clouddownload&ac=space
+        """
+        api = complete_url(base_url=base_url, query={"ct": "clouddownload", "ac": "space"})
+        return self.request(url=api, async_=async_, **request_kwargs)
+
+    @overload
+    def clouddownload_sign_app(
+        self, 
+        /, 
+        app: str = "android", 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def clouddownload_sign_app(
+        self, 
+        /, 
+        app: str = "android", 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def clouddownload_sign_app(
+        self, 
+        /, 
+        app: str = "android", 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """获取 sign 和 time 字段（各个添加任务的接口需要）
+
+        GET https://proapi.115.com/{app}/files/offlinesign
+        """
+        api = complete_url("/files/offlinesign", base_url=base_url, app=app)
+        return self.request(url=api, async_=async_, **request_kwargs)
+
+    @overload
+    def clouddownload_task(
+        self, 
+        payload: str | dict, 
+        /, 
+        method: str = "GET", 
+        type: Literal["", "web", "ssp"] = "web", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def clouddownload_task(
+        self, 
+        payload: str | dict, 
+        /, 
+        method: str = "GET", 
+        type: Literal["", "web", "ssp"] = "web", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def clouddownload_task(
+        self, 
+        payload: str | dict, 
+        /, 
+        method: str = "GET", 
+        type: Literal["", "web", "ssp"] = "web", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """获取云下载任务信息
+
+        GET https://clouddownload.115.com/?ac=get_user_task
+
+        :payload:
+            - info_hash: str
+        """
+        if isinstance(payload, str):
+            payload = {"info_hash": payload}
+        return self._clouddownload_request(
+            payload, 
+            "get_user_task", 
+            method=method, 
+            type=type, 
+            base_url=base_url, 
+            async_=async_, 
+            **request_kwargs, 
+        )
+
+    @overload # type: ignore
+    def clouddownload_task_add_bt(
+        self, 
+        payload: str | dict, 
+        /, 
+        method: str = "POST", 
+        type: Literal["", "web", "ssp"] = "ssp", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def clouddownload_task_add_bt(
+        self, 
+        payload: str | dict, 
+        /, 
+        method: str = "POST", 
+        type: Literal["", "web", "ssp"] = "ssp", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def clouddownload_task_add_bt(
+        self, 
+        payload: str | dict, 
+        /, 
+        method: str = "POST", 
+        type: Literal["", "web", "ssp"] = "ssp", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """添加一个种子作为云下载任务
+
+        POST https://clouddownload.115.com/lixianssp/?ac=add_task_bt
+
+        .. note::
+            `client.clouddownload_task_add_bt(info_hash)` 相当于 `client.clouddownload_task_add_url(f"magnet:?xt=urn:btih:{info_hash}")`
+
+            但此接口的优势是允许选择要下载的文件
+
+        :payload:
+            - info_hash: str 💡 种子文件的 info_hash
+            - wanted: str = <default> 💡 选择文件进行下载（是数字索引，从 0 开始计数，用 "," 分隔）
+            - savepath: str = <default> 💡 保存到 `wp_path_id` 对应目录下的相对路径
+            - wp_path_id: int | str = <default> 💡 保存到目录的 id
+        """
+        if isinstance(payload, str):
+            payload = {"info_hash": payload}
+        return self._clouddownload_request(
+            payload, 
+            "add_task_bt", 
+            method=method, 
+            type=type, 
+            base_url=base_url, 
+            async_=async_, 
+            **request_kwargs, 
+        )
+
+    @overload
+    def clouddownload_task_add_url(
+        self, 
+        payload: str | dict, 
+        /, 
+        method: str = "POST", 
+        type: Literal["", "web", "ssp"] = "ssp", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def clouddownload_task_add_url(
+        self, 
+        payload: str | dict, 
+        /, 
+        method: str = "POST", 
+        type: Literal["", "web", "ssp"] = "ssp", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def clouddownload_task_add_url(
+        self, 
+        payload: str | dict, 
+        /, 
+        method: str = "POST", 
+        type: Literal["", "web", "ssp"] = "ssp", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """添加一个云下载任务
+
+        POST https://clouddownload.115.com/lixianssp/?ac=add_task_url
+
+        :payload:
+            - url: str 💡 链接，支持HTTP、HTTPS、FTP、磁力链和电驴链接
+            - savepath: str = <default> 💡 保存到目录下的相对路径
+            - wp_path_id: int | str = <default> 💡 保存到目录的 id
+        """
+        if isinstance(payload, str):
+            payload = {"url": payload}
+        return self._clouddownload_request(
+            payload, 
+            "add_task_url", 
+            method=method, 
+            type=type, 
+            base_url=base_url, 
+            async_=async_, 
+            **request_kwargs, 
+        )
+
+    @overload # type: ignore
+    def clouddownload_task_add_urls(
+        self, 
+        payload: str | Iterable[str] | dict, 
+        /, 
+        method: str = "POST", 
+        type: Literal["", "web", "ssp"] = "ssp", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def clouddownload_task_add_urls(
+        self, 
+        payload: str | Iterable[str] | dict, 
+        /, 
+        method: str = "POST", 
+        type: Literal["", "web", "ssp"] = "ssp", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def clouddownload_task_add_urls(
+        self, 
+        payload: str | Iterable[str] | dict, 
+        /, 
+        method: str = "POST", 
+        type: Literal["", "web", "ssp"] = "ssp", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """添加一组云下载任务
+
+        POST https://clouddownload.115.com/lixianssp/?ac=add_task_urls
+
+        :payload:
+            - url: str    💡 链接，支持HTTP、HTTPS、FTP、磁力链和电驴链接
+            - url[0]: str 💡 链接，支持HTTP、HTTPS、FTP、磁力链和电驴链接
+            - url[1]: str
+            - ...
+            - savepath: str = <default> 💡 保存到目录下的相对路径
+            - wp_path_id: int | str = <default> 💡 保存到目录的 id
+        """
+        if isinstance(payload, str):
+            payload = payload.strip("\n").split("\n")
+        if not isinstance(payload, dict):
+            payload = {f"url[{i}]": url for i, url in enumerate(payload) if url}
+            if not payload:
+                raise ValueError("no `url` specified")
+        return self._clouddownload_request(
+            payload, 
+            "add_task_urls", 
+            method=method, 
+            type=type, 
+            base_url=base_url, 
+            async_=async_, 
+            **request_kwargs, 
+        )
+
+    @overload # type: ignore
+    def clouddownload_task_clear(
+        self, 
+        payload: int | dict = 0, 
+        /, 
+        method: str = "POST", 
+        type: Literal["", "web", "ssp"] = "web", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def clouddownload_task_clear(
+        self, 
+        payload: int | dict = 0, 
+        /, 
+        method: str = "POST", 
+        type: Literal["", "web", "ssp"] = "web", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def clouddownload_task_clear(
+        self, 
+        payload: int | dict = 0, 
+        /, 
+        method: str = "POST", 
+        type: Literal["", "web", "ssp"] = "web", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """清空云下载任务列表
+
+        POST https://clouddownload.115.com/?ac=task_clear
+
+        :payload:
+            - flag: int = 0 💡 标识，用于对应某种情况
+
+                - 0: 已完成
+                - 1: 全部
+                - 2: 已失败
+                - 3: 进行中
+                - 4: 已完成+删除源文件
+                - 5: 全部+删除源文件
+        """
+        if isinstance(payload, int):
+            payload = {"flag": payload}
+        return self._clouddownload_request(
+            payload, 
+            "task_clear", 
+            method=method, 
+            type=type, 
+            base_url=base_url, 
+            async_=async_, 
+            **request_kwargs, 
+        )
+
+    @overload
+    def clouddownload_task_cnt(
+        self, 
+        payload: dict | int = 0, 
+        /, 
+        method: str = "GET", 
+        type: Literal["", "web", "ssp"] = "web", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def clouddownload_task_cnt(
+        self, 
+        payload: dict | int = 0, 
+        /, 
+        method: str = "GET", 
+        type: Literal["", "web", "ssp"] = "web", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def clouddownload_task_cnt(
+        self, 
+        payload: dict | int = 0, 
+        /, 
+        method: str = "GET", 
+        type: Literal["", "web", "ssp"] = "web", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """获取当前正在运行的云下载任务数
+
+        GET https://clouddownload.115.com/?ac=get_task_cnt
+
+        :payload:
+            - flag: int = 0
+        """
+        if isinstance(payload, int):
+            payload = {"flag": payload}
+        return self._clouddownload_request(
+            payload, 
+            "get_task_cnt", 
+            method=method, 
+            type=type, 
+            base_url=base_url, 
+            async_=async_, 
+            **request_kwargs, 
+        )
+
+    @overload
+    def clouddownload_task_count(
+        self, 
+        /, 
+        method: str = "GET", 
+        type: Literal["", "web", "ssp"] = "web", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def clouddownload_task_count(
+        self, 
+        /, 
+        method: str = "GET", 
+        type: Literal["", "web", "ssp"] = "web", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def clouddownload_task_count(
+        self, 
+        /, 
+        method: str = "GET", 
+        type: Literal["", "web", "ssp"] = "web", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """获取当前各种类型任务的计数
+
+        GET https://clouddownload.115.com/?ac=task_count
+        """
+        return self._clouddownload_request(
+            action="task_count", 
+            method=method, 
+            type=type, 
+            base_url=base_url, 
+            async_=async_, 
+            **request_kwargs, 
+        )
+
+    @overload # type: ignore
+    def clouddownload_task_del(
+        self, 
+        payload: str | Iterable[str] | dict, 
+        /, 
+        method: str = "POST", 
+        type: Literal["", "web", "ssp"] = "web", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def clouddownload_task_del(
+        self, 
+        payload: str | Iterable[str] | dict, 
+        /, 
+        method: str = "POST", 
+        type: Literal["", "web", "ssp"] = "web", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def clouddownload_task_del(
+        self, 
+        payload: str | Iterable[str] | dict, 
+        /, 
+        method: str = "POST", 
+        type: Literal["", "web", "ssp"] = "web", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """删除一组云下载任务（无论是否已经完成）
+
+        POST https://clouddownload.115.com/?ac=task_del
+
+        :payload:
+            - hash[0]: str
+            - hash[1]: str
+            - ...
+            - flag: 0 | 1 = <default> 💡 是否删除源文件
+        """
+        if isinstance(payload, str):
+            payload = {"hash[0]": payload}
+        elif not isinstance(payload, dict):
+            payload = {f"hash[{i}]": hash for i, hash in enumerate(payload)}
+            if not payload:
+                raise ValueError("no `hash` (info_hash) specified")
+        return self._clouddownload_request(
+            payload, 
+            "task_del", 
+            method=method, 
+            type=type, 
+            base_url=base_url, 
+            async_=async_, 
+            **request_kwargs, 
+        )
+
+    @overload # type: ignore
+    def clouddownload_task_list(
+        self, 
+        payload: int | dict = 1, 
+        /, 
+        method: str = "GET", 
+        type: Literal["", "web", "ssp"] = "web", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def clouddownload_task_list(
+        self, 
+        payload: int | dict = 1, 
+        /, 
+        method: str = "GET", 
+        type: Literal["", "web", "ssp"] = "web", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def clouddownload_task_list(
+        self, 
+        payload: int | dict = 1, 
+        /, 
+        method: str = "GET", 
+        type: Literal["", "web", "ssp"] = "web", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """获取当前的云下载任务列表
+
+        GET https://clouddownload.115.com/?ac=task_lists
+
+        :payload:
+            - page: int = 1
+            - page_size: int = 30
+            - stat: int = <default> 💡 已知：9:已失败 11:已完成 12:进行中
+        """
+        if isinstance(payload, int):
+            payload = {"page": payload}
+        payload.setdefault("page_size", 30)
+        return self._clouddownload_request(
+            payload, 
+            "task_lists", 
+            method=method, 
+            type=type, 
+            base_url=base_url, 
+            async_=async_, 
+            **request_kwargs, 
+        )
+
+    @overload
+    def clouddownload_task_pause(
+        self, 
+        payload: str | dict, 
+        /, 
+        method: str = "POST", 
+        type: Literal["", "web", "ssp"] = "web", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def clouddownload_task_pause(
+        self, 
+        payload: str | dict, 
+        /, 
+        method: str = "POST", 
+        type: Literal["", "web", "ssp"] = "web", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def clouddownload_task_pause(
+        self, 
+        payload: str | dict, 
+        /, 
+        method: str = "POST", 
+        type: Literal["", "web", "ssp"] = "web", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """暂停云下载任务
+
+        POST https://clouddownload.115.com/?ac=pause_task
+
+        :payload:
+            - info_hash: str 💡 待重试任务的 info_hash
+        """
+        if isinstance(payload, str):
+            payload = {"info_hash": payload}
+        return self._clouddownload_request(
+            payload, 
+            "pause_task", 
+            method=method, 
+            type=type, 
+            base_url=base_url, 
+            async_=async_, 
+            **request_kwargs, 
+        )
+
+    @overload
+    def clouddownload_task_restart(
+        self, 
+        payload: str | dict, 
+        /, 
+        method: str = "POST", 
+        type: Literal["", "web", "ssp"] = "web", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def clouddownload_task_restart(
+        self, 
+        payload: str | dict, 
+        /, 
+        method: str = "POST", 
+        type: Literal["", "web", "ssp"] = "web", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def clouddownload_task_restart(
+        self, 
+        payload: str | dict, 
+        /, 
+        method: str = "POST", 
+        type: Literal["", "web", "ssp"] = "web", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """重试云下载任务
+
+        POST https://clouddownload.115.com/?ac=restart
+
+        :payload:
+            - info_hash: str 💡 待重试任务的 info_hash
+        """
+        if isinstance(payload, str):
+            payload = {"info_hash": payload}
+        return self._clouddownload_request(
+            payload, 
+            "restart", 
+            method=method, 
+            type=type, 
+            base_url=base_url, 
+            async_=async_, 
+            **request_kwargs, 
+        )
+
+    @overload
+    def clouddownload_task_resume(
+        self, 
+        payload: str | dict, 
+        /, 
+        method: str = "POST", 
+        type: Literal["", "web", "ssp"] = "web", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def clouddownload_task_resume(
+        self, 
+        payload: str | dict, 
+        /, 
+        method: str = "POST", 
+        type: Literal["", "web", "ssp"] = "web", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def clouddownload_task_resume(
+        self, 
+        payload: str | dict, 
+        /, 
+        method: str = "POST", 
+        type: Literal["", "web", "ssp"] = "web", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """恢复（被暂停的）云下载任务
+
+        POST https://clouddownload.115.com/?ac=resume_task
+
+        :payload:
+            - info_hash: str 💡 待重试任务的 info_hash
+        """
+        if isinstance(payload, str):
+            payload = {"info_hash": payload}
+        return self._clouddownload_request(
+            payload, 
+            "resume_task", 
+            method=method, 
+            type=type, 
+            base_url=base_url, 
+            async_=async_, 
+            **request_kwargs, 
+        )
+
+    @overload # type: ignore
+    def clouddownload_torrent(
+        self, 
+        payload: str | dict, 
+        /, 
+        method: str = "GET", 
+        type: Literal["", "web", "ssp"] = "web", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def clouddownload_torrent(
+        self, 
+        payload: str | dict, 
+        /, 
+        method: str = "GET", 
+        type: Literal["", "web", "ssp"] = "web", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def clouddownload_torrent(
+        self, 
+        payload: str | dict, 
+        /, 
+        method: str = "GET", 
+        type: Literal["", "web", "ssp"] = "web", 
+        base_url: str | Callable[[], str] = "https://clouddownload.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """查看种子的文件列表等信息
+
+        GET https://clouddownload.115.com/?ac=torrent
+
+        :payload:
+            - sha1: str
+        """
+        if isinstance(payload, str):
+            payload = {"sha1": payload}
+        return self._clouddownload_request(
+            payload, 
+            "torrent", 
+            method=method, 
+            type=type, 
+            base_url=base_url, 
+            async_=async_, 
+            **request_kwargs, 
+        )
 
     ########## Diary API ##########
 
@@ -9999,7 +11331,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_files(
         self, 
-        payload: int | str | dict = 0, 
+        payload: None | int | str | dict = 0, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -10010,7 +11342,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_files(
         self, 
-        payload: int | str | dict = 0, 
+        payload: None | int | str | dict = 0, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -10020,7 +11352,7 @@ class P115Client(P115OpenClient):
         ...
     def fs_files(
         self, 
-        payload: int | str | dict = 0, 
+        payload: None | int | str | dict = 0, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -10030,6 +11362,9 @@ class P115Client(P115OpenClient):
         """获取目录中的文件列表和基本信息
 
         GET https://webapi.115.com/files
+
+        .. attention::
+            webapi.115.com 下任意接口被风控，可能此域名下的所有接口都被风控，但重新登录往往能恢复，而 proapi.115.com 之下同样被风控，重新登录却未必恢复得了
 
         .. hint::
             指定如下条件中任一，且 cur = 0 （默认），即可遍历搜索所在目录树
@@ -10054,7 +11389,7 @@ class P115Client(P115OpenClient):
 
             - 目录和文件同名：文件和目录同名在 115 中不算是一个冲突
             - 相同的目录名：转存可以导致同一目录下有多个相同名字的目录
-            - 相同的文件名：转存、离线和上传等，可以导致同一目录下有多个相同名字的文件
+            - 相同的文件名：转存、云下载和上传等，可以导致同一目录下有多个相同名字的文件
 
         .. hint::
             如果文件或目录被置顶，会在整个文件列表的最前面
@@ -10077,6 +11412,7 @@ class P115Client(P115OpenClient):
             - cid: int | str = 0 💡 目录 id，对应 parent_id
             - limit: int = 32 💡 分页大小，目前最大值是 1,150，以前是没限制的
             - offset: int = 0 💡 分页开始的索引，索引从 0 开始计算
+
             - aid: int = 1 💡 area_id
 
                 - 0: 会被视为 1
@@ -10159,6 +11495,8 @@ class P115Client(P115OpenClient):
                 - >=100: 相当于 8
         """
         api = complete_url("/files", base_url=base_url)
+        if payload is None:
+            return self.request(url=api, async_=async_, **request_kwargs)
         if isinstance(payload, (int, str)):
             payload = {"cid": payload}
         payload = {
@@ -10172,7 +11510,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_files_app(
         self, 
-        payload: int | str | dict = 0, 
+        payload: None | int | str | dict = 0, 
         /, 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
@@ -10184,7 +11522,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_files_app(
         self, 
-        payload: int | str | dict = 0, 
+        payload: None | int | str | dict = 0, 
         /, 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
@@ -10195,7 +11533,7 @@ class P115Client(P115OpenClient):
         ...
     def fs_files_app(
         self, 
-        payload: int | str | dict = 0, 
+        payload: None | int | str | dict = 0, 
         /, 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
@@ -10213,11 +11551,23 @@ class P115Client(P115OpenClient):
         .. note::
             如果 `app` 为 "wechatmini" 或 "alipaymini"，则相当于 ``P115Client.fs_files_app2()``
 
-        .. caution::
-            这个接口有些问题，当 custom_order=1 时：
+        .. note::
+            一旦此接口被风控，那么同一域名下，所有路径尾部是 /files 的接口都被风控，但是如果你没有携带任何参数，竟然可以避免风控（至少可以用来获得一下文件总数，以及最近的 20 个创建的文件）
 
-                1. 如果设定 limit=1 可能会报错
-                2. fc_mix 无论怎么设置，都和 fc_mix=0 的效果相同（即目录总是置顶），但设置为 custom_order=2 就好了
+        .. attention::
+            此接口存在一些潜在的问题。假如我上传了一个扩展名特别长的文件，越出了这个接口的能力范围，就会直接报错，例如：
+
+            .. code:: python
+
+                client.upload_file_sample(b"", filename="a."+"a"*300)
+                # NOTE: 因而下面的请求将不会成功
+                client.fs_files_app()
+
+        .. caution::
+            这个接口有些问题：
+
+                1. 当 custom_order=1 时，如果设定 limit=1 可能会报错
+                2. fc_mix 无论怎么设置，都和 fc_mix=0 的效果相同（即目录总是置顶），设置为 custom_order=2 也没用
 
         .. hint::
             置顶无效，但可以知道是否置顶了。
@@ -10306,6 +11656,8 @@ class P115Client(P115OpenClient):
                 - >= 16: 相当于 8
         """
         api = complete_url("/2.0/ufile/files", base_url=base_url, app=app or "android", force_app=("wechatmini", "alipaymini"))
+        if payload is None:
+            return self.request(url=api, async_=async_, **request_kwargs)
         if isinstance(payload, (int, str)):
             payload = {"cid": payload}
         payload = {
@@ -10319,7 +11671,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_files_app2(
         self, 
-        payload: int | str | dict = 0, 
+        payload: None| int | str | dict = 0, 
         /, 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
@@ -10331,7 +11683,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_files_app2(
         self, 
-        payload: int | str | dict = 0, 
+        payload: None | int | str | dict = 0, 
         /, 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
@@ -10342,7 +11694,7 @@ class P115Client(P115OpenClient):
         ...
     def fs_files_app2(
         self, 
-        payload: int | str | dict = 0, 
+        payload: None | int | str | dict = 0, 
         /, 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
@@ -10354,13 +11706,13 @@ class P115Client(P115OpenClient):
 
         GET https://proapi.115.com/{app}/files
 
-        .. hint::
+        .. hint::x
             如果要遍历获取所有文件，需要指定 show_dir=0 且 cur=0（或不指定 cur），这个接口并没有 type=99 时获取所有文件的意义
 
         .. caution::
-            这个接口有些问题，当 custom_order=1 时：
+            这个接口有些问题：
 
-                1. 如果设定 limit=1 可能会报错
+                1. 当 custom_order=1 时，如果设定 limit=1 可能会报错
                 2. fc_mix 无论怎么设置，都和 fc_mix=0 的效果相同（即目录总是置顶），设置为 custom_order=2 也没用
 
         :payload:
@@ -10445,6 +11797,8 @@ class P115Client(P115OpenClient):
                 - >= 16: 相当于 8
         """
         api = complete_url("/files", base_url=base_url, app=app or "android", force_app=("wechatmini", "alipaymini"))
+        if payload is None:
+            return self.request(url=api, async_=async_, **request_kwargs)
         if isinstance(payload, (int, str)):
             payload = {"cid": payload}
         payload = {
@@ -10458,7 +11812,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_files_aps(
         self, 
-        payload: int | str | dict = 0, 
+        payload: None | int | str | dict = 0, 
         /, 
         base_url: str | Callable[[], str] = "https://aps.115.com", 
         *, 
@@ -10469,7 +11823,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_files_aps(
         self, 
-        payload: int | str | dict = 0, 
+        payload: None | int | str | dict = 0, 
         /, 
         base_url: str | Callable[[], str] = "https://aps.115.com", 
         *, 
@@ -10479,7 +11833,7 @@ class P115Client(P115OpenClient):
         ...
     def fs_files_aps(
         self, 
-        payload: int | str | dict = 0, 
+        payload: None | int | str | dict = 0, 
         /, 
         base_url: str | Callable[[], str] = "https://aps.115.com", 
         *, 
@@ -10577,6 +11931,8 @@ class P115Client(P115OpenClient):
                 - >=100: 相当于 8
         """
         api = complete_url("/natsort/files.php", base_url=base_url)
+        if payload is None:
+            return self.request(url=api, async_=async_, **request_kwargs)
         if isinstance(payload, (int, str)):
             payload = {"cid": payload}
         payload = {
@@ -10790,7 +12146,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_files_image_app(
         self, 
-        payload: int | str | dict = 0, 
+        payload: None | int | str | dict = 0, 
         /, 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
@@ -10802,7 +12158,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_files_image_app(
         self, 
-        payload: int | str | dict = 0, 
+        payload: None | int | str | dict = 0, 
         /, 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
@@ -10813,7 +12169,7 @@ class P115Client(P115OpenClient):
         ...
     def fs_files_image_app(
         self, 
-        payload: int | str | dict = 0, 
+        payload: None | int | str | dict = 0, 
         /, 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
@@ -10829,6 +12185,7 @@ class P115Client(P115OpenClient):
             - cid: int | str = 0 💡 目录 id，对应 parent_id
             - limit: int = 32    💡 一页大小，建议控制在 <= 9000，不然会报错
             - offset: int = 0    💡 索引偏移，索引从 0 开始计算
+
             - aid: int = 1 💡 area_id
 
                 - 0: 会被视为 1
@@ -10856,6 +12213,8 @@ class P115Client(P115OpenClient):
                 - 上一次打开时间："user_otime"
         """
         api = complete_url("/files/imglist", base_url=base_url, app=app)
+        if payload is None:
+            return self.request(url=api, async_=async_, **request_kwargs)
         if isinstance(payload, (int, str)):
             payload = {"cid": payload}
         payload = {"limit": 32, "offset": 0, "aid": 1, "cid": 0, "cur": 1, **payload}
@@ -10864,7 +12223,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_files_media(
         self, 
-        payload: int | str | dict = 0, 
+        payload: None | int | str | dict = 0, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -10875,7 +12234,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_files_media(
         self, 
-        payload: int | str | dict = 0, 
+        payload: None | int | str | dict = 0, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -10885,7 +12244,7 @@ class P115Client(P115OpenClient):
         ...
     def fs_files_media(
         self, 
-        payload: int | str | dict = 0, 
+        payload: None | int | str | dict = 0, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -10895,6 +12254,9 @@ class P115Client(P115OpenClient):
         """获取目录中的文件列表和基本信息（不含目录）
 
         GET https://webapi.115.com/files/medialist
+
+        .. attention::
+            有个 bug，当 ``cur=1`` 时，似乎总是拉到空的文件列表
 
         :payload:
             - cid: int | str = 0 💡 目录 id，对应 parent_id
@@ -10941,6 +12303,8 @@ class P115Client(P115OpenClient):
                 - >7: 相当于 1
         """
         api = complete_url("/files/medialist", base_url=base_url)
+        if payload is None:
+            return self.request(url=api, async_=async_, **request_kwargs)
         if isinstance(payload, (int, str)):
             payload = {"cid": payload}
         payload = {"limit": 32, "offset": 0, "aid": 1, "cid": 0, "cur": 1, "type": -1, **payload}
@@ -10949,7 +12313,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_files_media_app(
         self, 
-        payload: int | str | dict = 0, 
+        payload: None | int | str | dict = 0, 
         /, 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
@@ -10961,7 +12325,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_files_media_app(
         self, 
-        payload: int | str | dict = 0, 
+        payload: None | int | str | dict = 0, 
         /, 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
@@ -10972,7 +12336,7 @@ class P115Client(P115OpenClient):
         ...
     def fs_files_media_app(
         self, 
-        payload: int | str | dict = 0, 
+        payload: None | int | str | dict = 0, 
         /, 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
@@ -11029,6 +12393,8 @@ class P115Client(P115OpenClient):
                 - >7: 相当于 1
         """
         api = complete_url("/files/medialist", base_url=base_url, app=app)
+        if payload is None:
+            return self.request(url=api, async_=async_, **request_kwargs)
         if isinstance(payload, (int, str)):
             payload = {"cid": payload}
         payload = {"limit": 32, "offset": 0, "aid": 1, "cid": 0, "cur": 1, "type": -1, **payload}
@@ -11849,7 +13215,7 @@ class P115Client(P115OpenClient):
 
                 - 全部: 0
                 - ？？: 1（大概和接收有关）
-                - 离线下载: 2
+                - 云下载: 2
                 - 播放视频: 3
                 - 上传: 4
                 - ？？: 5
@@ -12001,7 +13367,7 @@ class P115Client(P115OpenClient):
 
                 - 全部: 0
                 - ？？: 1（大概和接收有关）
-                - 离线下载: 2
+                - 云下载: 2
                 - 播放视频: 3
                 - 上传: 4
                 - ？？: 5
@@ -12060,7 +13426,7 @@ class P115Client(P115OpenClient):
 
                 - 全部: 0
                 - ？？: 1（大概和接收有关）
-                - 离线下载: 2
+                - 云下载: 2
                 - 播放视频: 3
                 - 上传: 4
                 - ？？: 5
@@ -12120,7 +13486,7 @@ class P115Client(P115OpenClient):
 
                 - 全部: 0
                 - ？？: 1（大概和接收有关）
-                - 离线下载: 2
+                - 云下载: 2
                 - 播放视频: 3
                 - 上传: 4
                 - ？？: 5
@@ -15752,7 +17118,7 @@ class P115Client(P115OpenClient):
         async_: Literal[False, True] = False, 
         **request_kwargs, 
     ) -> dict | Coroutine[Any, Any, dict]:
-        """获取数据报告（当前数据，分组聚合）
+        """获取数据报告（当前数据，分组聚合，但并不精确）
 
         POST https://webapi.115.com/user/space_summury
         """
@@ -18643,7 +20009,7 @@ class P115Client(P115OpenClient):
         GET https://msg.115.com/?ct=im&ac=get_websocket_host
 
         .. note::
-            用返回数据构造链接，可由此监听 websocket 消息
+            用返回数据构造链接，可由此监听 websocket 消息，但目前来看，最多也就实时获得一个【删除】事件
 
             `wss://{server}/?uid={user_id}&session={session_id}&client_version=100&client_type=5&sequence_id=0&source=web&device_id=0000000000000000000000000000000000000000`
         """
@@ -21050,1173 +22416,6 @@ class P115Client(P115OpenClient):
         if isinstance(payload, int):
             payload = {"note_page_size": payload}
         return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
-
-    ########## Offline Download API ##########
-
-    @overload
-    def _offline_web_request(
-        self, 
-        payload: dict = {}, 
-        /, 
-        ac: str = "", 
-        method: str = "POST", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[False] = False, 
-        **request_kwargs, 
-    ) -> dict:
-        ...
-    @overload
-    def _offline_web_request(
-        self, 
-        payload: dict = {}, 
-        /, 
-        ac: str = "", 
-        method: str = "POST", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[True], 
-        **request_kwargs, 
-    ) -> Coroutine[Any, Any, dict]:
-        ...
-    def _offline_web_request(
-        self, 
-        payload: dict = {}, 
-        /, 
-        ac: str = "", 
-        method: str = "POST", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[False, True] = False, 
-        **request_kwargs, 
-    ) -> dict | Coroutine[Any, Any, dict]:
-        api = complete_url("/web/lixian/", base_url=base_url)
-        if ac:
-            payload["ac"] = ac
-        if method.upper() == "POST":
-            request_kwargs["data"] = payload
-        else:
-            request_kwargs["params"] = payload
-        return self.request(
-            url=api, 
-            method=method, 
-            async_=async_, 
-            **request_kwargs, 
-        )
-
-    @overload
-    def _offline_lixian_request(
-        self, 
-        payload: dict = {}, 
-        /, 
-        ac: str = "", 
-        method: str = "POST", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[False] = False, 
-        **request_kwargs, 
-    ) -> dict:
-        ...
-    @overload
-    def _offline_lixian_request(
-        self, 
-        payload: dict = {}, 
-        /, 
-        ac: str = "", 
-        method: str = "POST", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[True], 
-        **request_kwargs, 
-    ) -> Coroutine[Any, Any, dict]:
-        ...
-    def _offline_lixian_request(
-        self, 
-        payload: dict = {}, 
-        /, 
-        ac: str = "", 
-        method: str = "POST", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[False, True] = False, 
-        **request_kwargs, 
-    ) -> dict | Coroutine[Any, Any, dict]:
-        api = complete_url("/lixian/", base_url=base_url)
-        if ac:
-            payload["ac"] = ac
-        if method.upper() == "POST":
-            request_kwargs["data"] = payload
-            request_kwargs.setdefault("ecdh_encrypt", True)
-        else:
-            request_kwargs["params"] = payload
-        return self.request(
-            url=api, 
-            method=method, 
-            async_=async_, 
-            **request_kwargs, 
-        )
-
-    @overload
-    def _offline_lixianssp_request(
-        self, 
-        payload: dict = {}, 
-        /, 
-        ac: str = "", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[False] = False, 
-        **request_kwargs, 
-    ) -> dict:
-        ...
-    @overload
-    def _offline_lixianssp_request(
-        self, 
-        payload: dict = {}, 
-        /, 
-        ac: str = "", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[True], 
-        **request_kwargs, 
-    ) -> Coroutine[Any, Any, dict]:
-        ...
-    def _offline_lixianssp_request(
-        self, 
-        payload: dict = {}, 
-        /, 
-        ac: str = "", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[False, True] = False, 
-        **request_kwargs, 
-    ) -> dict | Coroutine[Any, Any, dict]:
-        api = complete_url("/lixianssp/", base_url=base_url)
-        request_kwargs["method"] = "POST"
-        for k, v in payload.items():
-            payload[k] = str(v)
-        if ac:
-            payload["ac"] = ac
-        payload["app_ver"] = "99.99.99.99"
-        request_kwargs["headers"] = {
-            **(request_kwargs.get("headers") or {}), 
-            "user-agent": "Mozilla/5.0 115disk/99.99.99.99 115Browser/99.99.99.99 115wangpan_android/99.99.99.99", 
-        }
-        request_kwargs["ecdh_encrypt"] = False
-        def parse(_, content: bytes, /) -> dict:
-            json = json_loads(content)
-            if data := json.get("data"):
-                try:
-                    json["data"] = json_loads(rsa_decrypt(data))
-                except Exception:
-                    pass
-            return json
-        request_kwargs.setdefault("parse", parse)
-        return self.request(
-            url=api, 
-            data={"data": rsa_encrypt(dumps(payload)).decode("ascii")}, 
-            async_=async_, 
-            **request_kwargs, 
-        )
-
-    @overload
-    def _offline_request(
-        self, 
-        payload: dict = {}, 
-        /, 
-        ac: str = "", 
-        method: str = "POST", 
-        type: Literal["", "web", "ssp"] = "web", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[False] = False, 
-        **request_kwargs, 
-    ) -> dict:
-        ...
-    @overload
-    def _offline_request(
-        self, 
-        payload: dict = {}, 
-        /, 
-        ac: str = "", 
-        method: str = "POST", 
-        type: Literal["", "web", "ssp"] = "web", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[True], 
-        **request_kwargs, 
-    ) -> Coroutine[Any, Any, dict]:
-        ...
-    def _offline_request(
-        self, 
-        payload: dict = {}, 
-        /, 
-        ac: str = "", 
-        method: str = "POST", 
-        type: Literal["", "web", "ssp"] = "web", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[False, True] = False, 
-        **request_kwargs, 
-    ) -> dict | Coroutine[Any, Any, dict]:
-        match type:
-            case "web":
-                call: Callable = self._offline_web_request
-            case "ssp":
-                call = self._offline_lixianssp_request
-            case _:
-                call = self._offline_lixian_request
-        return call(
-            payload, 
-            ac, 
-            method=method, 
-            base_url=base_url, 
-            async_=async_, 
-            **request_kwargs, 
-        )
-
-    @overload # type: ignore
-    def offline_add_torrent(
-        self, 
-        payload: str | dict, 
-        /, 
-        method: str = "POST", 
-        type: Literal["", "web", "ssp"] = "ssp", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[False] = False, 
-        **request_kwargs, 
-    ) -> dict:
-        ...
-    @overload
-    def offline_add_torrent(
-        self, 
-        payload: str | dict, 
-        /, 
-        method: str = "POST", 
-        type: Literal["", "web", "ssp"] = "ssp", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[True], 
-        **request_kwargs, 
-    ) -> Coroutine[Any, Any, dict]:
-        ...
-    def offline_add_torrent(
-        self, 
-        payload: str | dict, 
-        /, 
-        method: str = "POST", 
-        type: Literal["", "web", "ssp"] = "ssp", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[False, True] = False, 
-        **request_kwargs, 
-    ) -> dict | Coroutine[Any, Any, dict]:
-        """添加一个种子作为离线任务
-
-        POST https://lixian.115.com/lixianssp/?ac=add_task_bt
-
-        .. note::
-            `client.offline_add_torrent(info_hash)` 相当于 `client.offline_add_url(f"magnet:?xt=urn:btih:{info_hash}")`
-
-            但此接口的优势是允许选择要下载的文件
-
-        :payload:
-            - info_hash: str 💡 种子文件的 info_hash
-            - wanted: str = <default> 💡 选择文件进行下载（是数字索引，从 0 开始计数，用 "," 分隔）
-            - savepath: str = <default> 💡 保存到 `wp_path_id` 对应目录下的相对路径
-            - wp_path_id: int | str = <default> 💡 保存到目录的 id
-        """
-        if isinstance(payload, str):
-            payload = {"info_hash": payload}
-        return self._offline_request(
-            payload, 
-            "add_task_bt", 
-            method=method, 
-            type=type, 
-            base_url=base_url, 
-            async_=async_, 
-            **request_kwargs, 
-        )
-
-    @overload
-    def offline_add_url(
-        self, 
-        payload: str | dict, 
-        /, 
-        method: str = "POST", 
-        type: Literal["", "web", "ssp"] = "ssp", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[False] = False, 
-        **request_kwargs, 
-    ) -> dict:
-        ...
-    @overload
-    def offline_add_url(
-        self, 
-        payload: str | dict, 
-        /, 
-        method: str = "POST", 
-        type: Literal["", "web", "ssp"] = "ssp", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[True], 
-        **request_kwargs, 
-    ) -> Coroutine[Any, Any, dict]:
-        ...
-    def offline_add_url(
-        self, 
-        payload: str | dict, 
-        /, 
-        method: str = "POST", 
-        type: Literal["", "web", "ssp"] = "ssp", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[False, True] = False, 
-        **request_kwargs, 
-    ) -> dict | Coroutine[Any, Any, dict]:
-        """添加一个离线任务
-
-        POST https://lixian.115.com/lixianssp/?ac=add_task_url
-
-        :payload:
-            - url: str 💡 链接，支持HTTP、HTTPS、FTP、磁力链和电驴链接
-            - savepath: str = <default> 💡 保存到目录下的相对路径
-            - wp_path_id: int | str = <default> 💡 保存到目录的 id
-        """
-        if isinstance(payload, str):
-            payload = {"url": payload}
-        return self._offline_request(
-            payload, 
-            "add_task_url", 
-            method=method, 
-            type=type, 
-            base_url=base_url, 
-            async_=async_, 
-            **request_kwargs, 
-        )
-
-    @overload # type: ignore
-    def offline_add_urls(
-        self, 
-        payload: str | Iterable[str] | dict, 
-        /, 
-        method: str = "POST", 
-        type: Literal["", "web", "ssp"] = "ssp", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[False] = False, 
-        **request_kwargs, 
-    ) -> dict:
-        ...
-    @overload
-    def offline_add_urls(
-        self, 
-        payload: str | Iterable[str] | dict, 
-        /, 
-        method: str = "POST", 
-        type: Literal["", "web", "ssp"] = "ssp", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[True], 
-        **request_kwargs, 
-    ) -> Coroutine[Any, Any, dict]:
-        ...
-    def offline_add_urls(
-        self, 
-        payload: str | Iterable[str] | dict, 
-        /, 
-        method: str = "POST", 
-        type: Literal["", "web", "ssp"] = "ssp", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[False, True] = False, 
-        **request_kwargs, 
-    ) -> dict | Coroutine[Any, Any, dict]:
-        """添加一组离线任务
-
-        POST https://lixian.115.com/lixianssp/?ac=add_task_urls
-
-        :payload:
-            - url: str    💡 链接，支持HTTP、HTTPS、FTP、磁力链和电驴链接
-            - url[0]: str 💡 链接，支持HTTP、HTTPS、FTP、磁力链和电驴链接
-            - url[1]: str
-            - ...
-            - savepath: str = <default> 💡 保存到目录下的相对路径
-            - wp_path_id: int | str = <default> 💡 保存到目录的 id
-        """
-        if isinstance(payload, str):
-            payload = payload.strip("\n").split("\n")
-        if not isinstance(payload, dict):
-            payload = {f"url[{i}]": url for i, url in enumerate(payload) if url}
-            if not payload:
-                raise ValueError("no `url` specified")
-        return self._offline_request(
-            payload, 
-            "add_task_urls", 
-            method=method, 
-            type=type, 
-            base_url=base_url, 
-            async_=async_, 
-            **request_kwargs, 
-        )
-
-    @overload # type: ignore
-    def offline_clear(
-        self, 
-        payload: int | dict = 0, 
-        /, 
-        method: str = "POST", 
-        type: Literal["", "web", "ssp"] = "web", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[False] = False, 
-        **request_kwargs, 
-    ) -> dict:
-        ...
-    @overload
-    def offline_clear(
-        self, 
-        payload: int | dict = 0, 
-        /, 
-        method: str = "POST", 
-        type: Literal["", "web", "ssp"] = "web", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[True], 
-        **request_kwargs, 
-    ) -> Coroutine[Any, Any, dict]:
-        ...
-    def offline_clear(
-        self, 
-        payload: int | dict = 0, 
-        /, 
-        method: str = "POST", 
-        type: Literal["", "web", "ssp"] = "web", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[False, True] = False, 
-        **request_kwargs, 
-    ) -> dict | Coroutine[Any, Any, dict]:
-        """清空离线任务列表
-
-        POST https://lixian.115.com/lixian/?ac=task_clear
-
-        :payload:
-            - flag: int = 0 💡 标识，用于对应某种情况
-
-                - 0: 已完成
-                - 1: 全部
-                - 2: 已失败
-                - 3: 进行中
-                - 4: 已完成+删除源文件
-                - 5: 全部+删除源文件
-        """
-        if isinstance(payload, int):
-            payload = {"flag": payload}
-        return self._offline_request(
-            payload, 
-            "task_clear", 
-            method=method, 
-            type=type, 
-            base_url=base_url, 
-            async_=async_, 
-            **request_kwargs, 
-        )
-
-    @overload
-    def offline_download_path(
-        self, 
-        /, 
-        base_url: str | Callable[[], str] = "https://webapi.115.com", 
-        *, 
-        async_: Literal[False] = False, 
-        **request_kwargs, 
-    ) -> dict:
-        ...
-    @overload
-    def offline_download_path(
-        self, 
-        /, 
-        base_url: str | Callable[[], str] = "https://webapi.115.com", 
-        *, 
-        async_: Literal[True], 
-        **request_kwargs, 
-    ) -> Coroutine[Any, Any, dict]:
-        ...
-    def offline_download_path(
-        self, 
-        /, 
-        base_url: str | Callable[[], str] = "https://webapi.115.com", 
-        *, 
-        async_: Literal[False, True] = False, 
-        **request_kwargs, 
-    ) -> dict | Coroutine[Any, Any, dict]:
-        """获取当前默认的离线下载到的目录信息（可能有多个）
-
-        GET https://webapi.115.com/offine/downpath
-        """
-        api = complete_url("/offine/downpath", base_url=base_url)
-        return self.request(url=api, async_=async_, **request_kwargs)
-
-    @overload
-    def offline_download_path_set(
-        self, 
-        payload: int | str | dict, 
-        /, 
-        base_url: str | Callable[[], str] = "https://webapi.115.com", 
-        *, 
-        async_: Literal[False] = False, 
-        **request_kwargs, 
-    ) -> dict:
-        ...
-    @overload
-    def offline_download_path_set(
-        self, 
-        payload: int | str | dict, 
-        /, 
-        base_url: str | Callable[[], str] = "https://webapi.115.com", 
-        *, 
-        async_: Literal[True], 
-        **request_kwargs, 
-    ) -> Coroutine[Any, Any, dict]:
-        ...
-    def offline_download_path_set(
-        self, 
-        payload: int | str | dict, 
-        /, 
-        base_url: str | Callable[[], str] = "https://webapi.115.com", 
-        *, 
-        async_: Literal[False, True] = False, 
-        **request_kwargs, 
-    ) -> dict | Coroutine[Any, Any, dict]:
-        """设置默认选择的离线下载到的目录信息
-
-        POST https://webapi.115.com/offine/downpath
-
-        :payload:
-            - file_id: int | str 💡 目录 id
-        """
-        api = complete_url("/offine/downpath", base_url=base_url)
-        if isinstance(payload, (int, str)):
-            payload = {"file_id": payload}
-        return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
-
-    @overload # type: ignore
-    def offline_list(
-        self, 
-        payload: int | dict = 1, 
-        /, 
-        method: str = "GET", 
-        type: Literal["", "web", "ssp"] = "web", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[False] = False, 
-        **request_kwargs, 
-    ) -> dict:
-        ...
-    @overload
-    def offline_list(
-        self, 
-        payload: int | dict = 1, 
-        /, 
-        method: str = "GET", 
-        type: Literal["", "web", "ssp"] = "web", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[True], 
-        **request_kwargs, 
-    ) -> Coroutine[Any, Any, dict]:
-        ...
-    def offline_list(
-        self, 
-        payload: int | dict = 1, 
-        /, 
-        method: str = "GET", 
-        type: Literal["", "web", "ssp"] = "web", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[False, True] = False, 
-        **request_kwargs, 
-    ) -> dict | Coroutine[Any, Any, dict]:
-        """获取当前的离线任务列表
-
-        GET https://lixian.115.com/lixian/?ac=task_lists
-
-        :payload:
-            - page: int = 1
-            - page_size: int = 30
-            - stat: int = <default> 💡 已知：9:已失败 11:已完成 12:进行中
-        """
-        if isinstance(payload, int):
-            payload = {"page": payload}
-        payload.setdefault("page_size", 30)
-        return self._offline_request(
-            payload, 
-            "task_lists", 
-            method=method, 
-            type=type, 
-            base_url=base_url, 
-            async_=async_, 
-            **request_kwargs, 
-        )
-
-    @overload # type: ignore
-    def offline_quota_info(
-        self, 
-        /, 
-        method: str = "GET", 
-        type: Literal["", "web", "ssp"] = "web", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[False] = False, 
-        **request_kwargs, 
-    ) -> dict:
-        ...
-    @overload
-    def offline_quota_info(
-        self, 
-        /, 
-        method: str = "GET", 
-        type: Literal["", "web", "ssp"] = "web", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[True], 
-        **request_kwargs, 
-    ) -> Coroutine[Any, Any, dict]:
-        ...
-    def offline_quota_info(
-        self, 
-        /, 
-        method: str = "GET", 
-        type: Literal["", "web", "ssp"] = "web", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[False, True] = False, 
-        **request_kwargs, 
-    ) -> dict | Coroutine[Any, Any, dict]:
-        """获取当前离线配额信息（简略）
-
-        GET https://lixian.115.com/lixian/?ac=get_quota_info
-        """
-        return self._offline_request(
-            ac="get_quota_info", 
-            method=method, 
-            type=type, 
-            base_url=base_url, 
-            async_=async_, 
-            **request_kwargs, 
-        )
-
-    @overload
-    def offline_quota_package_array(
-        self, 
-        /, 
-        method: str = "GET", 
-        type: Literal["", "web", "ssp"] = "web", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[False] = False, 
-        **request_kwargs, 
-    ) -> dict:
-        ...
-    @overload
-    def offline_quota_package_array(
-        self, 
-        /, 
-        method: str = "GET", 
-        type: Literal["", "web", "ssp"] = "web", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[True], 
-        **request_kwargs, 
-    ) -> Coroutine[Any, Any, dict]:
-        ...
-    def offline_quota_package_array(
-        self, 
-        /, 
-        method: str = "GET", 
-        type: Literal["", "web", "ssp"] = "web", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[False, True] = False, 
-        **request_kwargs, 
-    ) -> dict | Coroutine[Any, Any, dict]:
-        """获取当前离线配额信息（详细）
-
-        GET https://lixian.115.com/lixian/?ac=get_quota_package_array
-        """
-        return self._offline_request(
-            ac="get_quota_package_array", 
-            method=method, 
-            type=type, 
-            base_url=base_url, 
-            async_=async_, 
-            **request_kwargs, 
-        )
-
-    @overload
-    def offline_quota_package_info(
-        self, 
-        /, 
-        method: str = "GET", 
-        type: Literal["", "web", "ssp"] = "web", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[False] = False, 
-        **request_kwargs, 
-    ) -> dict:
-        ...
-    @overload
-    def offline_quota_package_info(
-        self, 
-        /, 
-        method: str = "GET", 
-        type: Literal["", "web", "ssp"] = "web", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[True], 
-        **request_kwargs, 
-    ) -> Coroutine[Any, Any, dict]:
-        ...
-    def offline_quota_package_info(
-        self, 
-        /, 
-        method: str = "GET", 
-        type: Literal["", "web", "ssp"] = "web", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[False, True] = False, 
-        **request_kwargs, 
-    ) -> dict | Coroutine[Any, Any, dict]:
-        """获取当前离线配额信息（详细）
-
-        GET https://lixian.115.com/lixian/?ac=get_quota_package_info
-        """
-        return self._offline_request(
-            ac="get_quota_package_info", 
-            method=method, 
-            type=type, 
-            base_url=base_url, 
-            async_=async_, 
-            **request_kwargs, 
-        )
-
-    @overload # type: ignore
-    def offline_remove(
-        self, 
-        payload: str | Iterable[str] | dict, 
-        /, 
-        method: str = "POST", 
-        type: Literal["", "web", "ssp"] = "web", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[False] = False, 
-        **request_kwargs, 
-    ) -> dict:
-        ...
-    @overload
-    def offline_remove(
-        self, 
-        payload: str | Iterable[str] | dict, 
-        /, 
-        method: str = "POST", 
-        type: Literal["", "web", "ssp"] = "web", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[True], 
-        **request_kwargs, 
-    ) -> Coroutine[Any, Any, dict]:
-        ...
-    def offline_remove(
-        self, 
-        payload: str | Iterable[str] | dict, 
-        /, 
-        method: str = "POST", 
-        type: Literal["", "web", "ssp"] = "web", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[False, True] = False, 
-        **request_kwargs, 
-    ) -> dict | Coroutine[Any, Any, dict]:
-        """删除一组离线任务（无论是否已经完成）
-
-        POST https://lixian.115.com/lixian/?ac=task_del
-
-        :payload:
-            - hash[0]: str
-            - hash[1]: str
-            - ...
-            - flag: 0 | 1 = <default> 💡 是否删除源文件
-        """
-        if isinstance(payload, str):
-            payload = {"hash[0]": payload}
-        elif not isinstance(payload, dict):
-            payload = {f"hash[{i}]": hash for i, hash in enumerate(payload)}
-            if not payload:
-                raise ValueError("no `hash` (info_hash) specified")
-        return self._offline_request(
-            payload, 
-            "task_del", 
-            method=method, 
-            type=type, 
-            base_url=base_url, 
-            async_=async_, 
-            **request_kwargs, 
-        )
-
-    @overload
-    def offline_restart(
-        self, 
-        payload: str | dict, 
-        /, 
-        method: str = "POST", 
-        type: Literal["", "web", "ssp"] = "web", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[False] = False, 
-        **request_kwargs, 
-    ) -> dict:
-        ...
-    @overload
-    def offline_restart(
-        self, 
-        payload: str | dict, 
-        /, 
-        method: str = "POST", 
-        type: Literal["", "web", "ssp"] = "web", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[True], 
-        **request_kwargs, 
-    ) -> Coroutine[Any, Any, dict]:
-        ...
-    def offline_restart(
-        self, 
-        payload: str | dict, 
-        /, 
-        method: str = "POST", 
-        type: Literal["", "web", "ssp"] = "web", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[False, True] = False, 
-        **request_kwargs, 
-    ) -> dict | Coroutine[Any, Any, dict]:
-        """重试用户云下载任务
-
-        POST https://lixian.115.com/lixian/?ac=restart
-
-        :payload:
-            - info_hash: str 💡 待重试任务的 info_hash
-        """
-        if isinstance(payload, str):
-            payload = {"info_hash": payload}
-        return self._offline_request(
-            payload, 
-            "restart", 
-            method=method, 
-            type=type, 
-            base_url=base_url, 
-            async_=async_, 
-            **request_kwargs, 
-        )
-
-    @overload
-    def offline_sign(
-        self, 
-        /, 
-        base_url: str | Callable[[], str] = "https://115.com", 
-        *, 
-        async_: Literal[False] = False, 
-        **request_kwargs, 
-    ) -> dict:
-        ...
-    @overload
-    def offline_sign(
-        self, 
-        /, 
-        base_url: str | Callable[[], str] = "https://115.com", 
-        *, 
-        async_: Literal[True], 
-        **request_kwargs, 
-    ) -> Coroutine[Any, Any, dict]:
-        ...
-    def offline_sign(
-        self, 
-        /, 
-        base_url: str | Callable[[], str] = "https://115.com", 
-        *, 
-        async_: Literal[False, True] = False, 
-        **request_kwargs, 
-    ) -> dict | Coroutine[Any, Any, dict]:
-        """获取 sign 和 time 字段（各个添加任务的接口需要），以及其它信息
-
-        GET https://115.com/?ct=offline&ac=space
-        """
-        api = complete_url(base_url=base_url, query={"ct": "offline", "ac": "space"})
-        return self.request(url=api, async_=async_, **request_kwargs)
-
-    @overload
-    def offline_sign_app(
-        self, 
-        /, 
-        app: str = "android", 
-        base_url: str | Callable[[], str] = "https://proapi.115.com", 
-        *, 
-        async_: Literal[False] = False, 
-        **request_kwargs, 
-    ) -> dict:
-        ...
-    @overload
-    def offline_sign_app(
-        self, 
-        /, 
-        app: str = "android", 
-        base_url: str | Callable[[], str] = "https://proapi.115.com", 
-        *, 
-        async_: Literal[True], 
-        **request_kwargs, 
-    ) -> Coroutine[Any, Any, dict]:
-        ...
-    def offline_sign_app(
-        self, 
-        /, 
-        app: str = "android", 
-        base_url: str | Callable[[], str] = "https://proapi.115.com", 
-        *, 
-        async_: Literal[False, True] = False, 
-        **request_kwargs, 
-    ) -> dict | Coroutine[Any, Any, dict]:
-        """获取 sign 和 time 字段（各个添加任务的接口需要）
-
-        GET https://proapi.115.com/{app}/files/offlinesign
-        """
-        api = complete_url("/files/offlinesign", base_url=base_url, app=app)
-        return self.request(url=api, async_=async_, **request_kwargs)
-
-    @overload
-    def offline_task_cnt(
-        self, 
-        payload: dict | int = 0, 
-        /, 
-        method: str = "GET", 
-        type: Literal["", "web", "ssp"] = "web", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[False] = False, 
-        **request_kwargs, 
-    ) -> dict:
-        ...
-    @overload
-    def offline_task_cnt(
-        self, 
-        payload: dict | int = 0, 
-        /, 
-        method: str = "GET", 
-        type: Literal["", "web", "ssp"] = "web", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[True], 
-        **request_kwargs, 
-    ) -> Coroutine[Any, Any, dict]:
-        ...
-    def offline_task_cnt(
-        self, 
-        payload: dict | int = 0, 
-        /, 
-        method: str = "GET", 
-        type: Literal["", "web", "ssp"] = "web", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[False, True] = False, 
-        **request_kwargs, 
-    ) -> dict | Coroutine[Any, Any, dict]:
-        """获取当前正在运行的离线任务数
-
-        GET https://lixian.115.com/lixian/?ac=get_task_cnt
-
-        :payload:
-            - flag: int = 0
-        """
-        if isinstance(payload, int):
-            payload = {"flag": payload}
-        return self._offline_request(
-            payload, 
-            "get_task_cnt", 
-            method=method, 
-            type=type, 
-            base_url=base_url, 
-            async_=async_, 
-            **request_kwargs, 
-        )
-
-    @overload
-    def offline_task_count(
-        self, 
-        payload: dict | int = 0, 
-        /, 
-        method: str = "GET", 
-        type: Literal["", "web", "ssp"] = "web", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[False] = False, 
-        **request_kwargs, 
-    ) -> dict:
-        ...
-    @overload
-    def offline_task_count(
-        self, 
-        payload: dict | int = 0, 
-        /, 
-        method: str = "GET", 
-        type: Literal["", "web", "ssp"] = "web", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[True], 
-        **request_kwargs, 
-    ) -> Coroutine[Any, Any, dict]:
-        ...
-    def offline_task_count(
-        self, 
-        payload: dict | int = 0, 
-        /, 
-        method: str = "GET", 
-        type: Literal["", "web", "ssp"] = "web", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[False, True] = False, 
-        **request_kwargs, 
-    ) -> dict | Coroutine[Any, Any, dict]:
-        """获取当前各种类型任务的计数
-
-        GET https://lixian.115.com/lixian/?ac=get_task_cnt
-
-        :payload:
-            - stat: int = 0 💡 这个参数似乎没什么作用
-        """
-        if isinstance(payload, int):
-            payload = {"stat": payload}
-        return self._offline_request(
-            payload, 
-            "task_count", 
-            method=method, 
-            type=type, 
-            base_url=base_url, 
-            async_=async_, 
-            **request_kwargs, 
-        )
-
-    @overload # type: ignore
-    def offline_torrent_info(
-        self, 
-        payload: str | dict, 
-        /, 
-        method: str = "GET", 
-        type: Literal["", "web", "ssp"] = "web", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[False] = False, 
-        **request_kwargs, 
-    ) -> dict:
-        ...
-    @overload
-    def offline_torrent_info(
-        self, 
-        payload: str | dict, 
-        /, 
-        method: str = "GET", 
-        type: Literal["", "web", "ssp"] = "web", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[True], 
-        **request_kwargs, 
-    ) -> Coroutine[Any, Any, dict]:
-        ...
-    def offline_torrent_info(
-        self, 
-        payload: str | dict, 
-        /, 
-        method: str = "GET", 
-        type: Literal["", "web", "ssp"] = "web", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[False, True] = False, 
-        **request_kwargs, 
-    ) -> dict | Coroutine[Any, Any, dict]:
-        """查看种子的文件列表等信息
-
-        GET https://lixian.115.com/lixian/?ac=torrent
-
-        :payload:
-            - sha1: str
-        """
-        if isinstance(payload, str):
-            payload = {"sha1": payload}
-        return self._offline_request(
-            payload, 
-            "torrent", 
-            method=method, 
-            type=type, 
-            base_url=base_url, 
-            async_=async_, 
-            **request_kwargs, 
-        )
-
-    @overload
-    def offline_upload_torrent_path(
-        self, 
-        payload: dict | int = 1, 
-        /, 
-        method: str = "GET", 
-        type: Literal["", "web", "ssp"] = "web", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[False] = False, 
-        **request_kwargs, 
-    ) -> dict:
-        ...
-    @overload
-    def offline_upload_torrent_path(
-        self, 
-        payload: dict | int = 1, 
-        /, 
-        method: str = "GET", 
-        type: Literal["", "web", "ssp"] = "web", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[True], 
-        **request_kwargs, 
-    ) -> Coroutine[Any, Any, dict]:
-        ...
-    def offline_upload_torrent_path(
-        self, 
-        payload: dict | int = 1, 
-        /, 
-        method: str = "GET", 
-        type: Literal["", "web", "ssp"] = "web", 
-        base_url: str | Callable[[], str] = "https://lixian.115.com", 
-        *, 
-        async_: Literal[False, True] = False, 
-        **request_kwargs, 
-    ) -> dict | Coroutine[Any, Any, dict]:
-        """获取当前的种子上传到的目录，当你添加种子任务后，这个种子会在此目录中保存
-
-        GET https://lixian.115.com/lixian/?ac=get_id
-
-        :payload:
-            - torrent: int = 1
-        """
-        if isinstance(payload, int):
-            payload = {"torrent": payload}
-        return self._offline_request(
-            payload, 
-            "get_id", 
-            method=method, 
-            type=type, 
-            base_url=base_url, 
-            async_=async_, 
-            **request_kwargs, 
-        )
 
     ########## Photo API ##########
 
@@ -25809,8 +26008,7 @@ class P115Client(P115OpenClient):
     def upload_avatar(
         self, 
         /, 
-        file: ( Buffer | str | PathLike | URL | SupportsGeturl | 
-                SupportsRead | Iterable[Buffer] ), 
+        file: ( Buffer | str | PathLike | SupportsRead | Iterable[Buffer] ), 
         app: str = "web", 
         base_url: str | Callable[[], str] = "https://ictxl.115.com", 
         *, 
@@ -25822,8 +26020,7 @@ class P115Client(P115OpenClient):
     def upload_avatar(
         self, 
         /, 
-        file: ( Buffer | str | PathLike | URL | SupportsGeturl | 
-                SupportsRead | Iterable[Buffer] | AsyncIterable[Buffer] ), 
+        file: ( Buffer | str | PathLike | SupportsRead | Iterable[Buffer] | AsyncIterable[Buffer] ), 
         app: str = "web", 
         base_url: str | Callable[[], str] = "https://ictxl.115.com", 
         *, 
@@ -25834,8 +26031,7 @@ class P115Client(P115OpenClient):
     def upload_avatar(
         self, 
         /, 
-        file: ( Buffer | str | PathLike | URL | SupportsGeturl | 
-                SupportsRead | Iterable[Buffer] | AsyncIterable[Buffer] ), 
+        file: ( Buffer | str | PathLike | SupportsRead | Iterable[Buffer] | AsyncIterable[Buffer] ), 
         app: str = "web", 
         base_url: str | Callable[[], str] = "https://ictxl.115.com", 
         *, 
@@ -25844,7 +26040,7 @@ class P115Client(P115OpenClient):
     ) -> dict | Coroutine[Any, Any, dict]:
         """上传一张图片，可用于作为头像（图片时效性很短，请尽快使用）
 
-        POST https://ictxl.115.com/app/1.1/web/1.2/upload/set_avatar
+        POST https://ictxl.115.com/app/1.1/{app}/1.2/upload/set_avatar
 
         .. attention::
             此接口采用 multi-part 上传，其实是可以一次传多个文件的，但我做的封装只允许传一张图片。
@@ -25860,16 +26056,77 @@ class P115Client(P115OpenClient):
         :return: 接口响应
         """
         api = complete_url(f"/app/1.1/{app}/1.2/upload/set_avatar", base_url=base_url)
-        if isinstance(file, str):
+        if isinstance(file, (str, PathLike)):
             file = open(file, "rb")
         return self.request(url=api, method="POST", files={"file": ("a.jpg", file)}, async_=async_, **request_kwargs)
+
+    @overload
+    def upload_avatar2(
+        self, 
+        /, 
+        file: Buffer | str | PathLike, 
+        app: str = "web", 
+        base_url: str | Callable[[], str] = "https://job.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def upload_avatar2(
+        self, 
+        /, 
+        file: Buffer | str | PathLike, 
+        app: str = "web", 
+        base_url: str | Callable[[], str] = "https://job.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def upload_avatar2(
+        self, 
+        /, 
+        file: Buffer | str | PathLike, 
+        app: str = "web", 
+        base_url: str | Callable[[], str] = "https://job.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """上传一张图片，可用于作为头像
+
+        POST https://job.115.com/api/1.0/{app}/26.0/5/upload/avatar
+
+        :param file: 待上传的文件数据
+        :param app: 使用此设备的接口
+        :param base_url: 接口的基地址
+        :param async_: 是否异步
+        :param request_kwargs: 其余请求参数
+
+        :return: 接口响应
+        """
+        api = complete_url(f"/api/1.0/{app}/1.0/upload/avatar", base_url=base_url)
+        if isinstance(file, (str, PathLike)):
+            data: Buffer = open(file, "rb").read()
+        else:
+            data = file
+        headers = dict(request_kwargs.pop("headers", None) or ())
+        headers["content-type"] = "application/x-www-form-urlencoded"
+        return self.request(
+            url=api, 
+            method="POST", 
+            data=b"img="+b64encode(data), 
+            headers=headers, 
+            async_=async_, 
+            **request_kwargs, 
+        )
 
     @overload
     def upload_image(
         self, 
         /, 
-        file: ( Buffer | str | PathLike | URL | SupportsGeturl | 
-                SupportsRead | Iterable[Buffer] ), 
+        file: ( Buffer | str | PathLike | SupportsRead | Iterable[Buffer] ), 
         app: str = "web", 
         base_url: str | Callable[[], str] = "https://credentials.115.com", 
         *, 
@@ -25881,8 +26138,7 @@ class P115Client(P115OpenClient):
     def upload_image(
         self, 
         /, 
-        file: ( Buffer | str | PathLike | URL | SupportsGeturl | 
-                SupportsRead | Iterable[Buffer] | AsyncIterable[Buffer] ), 
+        file: ( Buffer | str | PathLike | SupportsRead | Iterable[Buffer] | AsyncIterable[Buffer] ), 
         app: str = "web", 
         base_url: str | Callable[[], str] = "https://credentials.115.com", 
         *, 
@@ -25893,8 +26149,7 @@ class P115Client(P115OpenClient):
     def upload_image(
         self, 
         /, 
-        file: ( Buffer | str | PathLike | URL | SupportsGeturl | 
-                SupportsRead | Iterable[Buffer] | AsyncIterable[Buffer] ), 
+        file: ( Buffer | str | PathLike | SupportsRead | Iterable[Buffer] | AsyncIterable[Buffer] ), 
         app: str = "web", 
         base_url: str | Callable[[], str] = "https://credentials.115.com", 
         *, 
@@ -25917,7 +26172,7 @@ class P115Client(P115OpenClient):
         :return: 接口响应
         """
         api = complete_url(f"/api/1.0/{app}/1.0/credentials/upload_images", base_url=base_url)
-        if isinstance(file, str):
+        if isinstance(file, (str, PathLike)):
             file = open(file, "rb")
         return self.request(url=api, method="POST", files={"image": ("a.jpg", file)}, async_=async_, **request_kwargs)
 
@@ -25963,7 +26218,7 @@ class P115Client(P115OpenClient):
             通过扩展名来识别，仅支持以下格式图片(jpg,jpeg,png,gif,svg,webp,heic,bmp,dng)
 
         .. note::
-            `target` 随便设置，例如 "U_4_-1"、"U_5_-2"
+            `target` 随便设置，例如 "U_4_-1"、"U_5_-2"、"U_3_-10" 等
 
         :payload:
             - filename: str = <default> 💡 文件名，默认为一个新的 uuid4 对象的字符串表示
@@ -26078,7 +26333,7 @@ class P115Client(P115OpenClient):
             通过扩展名来识别，仅支持以下格式图片(jpg,jpeg,png,gif,svg,webp,heic,bmp,dng)
 
         .. note::
-            `target` 随便设置，例如 "U_4_-1"、"U_5_-2"
+            `target` 随便设置，例如 "U_4_-1"、"U_5_-2"、"U_3_-10" 等
 
         :param filename: 文件名，默认为一个新的 uuid4 对象的字符串表示
         :param pid: 上传文件到此目录的 id 或 pickcode，或者指定的 target（格式为 f"U_{aid}_{pid}" 或 f"S_{share_id}_{pid}"）
@@ -26306,7 +26561,7 @@ class P115Client(P115OpenClient):
             不支持秒传，但也不必传文件大小和 sha1，最大支持上传 50 MB 的文件
 
         .. note::
-            `target` 随便设置，例如 "U_4_-1"、"U_5_-2"
+            `target` 随便设置，例如 "U_4_-1"、"U_5_-2"、"U_3_-10" 等
 
         :param file: 待上传的文件
         :param pid: 上传文件到此目录的 id 或 pickcode，或者指定的 target（格式为 f"U_{aid}_{pid}" 或 f"S_{share_id}_{pid}"）
