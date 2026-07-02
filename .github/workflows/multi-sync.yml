@@ -44,6 +44,12 @@ jobs:
       - name: Checkout Target Repo 5
         uses: actions/checkout@v3
         with:
+          repository: Ponphil/LitePan
+          path: temp/LitePan      
+
+      - name: Checkout Target Repo 6
+        uses: actions/checkout@v3
+        with:
           repository: randomshit699/Bncr_plugins
           path: temp/Bncr_plugins          
 
@@ -56,13 +62,14 @@ jobs:
           cd main-repo
           
           # 断开与原作者的命运绑定
-          rm -rf ../temp/p115client/.git ../temp/p123client/.git ../temp/pansou/.git ../temp/pansou-web/.git/.git ../temp/Bncr_plugins/.git
+          rm -rf ../temp/p115client/.git ../temp/p123client/.git ../temp/pansou/.git ../temp/pansou-web/.git ../temp/LitePan/.git ../temp/Bncr_plugins/.git
           
           # 增量同步文件
           rsync -a --delete ../temp/p115client/ ./p115client/
           rsync -a --delete ../temp/p123client/ ./p123client/
           rsync -a --delete ../temp/pansou/ ./pansou/
           rsync -a --delete ../temp/pansou-web/ ./pansou-web/
+          rsync -a --delete ../temp/LitePan/ ./LitePan/
           rsync -a --delete ../temp/Bncr_plugins/ ./Bncr_plugins/
           
           # 配置 Git 机器人身份
