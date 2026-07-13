@@ -140,22 +140,29 @@ jobs:
               STATUS="➖ 挂机"
             fi
             
+            # 【核心恢复】: 给仓库名套上超链接，并拼接进 HTML 原生表格
             LINK="<a href=\"${repo_urls[$repo]}\">${repo}</a>"
-            # 采用 Telegram 完美支持的列表排版
-            TABLE_ROWS="${TABLE_ROWS}🔹 ${LINK} : ${STATUS} ( ${FILE_COUNT} )"$'\n'
+            TABLE_ROWS="${TABLE_ROWS}<tr><td>${LINK}</td><td>${STATUS}</td><td>${FILE_COUNT}</td></tr>"$'\n'
           done
           
-          # 拼装基础 HTML（严格遵循 TG 官方标签规范）
+          # 拼装带有原生表格的基础 HTML
           cat <<EOF > tg_msg.html
-          <b>🔔 GitHub 库级监控简报</b>
-          🤖 今日自动扫描任务已执行完毕。
+          <h3>🔔 GitHub 库级监控简报</h3>
+          <p>🤖 今日自动扫描任务已执行完毕。</p>
           
-          <b>📊 框架变动全景纵览</b>
-          ${TABLE_ROWS}
+          <h4>📊 框架变动全景纵览</h4>
+          <table border="1">
+              <tr>
+                  <th>监控库名</th>
+                  <th>今日状态</th>
+                  <th>变动数</th>
+              </tr>
+              ${TABLE_ROWS}
+          </table>
           EOF
           
           if [ "$HAS_UPDATE" = true ]; then
-            # 拼装折叠块（空行是触发折叠的关键）
+            # 【核心修复】: 拼装折叠块，必须用物理空行隔离，激活 Telegram 原生折叠逻辑
             cat <<EOF >> tg_msg.html
           
           <blockquote expandable>💡 <b>详细代码变动日志（点击展开）</b>
@@ -185,14 +192,13 @@ jobs:
           with open("tg_msg.html", "r", encoding="utf-8") as f:
               html_content = f.read()
               
-          url = f"https://api.telegram.org/bot{token}/sendMessage"
+          # 【致胜关键】: 接口切回 API 10.1 专属的 sendRichMessage，彻底接纳 <table> 标签
+          url = f"https://api.telegram.org/bot{token}/sendRichMessage"
           
-          # payload 配置：禁用链接预览，启用 HTML 模式
           data = {
               "chat_id": chat_id,
-              "parse_mode": "HTML",
-              "text": html_content,
-              "link_preview_options": {"is_disabled": True}
+              "rich_message": {"html": html_content},
+              "link_preview_options": {"is_disabled": True} # 屏蔽超链接的网页预览卡片
           }
           
           req = urllib.request.Request(
@@ -203,7 +209,7 @@ jobs:
           
           try:
               with urllib.request.urlopen(req) as response:
-                  print("✅ Telegram 完美折叠排版通知已成功送达！")
+                  print("✅ Telegram 原生表格与完美折叠排版通知已成功送达！")
           except Exception as e:
               print(f"❌ 发送失败: {e}")
               if hasattr(e, "read"):
