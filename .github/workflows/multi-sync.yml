@@ -8,6 +8,9 @@ on:
 jobs:
   sync_repos:
     runs-on: ubuntu-latest
+    # 必须给予 Action 推送代码的写权限
+    permissions:
+      contents: write
     
     steps:
       # 1. 拉取你自己的这个总备份仓库
@@ -16,7 +19,7 @@ jobs:
         with:
           path: main-repo
 
-      # 2. 依次拉取所有的目标仓库
+      # 2. 拉取所有的目标仓库 (共8个)
       - name: Checkout Target Repo 1
         uses: actions/checkout@v3
         with:
@@ -90,6 +93,7 @@ jobs:
           git config user.name 'GitHub Actions Bot'
           git config user.email 'actions@github.com'
           
+          # 暂存所有更改以供 Git 比对
           git add .
           
           # 提取状态明细
@@ -117,16 +121,16 @@ jobs:
           TABLE_ROWS=""
           DETAILS=""
           
+          # 遍历仓库处理数据
           for repo in "${repos[@]}"; do
             if echo "$STAGED_FILES" | grep -q "^${repo}/"; then
               FILE_COUNT=$(echo "$STAGED_FILES" | grep -c "^${repo}/")
-              STATUS="✅ 更新"
+              STATUS="✅ <b>更新</b>"
               
-              # 修复1：使用全角空格代替 &emsp;，避开 sed 乱码陷阱
+              # 提取前5个变动文件，使用全角空格对齐防止解析错误
               REPO_FILES=$(echo "$STAGED_FILES" | grep "^${repo}/" | sed "s|^${repo}/| ├─ 📄 |" | head -n 5)
               
-              # 修复2：使用真实的 \n 进行换行，让 Telegram 能正确计算折叠高度
-              DETAILS="${DETAILS}📦 <b>${repo}</b>"$'\n'"${REPO_FILES}"$'\n'
+              DETAILS="${DETAILS}📦 <b><a href=\"${repo_urls[$repo]}\">${repo}</a></b>"$'\n'"${REPO_FILES}"$'\n'
               if [ "$FILE_COUNT" -gt 5 ]; then
                 DETAILS="${DETAILS} └─ 📝 <i>...等共 ${FILE_COUNT} 个文件</i>"$'\n'
               fi
@@ -136,29 +140,22 @@ jobs:
               STATUS="➖ 挂机"
             fi
             
-            # 添加超链接到表格的库名上
             LINK="<a href=\"${repo_urls[$repo]}\">${repo}</a>"
-            TABLE_ROWS="${TABLE_ROWS}<tr><td>${LINK}</td><td>${STATUS}</td><td>${FILE_COUNT}</td></tr>"
+            # 采用 Telegram 完美支持的列表排版
+            TABLE_ROWS="${TABLE_ROWS}🔹 ${LINK} : ${STATUS} ( ${FILE_COUNT} )"$'\n'
           done
           
-          # 写入文件供 Python 读取，避免转义错误
+          # 拼装基础 HTML（严格遵循 TG 官方标签规范）
           cat <<EOF > tg_msg.html
-          <h3>🔔 GitHub 库级监控简报</h3>
-          <p>🤖 今日自动扫描任务已执行完毕。</p>
+          <b>🔔 GitHub 库级监控简报</b>
+          🤖 今日自动扫描任务已执行完毕。
           
-          <h4>📊 框架变动全景纵览</h4>
-          <table border="1">
-              <tr>
-                  <th>监控库名</th>
-                  <th>今日状态</th>
-                  <th>变动数</th>
-              </tr>
-              ${TABLE_ROWS}
-          </table>
+          <b>📊 框架变动全景纵览</b>
+          ${TABLE_ROWS}
           EOF
           
           if [ "$HAS_UPDATE" = true ]; then
-            # 这里必须留空行，这是触发 blockquote 折叠的关键逻辑
+            # 拼装折叠块（空行是触发折叠的关键）
             cat <<EOF >> tg_msg.html
           
           <blockquote expandable>💡 <b>详细代码变动日志（点击展开）</b>
@@ -174,7 +171,7 @@ jobs:
             echo "所有监控库均未发现代码更新。"
           fi
           
-          # 使用原生 API 接口，完美支持 10.1 新特性
+          # 执行 Python 脚本发送通知
           python3 -c '
           import os, json, urllib.request
           
@@ -190,11 +187,12 @@ jobs:
               
           url = f"https://api.telegram.org/bot{token}/sendMessage"
           
+          # payload 配置：禁用链接预览，启用 HTML 模式
           data = {
               "chat_id": chat_id,
               "parse_mode": "HTML",
               "text": html_content,
-              "link_preview_options": {"is_disabled": True} # 禁用链接预览，保持界面整洁
+              "link_preview_options": {"is_disabled": True}
           }
           
           req = urllib.request.Request(
