@@ -16,7 +16,7 @@ jobs:
         with:
           path: main-repo
 
-      # 2. 拉取各个目标仓库
+      # 2. 拉取旧的几个目标仓库
       - name: Checkout Target Repo 1
         uses: actions/checkout@v3
         with:
@@ -53,16 +53,30 @@ jobs:
           repository: randomshit699/Bncr_plugins
           path: temp/Bncr_plugins          
 
-      # 3. 核心处理、精准差异化提取与优雅通知
+      # 🔥 新增 7. 拉取 Pyrofork
+      - name: Checkout Target Repo 7
+        uses: actions/checkout@v3
+        with:
+          repository: Mayuri-Chan/pyrofork
+          path: temp/pyrofork
+
+      # 🔥 新增 8. 拉取 Kurigram
+      - name: Checkout Target Repo 8
+        uses: actions/checkout@v3
+        with:
+          repository: KurimuzonAkuma/kurigram
+          path: temp/kurigram
+
+      # 3. 核心处理：10.1 魔法排版与优雅通知
       - name: Process, Commit and Notify
         env:
-          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }} # 从 GitHub Secrets 读取
-          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}     # 从 GitHub Secrets 读取
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
         run: |
           cd main-repo
           
-          # 断开与原作者的命运绑定
-          rm -rf ../temp/p115client/.git ../temp/p123client/.git ../temp/pansou/.git ../temp/pansou-web/.git ../temp/LitePan/.git ../temp/Bncr_plugins/.git
+          # 断开与原作者的命运绑定，追加了新增的两个库
+          rm -rf ../temp/p115client/.git ../temp/p123client/.git ../temp/pansou/.git ../temp/pansou-web/.git ../temp/LitePan/.git ../temp/Bncr_plugins/.git ../temp/pyrofork/.git ../temp/kurigram/.git
           
           # 增量同步文件
           rsync -a --delete ../temp/p115client/ ./p115client/
@@ -71,6 +85,8 @@ jobs:
           rsync -a --delete ../temp/pansou-web/ ./pansou-web/
           rsync -a --delete ../temp/LitePan/ ./LitePan/
           rsync -a --delete ../temp/Bncr_plugins/ ./Bncr_plugins/
+          rsync -a --delete ../temp/pyrofork/ ./pyrofork/
+          rsync -a --delete ../temp/kurigram/ ./kurigram/
           
           # 配置 Git 机器人身份
           git config user.name 'GitHub Actions Bot'
@@ -79,50 +95,112 @@ jobs:
           # 暂存所有更改以供 Git 比对
           git add .
           
-          # 【逻辑分流】检查是否有代码更新
-          if git diff --staged --quiet; then
-            echo "未检测到GitHub代码更新。"
-            
-            # 情况 1：无更新时的优雅文案 (解决 YAML 缩进冲突)
-            MSG="🔔 <b>GitHub同步简报</b>"
-            MSG="$MSG"$'\n\n'"☕ 您好，今日定时同步已顺利完成。"
-            MSG="$MSG"$'\n'"✨ 您密切关注的几个GitHub仓库<b>均无任何更新</b>，备份库继续保持在最新状态。"
-            
-          else
-            echo "检测到代码更新，正在生成明细..."
-            STAGED_FILES=$(git diff --cached --name-only)
-            
-            # 情况 2：有更新时的优雅文案头部 (解决 YAML 缩进冲突)
-            MSG="🔔 <b>GitHub同步简报</b>"
-            MSG="$MSG"$'\n\n'"🚀 您好，今日定时同步发现代码变动，已自动安全合并并推送至您的主分支。"
-            MSG="$MSG"$'\n\n'"<b>📋 本次更新细节如下：</b>"
-            
-            for repo in p115client p123client pansou pansou-web; do
-              if echo "$STAGED_FILES" | grep -q "^${repo}/"; then
-                REPO_FILES=$(echo "$STAGED_FILES" | grep "^${repo}/" | sed "s|^${repo}/|  └── 📄 |" | head -n 10)
-                TOTAL_COUNT=$(echo "$STAGED_FILES" | grep -c "^${repo}/" || true)
-                
-                MSG="$MSG"$'\n\n'"📦 <b>${repo}</b>"
-                MSG="$MSG"$'\n'"${REPO_FILES}"
-                
-                if [ "$TOTAL_COUNT" -gt 10 ]; then
-                  MSG="$MSG"$'\n'"  └── 📝 <i>...等共 ${TOTAL_COUNT} 个文件变动</i>"
-                fi
-              fi
-            done
-            
-            # 稳妥提交并推送到你的总仓库
-            git commit -m "自动同步最新代码: $(date +'%Y-%m-%d %H:%M:%S')"
-            git push origin main
+          # 提取状态明细
+          STAGED_FILES=$(git diff --cached --name-only)
+          HAS_UPDATE=false
+          if [ -n "$STAGED_FILES" ]; then
+            HAS_UPDATE=true
           fi
           
-          # 【发送通知】通过 Telegram API 发送格式化后的 HTML 优雅消息
-          if [ ! -z "$TG_BOT_TOKEN" ] && [ ! -z "$TG_CHAT_ID" ]; then
-            curl -s -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
-              --data-urlencode "chat_id=${TG_CHAT_ID}" \
-              --data-urlencode "parse_mode=HTML" \
-              --data-urlencode "text=${MSG}" > /dev/null
-            echo "Telegram 优雅通知已成功送达。"
+          # 定义需要监控的所有模块列表
+          repos=("p115client" "p123client" "pansou" "pansou-web" "LitePan" "Bncr_plugins" "pyrofork" "kurigram")
+          
+          # 动态构建 API 10.1 原生表格行与详情模块
+          TABLE_ROWS=""
+          DETAILS=""
+          
+          for repo in "${repos[@]}"; do
+            if echo "$STAGED_FILES" | grep -q "^${repo}/"; then
+              FILE_COUNT=$(echo "$STAGED_FILES" | grep -c "^${repo}/")
+              STATUS="✅ 更新"
+              
+              # 提取部分文件明细并转换为 HTML 的换行符
+              REPO_FILES=$(echo "$STAGED_FILES" | grep "^${repo}/" | sed "s|^${repo}/|&emsp;├─ 📄 |" | head -n 5)
+              REPO_FILES_HTML=$(echo "$REPO_FILES" | awk 1 ORS='<br>')
+              
+              DETAILS="${DETAILS}📦 <b>${repo}</b><br>${REPO_FILES_HTML}"
+              if [ "$FILE_COUNT" -gt 5 ]; then
+                DETAILS="${DETAILS}&emsp;└─ 📝 <i>...等共 ${FILE_COUNT} 个文件</i><br>"
+              fi
+              DETAILS="${DETAILS}<br>"
+            else
+              FILE_COUNT="0"
+              STATUS="➖ 挂机"
+            fi
+            
+            # API 10.1 原生表格 HTML 拼装
+            TABLE_ROWS="${TABLE_ROWS}<tr><td>${repo}</td><td>${STATUS}</td><td>${FILE_COUNT}</td></tr>"
+          done
+          
+          # 写入文件供 Python 读取 (避免 Bash 特殊字符引发语法错误)
+          cat <<EOF > tg_msg.html
+          <h3>🔔 GitHub 库级监控简报</h3>
+          <p>🤖 今日自动扫描任务已执行完毕。</p>
+          
+          <h4>📊 框架变动全景纵览</h4>
+          <!-- API 10.1 魔法开启：原生数据表格 -->
+          <table border="1">
+              <tr>
+                  <th>监控库名</th>
+                  <th>今日状态</th>
+                  <th>变动数</th>
+              </tr>
+              ${TABLE_ROWS}
+          </table>
+          EOF
+          
+          if [ "$HAS_UPDATE" = true ]; then
+            # API 10.1 魔法开启：可折叠引用块
+            cat <<EOF >> tg_msg.html
+          
+          <blockquote expandable>
+              💡 <b>详细代码变动日志（点击展开）</b><br><br>
+              ${DETAILS}
+          </blockquote>
+          EOF
+            
+            # 稳妥提交并推送
+            git commit -m "自动同步代码: $(date +'%Y-%m-%d %H:%M:%S')"
+            git push origin main
+            echo "检测到代码更新，提交推送成功。"
           else
-            echo "⚠️ 未检测到 TG_BOT_TOKEN 或 TG_CHAT_ID 密钥配置，跳过发送消息。"
+            echo "所有监控库均未发现代码更新。"
           fi
+          
+          # 【内嵌 Python 核心驱动】：利用 Python 直接构造发送 API 10.1 专属的 sendRichMessage
+          python3 -c '
+          import os, json, urllib.request
+          
+          token = os.environ.get("TG_BOT_TOKEN")
+          chat_id = os.environ.get("TG_CHAT_ID")
+          
+          if not token or not chat_id:
+              print("⚠️ 未检测到 TG_BOT_TOKEN 或 TG_CHAT_ID 密钥配置，跳过消息发送。")
+              exit(0)
+              
+          # 读取 Bash 处理好的 HTML
+          with open("tg_msg.html", "r", encoding="utf-8") as f:
+              html_content = f.read()
+              
+          # 调用 API 10.1 专用的 sendRichMessage 接口
+          url = f"https://api.telegram.org/bot{token}/sendRichMessage"
+          
+          data = {
+              "chat_id": chat_id,
+              "rich_message": {"html": html_content}
+          }
+          
+          req = urllib.request.Request(
+              url, 
+              data=json.dumps(data).encode("utf-8"), 
+              headers={"Content-Type": "application/json"}
+          )
+          
+          try:
+              with urllib.request.urlopen(req) as response:
+                  print("✅ Telegram 10.1 极致排版通知已成功送达！")
+          except Exception as e:
+              print(f"❌ Telegram 通知发送失败: {e}")
+              if hasattr(e, "read"):
+                  print(e.read().decode("utf-8"))
+          '
