@@ -16,7 +16,7 @@ jobs:
         with:
           path: main-repo
 
-      # 2. 拉取旧的几个目标仓库
+      # 2. 依次拉取所有的目标仓库
       - name: Checkout Target Repo 1
         uses: actions/checkout@v3
         with:
@@ -53,21 +53,19 @@ jobs:
           repository: randomshit699/Bncr_plugins
           path: temp/Bncr_plugins          
 
-      # 🔥 新增 7. 拉取 Pyrofork
       - name: Checkout Target Repo 7
         uses: actions/checkout@v3
         with:
           repository: Mayuri-Chan/pyrofork
           path: temp/pyrofork
 
-      # 🔥 新增 8. 拉取 Kurigram
       - name: Checkout Target Repo 8
         uses: actions/checkout@v3
         with:
           repository: KurimuzonAkuma/kurigram
           path: temp/kurigram
 
-      # 3. 核心处理：10.1 魔法排版与优雅通知
+      # 3. 核心处理、精准差异化提取与优雅通知
       - name: Process, Commit and Notify
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
@@ -75,7 +73,7 @@ jobs:
         run: |
           cd main-repo
           
-          # 断开与原作者的命运绑定，追加了新增的两个库
+          # 断开与原作者的命运绑定
           rm -rf ../temp/p115client/.git ../temp/p123client/.git ../temp/pansou/.git ../temp/pansou-web/.git ../temp/LitePan/.git ../temp/Bncr_plugins/.git ../temp/pyrofork/.git ../temp/kurigram/.git
           
           # 增量同步文件
@@ -92,7 +90,6 @@ jobs:
           git config user.name 'GitHub Actions Bot'
           git config user.email 'actions@github.com'
           
-          # 暂存所有更改以供 Git 比对
           git add .
           
           # 提取状态明细
@@ -102,10 +99,21 @@ jobs:
             HAS_UPDATE=true
           fi
           
-          # 定义需要监控的所有模块列表
+          # 定义需要监控的模块列表
           repos=("p115client" "p123client" "pansou" "pansou-web" "LitePan" "Bncr_plugins" "pyrofork" "kurigram")
           
-          # 动态构建 API 10.1 原生表格行与详情模块
+          # 定义每个仓库的超链接映射字典
+          declare -A repo_urls=(
+            ["p115client"]="https://github.com/ChenyangGao/p115client"
+            ["p123client"]="https://github.com/ChenyangGao/p123client"
+            ["pansou"]="https://github.com/fish2018/pansou"
+            ["pansou-web"]="https://github.com/fish2018/pansou-web"
+            ["LitePan"]="https://github.com/Ponphil/LitePan"
+            ["Bncr_plugins"]="https://github.com/randomshit699/Bncr_plugins"
+            ["pyrofork"]="https://github.com/Mayuri-Chan/pyrofork"
+            ["kurigram"]="https://github.com/KurimuzonAkuma/kurigram"
+          )
+          
           TABLE_ROWS=""
           DETAILS=""
           
@@ -114,31 +122,31 @@ jobs:
               FILE_COUNT=$(echo "$STAGED_FILES" | grep -c "^${repo}/")
               STATUS="✅ 更新"
               
-              # 提取部分文件明细并转换为 HTML 的换行符
-              REPO_FILES=$(echo "$STAGED_FILES" | grep "^${repo}/" | sed "s|^${repo}/|&emsp;├─ 📄 |" | head -n 5)
-              REPO_FILES_HTML=$(echo "$REPO_FILES" | awk 1 ORS='<br>')
+              # 修复1：使用全角空格代替 &emsp;，避开 sed 乱码陷阱
+              REPO_FILES=$(echo "$STAGED_FILES" | grep "^${repo}/" | sed "s|^${repo}/| ├─ 📄 |" | head -n 5)
               
-              DETAILS="${DETAILS}📦 <b>${repo}</b><br>${REPO_FILES_HTML}"
+              # 修复2：使用真实的 \n 进行换行，让 Telegram 能正确计算折叠高度
+              DETAILS="${DETAILS}📦 <b>${repo}</b>"$'\n'"${REPO_FILES}"$'\n'
               if [ "$FILE_COUNT" -gt 5 ]; then
-                DETAILS="${DETAILS}&emsp;└─ 📝 <i>...等共 ${FILE_COUNT} 个文件</i><br>"
+                DETAILS="${DETAILS} └─ 📝 <i>...等共 ${FILE_COUNT} 个文件</i>"$'\n'
               fi
-              DETAILS="${DETAILS}<br>"
+              DETAILS="${DETAILS}"$'\n'
             else
               FILE_COUNT="0"
               STATUS="➖ 挂机"
             fi
             
-            # API 10.1 原生表格 HTML 拼装
-            TABLE_ROWS="${TABLE_ROWS}<tr><td>${repo}</td><td>${STATUS}</td><td>${FILE_COUNT}</td></tr>"
+            # 添加超链接到表格的库名上
+            LINK="<a href=\"${repo_urls[$repo]}\">${repo}</a>"
+            TABLE_ROWS="${TABLE_ROWS}<tr><td>${LINK}</td><td>${STATUS}</td><td>${FILE_COUNT}</td></tr>"
           done
           
-          # 写入文件供 Python 读取 (避免 Bash 特殊字符引发语法错误)
+          # 写入文件供 Python 读取，避免转义错误
           cat <<EOF > tg_msg.html
           <h3>🔔 GitHub 库级监控简报</h3>
           <p>🤖 今日自动扫描任务已执行完毕。</p>
           
           <h4>📊 框架变动全景纵览</h4>
-          <!-- API 10.1 魔法开启：原生数据表格 -->
           <table border="1">
               <tr>
                   <th>监控库名</th>
@@ -150,13 +158,12 @@ jobs:
           EOF
           
           if [ "$HAS_UPDATE" = true ]; then
-            # API 10.1 魔法开启：可折叠引用块
+            # 这里必须留空行，这是触发 blockquote 折叠的关键逻辑
             cat <<EOF >> tg_msg.html
           
-          <blockquote expandable>
-              💡 <b>详细代码变动日志（点击展开）</b><br><br>
-              ${DETAILS}
-          </blockquote>
+          <blockquote expandable>💡 <b>详细代码变动日志（点击展开）</b>
+          
+          ${DETAILS}</blockquote>
           EOF
             
             # 稳妥提交并推送
@@ -167,7 +174,7 @@ jobs:
             echo "所有监控库均未发现代码更新。"
           fi
           
-          # 【内嵌 Python 核心驱动】：利用 Python 直接构造发送 API 10.1 专属的 sendRichMessage
+          # 使用原生 API 接口，完美支持 10.1 新特性
           python3 -c '
           import os, json, urllib.request
           
@@ -175,19 +182,19 @@ jobs:
           chat_id = os.environ.get("TG_CHAT_ID")
           
           if not token or not chat_id:
-              print("⚠️ 未检测到 TG_BOT_TOKEN 或 TG_CHAT_ID 密钥配置，跳过消息发送。")
+              print("⚠️ 未检测到密钥，跳过发送。")
               exit(0)
               
-          # 读取 Bash 处理好的 HTML
           with open("tg_msg.html", "r", encoding="utf-8") as f:
               html_content = f.read()
               
-          # 调用 API 10.1 专用的 sendRichMessage 接口
-          url = f"https://api.telegram.org/bot{token}/sendRichMessage"
+          url = f"https://api.telegram.org/bot{token}/sendMessage"
           
           data = {
               "chat_id": chat_id,
-              "rich_message": {"html": html_content}
+              "parse_mode": "HTML",
+              "text": html_content,
+              "link_preview_options": {"is_disabled": True} # 禁用链接预览，保持界面整洁
           }
           
           req = urllib.request.Request(
@@ -198,9 +205,9 @@ jobs:
           
           try:
               with urllib.request.urlopen(req) as response:
-                  print("✅ Telegram 10.1 极致排版通知已成功送达！")
+                  print("✅ Telegram 完美折叠排版通知已成功送达！")
           except Exception as e:
-              print(f"❌ Telegram 通知发送失败: {e}")
+              print(f"❌ 发送失败: {e}")
               if hasattr(e, "read"):
                   print(e.read().decode("utf-8"))
           '
