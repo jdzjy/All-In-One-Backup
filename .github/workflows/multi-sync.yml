@@ -93,7 +93,6 @@ jobs:
           git config user.name 'GitHub Actions Bot'
           git config user.email 'actions@github.com'
           
-          # 暂存所有更改以供 Git 比对
           git add .
           
           # 提取状态明细
@@ -121,31 +120,29 @@ jobs:
           TABLE_ROWS=""
           DETAILS=""
           
-          # 遍历仓库处理数据
           for repo in "${repos[@]}"; do
             if echo "$STAGED_FILES" | grep -q "^${repo}/"; then
               FILE_COUNT=$(echo "$STAGED_FILES" | grep -c "^${repo}/")
               STATUS="✅ <b>更新</b>"
               
-              # 提取前5个变动文件，使用全角空格对齐防止解析错误
-              REPO_FILES=$(echo "$STAGED_FILES" | grep "^${repo}/" | sed "s|^${repo}/| ├─ 📄 |" | head -n 5)
+              # 🚀 核心修复 1：利用 sed 命令给每一个文件路径的末尾强制加上 <br>
+              REPO_FILES=$(echo "$STAGED_FILES" | grep "^${repo}/" | sed "s|^${repo}/| ├─ 📄 |" | head -n 5 | sed 's/$/<br>/')
               
-              DETAILS="${DETAILS}📦 <b><a href=\"${repo_urls[$repo]}\">${repo}</a></b>"$'\n'"${REPO_FILES}"$'\n'
+              # 给库名标题也加上 <br>
+              DETAILS="${DETAILS}📦 <b><a href=\"${repo_urls[$repo]}\">${repo}</a></b><br>${REPO_FILES}"
               if [ "$FILE_COUNT" -gt 5 ]; then
-                DETAILS="${DETAILS} └─ 📝 <i>...等共 ${FILE_COUNT} 个文件</i>"$'\n'
+                DETAILS="${DETAILS} └─ 📝 <i>...等共 ${FILE_COUNT} 个文件</i><br>"
               fi
-              DETAILS="${DETAILS}"$'\n'
+              DETAILS="${DETAILS}<br>"
             else
               FILE_COUNT="0"
               STATUS="➖ 挂机"
             fi
             
-            # 【核心恢复】: 给仓库名套上超链接，并拼接进 HTML 原生表格
             LINK="<a href=\"${repo_urls[$repo]}\">${repo}</a>"
-            TABLE_ROWS="${TABLE_ROWS}<tr><td>${LINK}</td><td>${STATUS}</td><td>${FILE_COUNT}</td></tr>"$'\n'
+            TABLE_ROWS="${TABLE_ROWS}<tr><td>${LINK}</td><td>${STATUS}</td><td>${FILE_COUNT}</td></tr>"
           done
           
-          # 拼装带有原生表格的基础 HTML
           cat <<EOF > tg_msg.html
           <h3>🔔 GitHub 库级监控简报</h3>
           <p>🤖 今日自动扫描任务已执行完毕。</p>
@@ -162,15 +159,13 @@ jobs:
           EOF
           
           if [ "$HAS_UPDATE" = true ]; then
-            # 【核心修复】: 拼装折叠块，必须用物理空行隔离，激活 Telegram 原生折叠逻辑
+            # 🚀 核心修复 2：在折叠块的提示语后方增加 <br><br>，把它和底下的代码文件彻底隔开
             cat <<EOF >> tg_msg.html
           
-          <blockquote expandable>💡 <b>详细代码变动日志（点击展开）</b>
-          
+          <blockquote expandable>💡 <b>详细代码变动日志（点击展开）</b><br><br>
           ${DETAILS}</blockquote>
           EOF
             
-            # 稳妥提交并推送
             git commit -m "自动同步代码: $(date +'%Y-%m-%d %H:%M:%S')"
             git push origin main
             echo "检测到代码更新，提交推送成功。"
@@ -178,7 +173,6 @@ jobs:
             echo "所有监控库均未发现代码更新。"
           fi
           
-          # 执行 Python 脚本发送通知
           python3 -c '
           import os, json, urllib.request
           
@@ -192,13 +186,12 @@ jobs:
           with open("tg_msg.html", "r", encoding="utf-8") as f:
               html_content = f.read()
               
-          # 【致胜关键】: 接口切回 API 10.1 专属的 sendRichMessage，彻底接纳 <table> 标签
           url = f"https://api.telegram.org/bot{token}/sendRichMessage"
           
           data = {
               "chat_id": chat_id,
               "rich_message": {"html": html_content},
-              "link_preview_options": {"is_disabled": True} # 屏蔽超链接的网页预览卡片
+              "link_preview_options": {"is_disabled": True}
           }
           
           req = urllib.request.Request(
