@@ -163,7 +163,7 @@ jobs:
             cat <<EOF >> tg_msg.html
           
           <details>
-          <summary>💡 <b>详细代码变动日志（点击展开）</b></summary>
+          <summary>💡 <b><i>详细代码变动日志（点击展开）</i></b></summary>
           <br>
           <blockquote>${DETAILS}</blockquote>
           </details>
