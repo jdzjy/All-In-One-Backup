@@ -255,7 +255,7 @@ class MediaArea(Object):
         elif self.type == enums.MediaAreaType.REACTION:
             if self.reaction.custom_emoji_id:
                 reaction = raw.types.ReactionCustomEmoji(
-                    document_id=self.reaction.custom_emoji_id
+                    document_id=int(self.reaction.custom_emoji_id)
                 )
             else:
                 reaction = raw.types.ReactionEmoji(
