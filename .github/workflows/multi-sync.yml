@@ -53,8 +53,8 @@ jobs:
       - name: Checkout Target Repo 6
         uses: actions/checkout@v3
         with:
-          repository: randomshit699/Bncr_plugins
-          path: temp/Bncr_plugins          
+          repository: eternnoir/pyTelegramBotAPI
+          path: temp/pyTelegramBotAPI          
 
       - name: Checkout Target Repo 7
         uses: actions/checkout@v3
@@ -77,7 +77,7 @@ jobs:
           cd main-repo
           
           # 断开与原作者的命运绑定
-          rm -rf ../temp/p115client/.git ../temp/p123client/.git ../temp/pansou/.git ../temp/pansou-web/.git ../temp/LitePan/.git ../temp/Bncr_plugins/.git ../temp/pyrofork/.git ../temp/kurigram/.git
+          rm -rf ../temp/p115client/.git ../temp/p123client/.git ../temp/pansou/.git ../temp/pansou-web/.git ../temp/LitePan/.git ../temp/pyTelegramBotAPI/.git ../temp/pyrofork/.git ../temp/kurigram/.git
           
           # 增量同步文件
           rsync -a --delete ../temp/p115client/ ./p115client/
@@ -85,7 +85,7 @@ jobs:
           rsync -a --delete ../temp/pansou/ ./pansou/
           rsync -a --delete ../temp/pansou-web/ ./pansou-web/
           rsync -a --delete ../temp/LitePan/ ./LitePan/
-          rsync -a --delete ../temp/Bncr_plugins/ ./Bncr_plugins/
+          rsync -a --delete ../temp/pyTelegramBotAPI/ ./pyTelegramBotAPI/
           rsync -a --delete ../temp/pyrofork/ ./pyrofork/
           rsync -a --delete ../temp/kurigram/ ./kurigram/
           
@@ -103,7 +103,7 @@ jobs:
           fi
           
           # 定义需要监控的模块列表
-          repos=("p115client" "p123client" "pansou" "pansou-web" "LitePan" "Bncr_plugins" "pyrofork" "kurigram")
+          repos=("p115client" "p123client" "pansou" "pansou-web" "LitePan" "pyTelegramBotAPI" "pyrofork" "kurigram")
           
           # 定义每个仓库的超链接映射字典
           declare -A repo_urls=(
@@ -112,7 +112,7 @@ jobs:
             ["pansou"]="https://github.com/fish2018/pansou"
             ["pansou-web"]="https://github.com/fish2018/pansou-web"
             ["LitePan"]="https://github.com/Ponphil/LitePan"
-            ["Bncr_plugins"]="https://github.com/randomshit699/Bncr_plugins"
+            ["pyTelegramBotAPI"]="https://github.com/eternnoir/pyTelegramBotAPI"
             ["pyrofork"]="https://github.com/Mayuri-Chan/pyrofork"
             ["kurigram"]="https://github.com/KurimuzonAkuma/kurigram"
           )
@@ -125,12 +125,12 @@ jobs:
               FILE_COUNT=$(echo "$STAGED_FILES" | grep -c "^${repo}/")
               STATUS="✅ <b>更新</b>"
               
-              # 🚀 核心修复 1：利用 sed 命令给每一个文件路径的末尾强制加上 <br>
-              REPO_FILES=$(echo "$STAGED_FILES" | grep "^${repo}/" | sed "s|^${repo}/| ├─ 📄 |" | head -n 5 | sed 's/$/<br>/')
+              # 给每一个文件路径的末尾强制加上 <br>
+              REPO_FILES=$(echo "$STAGED_FILES" | grep "^${repo}/" | sed "s|^${repo}/| ├─ 📄 |" | head -n 15 | sed 's/$/<br>/')
               
               # 给库名标题也加上 <br>
               DETAILS="${DETAILS}📦 <b><a href=\"${repo_urls[$repo]}\">${repo}</a></b><br>${REPO_FILES}"
-              if [ "$FILE_COUNT" -gt 5 ]; then
+              if [ "$FILE_COUNT" -gt 15 ]; then
                 DETAILS="${DETAILS} └─ 📝 <i>...等共 ${FILE_COUNT} 个文件</i><br>"
               fi
               DETAILS="${DETAILS}<br>"
@@ -159,11 +159,14 @@ jobs:
           EOF
           
           if [ "$HAS_UPDATE" = true ]; then
-            # 🚀 核心修复 2：在折叠块的提示语后方增加 <br><br>，把它和底下的代码文件彻底隔开
+            # 🚀 核心修复：全面适配 API 10.1，使用 <details> 和 <summary> 替代被弃用的 blockquote expandable
             cat <<EOF >> tg_msg.html
           
-          <blockquote expandable>💡 <b>详细代码变动日志（点击展开）</b><br><br>
-          ${DETAILS}</blockquote>
+          <details>
+          <summary>💡 <b>详细代码变动日志（点击展开）</b></summary>
+          <br>
+          <blockquote>${DETAILS}</blockquote>
+          </details>
           EOF
             
             git commit -m "自动同步代码: $(date +'%Y-%m-%d %H:%M:%S')"
@@ -188,6 +191,7 @@ jobs:
               
           url = f"https://api.telegram.org/bot{token}/sendRichMessage"
           
+          # 💡 API 10.1 规范：将 HTML 封装进 rich_message 对象中
           data = {
               "chat_id": chat_id,
               "rich_message": {"html": html_content},
