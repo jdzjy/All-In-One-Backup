@@ -19,7 +19,7 @@
 import html
 import logging
 from datetime import datetime
-from typing import List, Optional, Union
+from typing import Dict, List, Optional, Union
 
 import pyrogram
 from pyrogram import enums, raw, types, utils
@@ -400,6 +400,14 @@ class User(Object, Update):
             True, if the bot supports join request queries and can be assigned to process them.
             Returned only in :meth:`~pyrogram.Client.get_me`
 
+        community_id (``int``, *optional*)
+            The identifier to which chat with the bot was added.
+            For bots only.
+
+        community (:obj:`~pyrogram.types.Community`, *optional*)
+            The :obj:`~pyrogram.types.Community` to which chat with the bot was added.
+            For bots only.
+
         raw (:obj:`~pyrogram.raw.base.User` | :obj:`~pyrogram.raw.base.UserStatus`, *optional*):
             The raw user or user status object, as received from the Telegram API.
 
@@ -511,7 +519,9 @@ class User(Object, Update):
         note: Optional["types.FormattedText"] = None,
         supports_guest_queries: Optional[bool] = None,
         supports_join_request_queries: Optional[bool] = None,
-        raw: Optional[Union["raw.base.User", "raw.base.UserStatus"]] = None
+        community_id: Optional[int] = None,
+        community: Optional["types.Community"] = None,
+        raw: Optional[Union["raw.base.User", "raw.base.UserStatus"]] = None,
     ):
         super().__init__(client)
 
@@ -609,6 +619,8 @@ class User(Object, Update):
         self.note = note
         self.supports_guest_queries = supports_guest_queries
         self.supports_join_request_queries = supports_join_request_queries
+        self.community_id = community_id
+        self.community = community
         self.raw = raw
 
     @property
@@ -620,7 +632,7 @@ class User(Object, Update):
         return Link(
             f"tg://user?id={self.id}",
             self.first_name or "Deleted Account",
-            self._client.parse_mode
+            self._client.parse_mode,
         )
 
     # region Deprecated
@@ -680,7 +692,8 @@ class User(Object, Update):
             dc_id=getattr(user.photo, "dc_id", None),
             phone_number=user.phone,
             photo=types.ChatPhoto._parse(client, user.photo, user.id, user.access_hash),
-            restrictions=types.List([types.Restriction._parse(r) for r in user.restriction_reason]) or None,
+            restrictions=types.List([types.Restriction._parse(r) for r in user.restriction_reason])
+            or None,
             reply_color=types.ChatColor._parse(user.color),
             profile_color=types.ChatColor._parse_profile_color(user.profile_color),
             added_to_attachment_menu=user.attach_menu_enabled,
@@ -699,12 +712,18 @@ class User(Object, Update):
             paid_message_star_count=user.send_paid_messages_stars,
             supports_guest_queries=user.bot_guestchat,
             supports_join_request_queries=user.bot_guard,
+            community_id=user.linked_community_id,
             raw=user,
-            client=client
+            client=client,
         )
 
     @staticmethod
-    async def _parse_full(client, user: "raw.types.UserFull", users: dict, chats: dict) -> Optional["User"]:
+    async def _parse_full(
+        client,
+        user: "raw.types.UserFull",
+        users: Dict[int, "raw.base.User"],
+        chats: Dict[int, "raw.base.Chat"],
+    ) -> Optional["User"]:
         parsed_user = User._parse(client, users[user.id])
         parsed_user.raw = user
 
@@ -729,55 +748,73 @@ class User(Object, Update):
         parsed_user.display_gifts_button = user.display_gifts_button
         parsed_user.uses_unofficial_app = user.unofficial_security_risk
         parsed_user.bio = user.about or None
-        parsed_user.personal_photo = types.ChatPhoto._parse(client, user.personal_photo, users[user.id].id, users[user.id].access_hash)
+        parsed_user.personal_photo = types.ChatPhoto._parse(
+            client, user.personal_photo, users[user.id].id, users[user.id].access_hash
+        )
         # parsed_user.photo = types.ChatPhoto._parse(client, user.profile_photo, users[user.id].id, users[user.id].access_hash)
-        parsed_user.public_photo = types.ChatPhoto._parse(client, user.fallback_photo, users[user.id].id, users[user.id].access_hash)
+        parsed_user.public_photo = types.ChatPhoto._parse(
+            client, user.fallback_photo, users[user.id].id, users[user.id].access_hash
+        )
         # parsed_user.bot_info = user.bot_info
         # parsed_user.bot_forum_view
 
         if user.pinned_msg_id:
-            parsed_user.pinned_message = await client.get_messages(chat_id=parsed_user.id, pinned=True)
+            parsed_user.pinned_message = await client.get_messages(
+                chat_id=parsed_user.id, pinned=True
+            )
 
         parsed_user.folder_id = user.folder_id
         parsed_user.message_auto_delete_time = user.ttl_period
         parsed_user.theme = await types.ChatTheme._parse(client, user.theme)
         parsed_user.private_forward_name = user.private_forward_name
-        parsed_user.bot_group_admin_rights = types.ChatAdministratorRights._parse(user.bot_group_admin_rights)
-        parsed_user.bot_broadcast_admin_rights = types.ChatAdministratorRights._parse(user.bot_broadcast_admin_rights)
+        parsed_user.bot_group_admin_rights = types.ChatAdministratorRights._parse(
+            user.bot_group_admin_rights
+        )
+        parsed_user.bot_broadcast_admin_rights = types.ChatAdministratorRights._parse(
+            user.bot_broadcast_admin_rights
+        )
         parsed_user.chat_background = types.ChatBackground._parse(client, user.wallpaper)
 
         if user.stories:
-            parsed_user.stories = types.List(
-                [
-                    await types.Story._parse(
-                        client, story, user.stories.peer, users, chats
-                    )
-                    for story in user.stories.stories
-                ]
-            ) or None
+            parsed_user.stories = (
+                types.List(
+                    [
+                        await types.Story._parse(client, story, user.stories.peer, users, chats)
+                        for story in user.stories.stories
+                    ]
+                )
+                or None
+            )
 
-        parsed_user.business_work_hours = types.BusinessWorkingHours._parse(user.business_work_hours)
+        parsed_user.business_work_hours = types.BusinessWorkingHours._parse(
+            user.business_work_hours
+        )
         parsed_user.business_location = types.Location._parse_business(user.business_location)
-        parsed_user.business_greeting_message = types.BusinessMessage._parse(client, user.business_greeting_message, users)
-        parsed_user.business_away_message = types.BusinessMessage._parse(client, user.business_away_message, users)
+        parsed_user.business_greeting_message = types.BusinessMessage._parse(
+            client, user.business_greeting_message, users
+        )
+        parsed_user.business_away_message = types.BusinessMessage._parse(
+            client, user.business_away_message, users
+        )
         parsed_user.business_intro = await types.BusinessIntro._parse(client, user.business_intro)
         parsed_user.birthday = types.Birthday._parse(user.birthday)
 
         if user.personal_channel_id:
-            parsed_user.personal_channel = types.Chat._parse_channel_chat(client, chats[user.personal_channel_id])
+            parsed_user.personal_channel = types.Chat._parse_channel_chat(
+                client, chats[user.personal_channel_id]
+            )
             parsed_user.personal_channel_message = await client.get_messages(
-                chat_id=parsed_user.personal_channel.id,
-                message_ids=user.personal_channel_message
+                chat_id=parsed_user.personal_channel.id, message_ids=user.personal_channel_message
             )
 
         parsed_user.gift_count = user.stargifts_count
         # parsed_user.starref_program = user.starref_program
         parsed_user.bot_verification = types.BotVerification._parse(
-            client,
-            user.bot_verification,
-            users
+            client, user.bot_verification, users
         )
-        parsed_user.main_profile_tab = enums.ProfileTab(type(user.main_tab)) if user.main_tab else None
+        parsed_user.main_profile_tab = (
+            enums.ProfileTab(type(user.main_tab)) if user.main_tab else None
+        )
 
         if user.saved_music:
             attributes = {type(i): i for i in user.saved_music.attributes}
@@ -796,9 +833,16 @@ class User(Object, Update):
 
         parsed_user.rating = types.UserRating._parse(user.stars_rating)
         parsed_user.pending_rating = types.UserRating._parse(user.stars_my_pending_rating)
-        parsed_user.pending_rating_date = utils.timestamp_to_datetime(user.stars_my_pending_rating_date)
+        parsed_user.pending_rating_date = utils.timestamp_to_datetime(
+            user.stars_my_pending_rating_date
+        )
         parsed_user.accepted_gift_types = types.AcceptedGiftTypes._parse(user.disallowed_gifts)
         parsed_user.note = types.FormattedText._parse(client, user.note)
+
+        if parsed_user.community_id:
+            parsed_user.community = types.Community._parse(
+                client, chats.get(utils.get_raw_peer_id(parsed_user.community_id))
+            )
 
         return parsed_user
 
@@ -832,7 +876,7 @@ class User(Object, Update):
         return {
             "status": status,
             "last_online_date": last_online_date,
-            "next_offline_date": next_offline_date
+            "next_offline_date": next_offline_date,
         }
 
     @staticmethod
@@ -841,7 +885,7 @@ class User(Object, Update):
             id=user_status.user_id,
             **User._parse_status(user_status.status),
             raw=user_status,
-            client=client
+            client=client,
         )
 
     async def archive(self):

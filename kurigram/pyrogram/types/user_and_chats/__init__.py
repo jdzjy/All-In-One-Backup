@@ -34,7 +34,13 @@ from .chat_event_filter import ChatEventFilter
 from .chat_folder_invite_link_info import ChatFolderInviteLinkInfo
 from .chat_invite_link import ChatInviteLink
 from .chat_join_request import ChatJoinRequest
-from .chat_join_result import ChatJoinResult, ChatJoinResultSuccess, ChatJoinResultRequestSent, ChatJoinResultGuardBotApprovalRequired, ChatJoinResultDeclined
+from .chat_join_result import (
+    ChatJoinResult,
+    ChatJoinResultDeclined,
+    ChatJoinResultGuardBotApprovalRequired,
+    ChatJoinResultRequestSent,
+    ChatJoinResultSuccess,
+)
 from .chat_joiner import ChatJoiner
 from .chat_member import ChatMember
 from .chat_member_updated import ChatMemberUpdated
@@ -42,6 +48,17 @@ from .chat_permissions import ChatPermissions
 from .chat_photo import ChatPhoto
 from .chat_reactions import ChatReactions
 from .chat_settings import ChatSettings
+from .community import Community
+from .community_administrator_rights import CommunityAdministratorRights
+from .community_member_status import (
+    CommunityMemberStatus,
+    CommunityMemberStatusAdministrator,
+    CommunityMemberStatusBanned,
+    CommunityMemberStatusCreator,
+    CommunityMemberStatusLeft,
+    CommunityMemberStatusMember,
+)
+from .community_permissions import CommunityPermissions
 from .dialog import Dialog
 from .emoji_status import EmojiStatus
 from .failed_to_add_member import FailedToAddMember
@@ -86,10 +103,10 @@ __all__ = [
     "ChatInviteLink",
     "ChatJoinRequest",
     "ChatJoinResult",
-    "ChatJoinResultSuccess",
-    "ChatJoinResultRequestSent",
-    "ChatJoinResultGuardBotApprovalRequired",
     "ChatJoinResultDeclined",
+    "ChatJoinResultGuardBotApprovalRequired",
+    "ChatJoinResultRequestSent",
+    "ChatJoinResultSuccess",
     "ChatJoiner",
     "ChatMember",
     "ChatMemberUpdated",
@@ -98,6 +115,15 @@ __all__ = [
     "ChatPrivileges",
     "ChatReactions",
     "ChatSettings",
+    "Community",
+    "CommunityAdministratorRights",
+    "CommunityMemberStatus",
+    "CommunityMemberStatusAdministrator",
+    "CommunityMemberStatusBanned",
+    "CommunityMemberStatusCreator",
+    "CommunityMemberStatusLeft",
+    "CommunityMemberStatusMember",
+    "CommunityPermissions",
     "Dialog",
     "EmojiStatus",
     "FailedToAddMember",
@@ -120,5 +146,5 @@ __all__ = [
     "VideoChatEnded",
     "VideoChatMembersInvited",
     "VideoChatScheduled",
-    "VideoChatStarted"
+    "VideoChatStarted",
 ]

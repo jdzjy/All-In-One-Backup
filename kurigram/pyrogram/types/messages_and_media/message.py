@@ -438,6 +438,12 @@ class Message(Object, Update):
         checklist_tasks_added (:obj:`~pyrogram.types.ChecklistTasksAdded`, *optional*):
             Service message: checklist tasks added.
 
+        community_chat_added (:obj:`~pyrogram.types.CommunityChatAdded`, *optional*):
+            Service message: chat added to a Community.
+
+        community_chat_removed (:obj:`~pyrogram.types.CommunityChatRemoved`, *optional*):
+            Service message: chat removed from a Community.
+
         premium_gift_code (:obj:`~pyrogram.types.PremiumGiftCode`, *optional*):
             Service message: premium gift code information.
 
@@ -734,6 +740,8 @@ class Message(Object, Update):
         direct_message_price_changed: Optional["types.DirectMessagePriceChanged"] = None,
         checklist_tasks_done: Optional[List["types.ChecklistTasksDone"]] = None,
         checklist_tasks_added: Optional[List["types.ChecklistTasksAdded"]] = None,
+        community_chat_added: Optional[List["types.CommunityChatAdded"]] = None,
+        community_chat_removed: Optional[List["types.CommunityChatRemoved"]] = None,
         premium_gift_code: Optional["types.PremiumGiftCode"] = None,
         gifted_premium: Optional["types.GiftedPremium"] = None,
         gifted_stars: Optional["types.GiftedStars"] = None,
@@ -916,6 +924,8 @@ class Message(Object, Update):
         self.direct_message_price_changed = direct_message_price_changed
         self.checklist_tasks_done = checklist_tasks_done
         self.checklist_tasks_added = checklist_tasks_added
+        self.community_chat_added = community_chat_added
+        self.community_chat_removed = community_chat_removed
         self.premium_gift_code = premium_gift_code
         self.gifted_premium = gifted_premium
         self.gifted_stars = gifted_stars
@@ -1064,6 +1074,8 @@ class Message(Object, Update):
         direct_message_price_changed = None
         checklist_tasks_done = None
         checklist_tasks_added = None
+        community_chat_added = None
+        community_chat_removed = None
 
         service_type = enums.MessageServiceType.UNSUPPORTED
 
@@ -1335,6 +1347,14 @@ class Message(Object, Update):
         elif isinstance(action, raw.types.MessageActionTodoAppendTasks):
             service_type = enums.MessageServiceType.CHECKLIST_TASKS_ADDED
             checklist_tasks_added = types.ChecklistTasksAdded._parse(client, message, users, chats)
+        elif isinstance(action, raw.types.MessageActionChangeCommunity):
+            if action.community_id:
+                service_type = enums.MessageServiceType.COMMUNITY_CHAT_ADDED
+                community_chat_added = types.CommunityChatAdded._parse(client, action, chats)
+            else:
+                service_type = enums.MessageServiceType.COMMUNITY_CHAT_REMOVED
+                community_chat_removed = types.CommunityChatRemoved()
+
 
         parsed_message = Message(
             id=message.id,
@@ -1411,6 +1431,8 @@ class Message(Object, Update):
             direct_message_price_changed=direct_message_price_changed,
             checklist_tasks_done=checklist_tasks_done,
             checklist_tasks_added=checklist_tasks_added,
+            community_chat_added=community_chat_added,
+            community_chat_removed=community_chat_removed,
             reactions=types.MessageReactions._parse(client, message.reactions, users, chats),
             business_connection_id=business_connection_id,
             raw=message,
