@@ -1,10 +1,30 @@
+<script setup lang="ts">
+import { computed } from "vue";
+import { getSvg } from "./svgRegistry";
+import { getIconfontSymbolId } from "./iconfontSymbolMap";
+
+const props = withDefaults(
+  defineProps<{ name: string; size?: number | string; className?: string }>(),
+  { size: 18, className: "" },
+);
+
+const dim = computed(() => {
+  const n = Number(props.size);
+  return Number.isFinite(n) && n > 0 ? n : 18;
+});
+
+const rootStyle = computed(() => ({
+  width: `${dim.value}px`,
+  height: `${dim.value}px`,
+}));
+
+const symbolId = computed(() => getIconfontSymbolId(props.name));
+const symbolHash = computed(() => (symbolId.value ? `#${symbolId.value}` : ""));
+const fallbackMarkup = computed(() => (symbolId.value ? "" : getSvg(props.name)));
+</script>
+
 <template>
-  <span
-    class="lp-svg-icon"
-    :class="className"
-    :style="rootStyle"
-    aria-hidden="true"
-  >
+  <span class="lp-svg-icon" :class="className" :style="rootStyle" aria-hidden="true">
     <svg
       v-if="symbolId"
       class="lp-iconfont-use"
@@ -21,45 +41,6 @@
   </span>
 </template>
 
-<script setup>
-import { computed } from 'vue'
-import { getSvg } from './svgRegistry.js'
-import { getIconfontSymbolId } from './iconfontSymbolMap.js'
-
-const props = defineProps({
-  name: {
-    type: String,
-    required: true
-  },
-  size: {
-    type: [Number, String],
-    default: 18
-  },
-  className: {
-    type: String,
-    default: ''
-  }
-})
-
-const dim = computed(() => {
-  const n = Number(props.size)
-  return Number.isFinite(n) && n > 0 ? n : 18
-})
-
-const rootStyle = computed(() => ({
-  width: `${dim.value}px`,
-  height: `${dim.value}px`
-}))
-
-const symbolId = computed(() => getIconfontSymbolId(props.name))
-
-const symbolHash = computed(() => (symbolId.value ? `#${symbolId.value}` : ''))
-
-const fallbackMarkup = computed(() =>
-  symbolId.value ? '' : getSvg(props.name)
-)
-</script>
-
 <style scoped>
 .lp-svg-icon {
   display: inline-flex;
@@ -69,12 +50,10 @@ const fallbackMarkup = computed(() =>
   vertical-align: middle;
   line-height: 0;
 }
-
 .lp-iconfont-use {
   display: block;
   overflow: visible;
 }
-
 .lp-svg-fallback :deep(svg) {
   display: block;
   width: 100%;

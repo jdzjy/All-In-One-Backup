@@ -1,342 +1,364 @@
+<script setup lang="ts">
+import { computed, ref, watch } from "vue";
+import { http, getApiErrorMessage } from "@/api/client";
+import type { Crumb } from "@/stores/browser";
+import AppModal from "@/components/base/AppModal.vue";
+import AppButton from "@/components/base/AppButton.vue";
+import BreadcrumbNav from "@/components/file/BreadcrumbNav.vue";
+import SvgIcon from "@/components/icons/SvgIcon.vue";
+
+export interface LocalBrowseDir {
+  name: string;
+  path: string;
+}
+
+export interface LocalBrowseResult {
+  path: string;
+  parent: string | null;
+  dirs: LocalBrowseDir[];
+  exists: boolean;
+  writable?: boolean;
+}
+
+const props = withDefaults(
+  defineProps<{
+    open: boolean;
+    initialPath?: string;
+    title?: string;
+    confirmText?: string;
+  }>(),
+  {
+    title: "选择容器内目录",
+    confirmText: "选择当前目录",
+  },
+);
+const emit = defineEmits<{ close: []; select: [path: string] }>();
+
+const loading = ref(false);
+const error = ref("");
+const dirs = ref<LocalBrowseDir[]>([]);
+const currentPath = ref("");
+
+const quickPaths = ["/app/strm", "/app/data", "/app/mounts", "/app", "/mnt", "/media", "/"];
+
+const breadcrumb = computed<Crumb[]>(() => {
+  const path = currentPath.value.trim() || "/";
+  if (path === "/") return [{ id: "/", name: "根目录" }];
+  const parts = path.split("/").filter(Boolean);
+  const crumbs: Crumb[] = [{ id: "/", name: "根目录" }];
+  let acc = "";
+  for (const part of parts) {
+    acc += `/${part}`;
+    crumbs.push({ id: acc, name: part });
+  }
+  return crumbs;
+});
+
+async function load(path: string) {
+  loading.value = true;
+  error.value = "";
+  try {
+    const data = await http.get<LocalBrowseResult>("/admin/local-fs/browse", path ? { path } : undefined);
+    currentPath.value = data.path;
+    dirs.value = data.dirs ?? [];
+  } catch (e) {
+    error.value = getApiErrorMessage(e, "加载失败");
+    dirs.value = [];
+  } finally {
+    loading.value = false;
+  }
+}
+
+function go(path: string) {
+  const next = path.trim();
+  if (!next) return;
+  void load(next);
+}
+
+function goToCrumb(index: number) {
+  const crumb = breadcrumb.value[index];
+  if (!crumb) return;
+  go(crumb.id);
+}
+
+function openDir(dir: LocalBrowseDir) {
+  go(dir.path);
+}
+
+function confirm() {
+  const finalPath = currentPath.value.trim();
+  if (!finalPath) return;
+  emit("select", finalPath);
+}
+
+watch(
+  () => props.open,
+  (open) => {
+    if (!open) return;
+    void load(props.initialPath?.trim() || "");
+  },
+);
+</script>
+
 <template>
-  <div class="ldb-overlay" @click.self="$emit('cancel')">
-    <div class="ldb-modal" @click.stop>
-      <div class="ldb-header">
-        <h3>选择容器内目录</h3>
-        <button class="ldb-close" type="button" @click="$emit('cancel')">×</button>
-      </div>
-
-      <div class="ldb-pathbar">
-        <input
-          v-model="pathInput"
-          class="ldb-path-input"
-          placeholder="直接输入或浏览选择"
-          @keyup.enter="go(pathInput)"
-        >
-        <button class="ldb-btn" type="button" @click="go(pathInput)">前往</button>
-        <button class="ldb-btn" type="button" :disabled="!parent" @click="go(parent)">
-          ← 上一级
-        </button>
-      </div>
-
-      <div v-if="error" class="ldb-error">{{ error }}</div>
-
-      <div class="ldb-quick">
-        <span class="ldb-quick-label">常用：</span>
-        <button v-for="p in quickPaths" :key="p" class="ldb-chip" type="button" @click="go(p)">
-          {{ p }}
-        </button>
-      </div>
-
-      <div class="ldb-list">
-        <div v-if="loading" class="ldb-state">加载中...</div>
-        <div v-else-if="dirs.length === 0 && !error" class="ldb-state">该目录下没有子目录</div>
-        <button
-          v-for="d in dirs"
-          :key="d.path"
-          type="button"
-          class="ldb-row"
-          @click="go(d.path)"
-          @dblclick="confirm(d.path)"
-        >
-          <i class="fas fa-folder"></i>
-          <span class="ldb-row-name">{{ d.name }}</span>
-        </button>
-      </div>
-
-      <div class="ldb-footer">
-        <span class="ldb-footer-current">当前：<code>{{ currentPath || '-' }}</code></span>
-        <div class="ldb-actions">
-          <button class="ldb-btn" type="button" @click="$emit('cancel')">取消</button>
-          <button class="ldb-btn primary" type="button" :disabled="!currentPath" @click="confirm()">
-            选择该目录
+  <AppModal :open="open" bare nested @close="emit('close')">
+    <div class="local-dir-picker">
+      <div class="folder-selector">
+        <div class="folder-selector__header">
+          <h3 class="folder-selector__title">{{ title }}</h3>
+          <button
+            type="button"
+            class="folder-selector__close"
+            aria-label="关闭"
+            @click="emit('close')"
+          >
+            ×
           </button>
+        </div>
+
+        <div class="folder-selector__content">
+          <BreadcrumbNav :items="breadcrumb" compact @navigate="goToCrumb" />
+
+          <div class="local-dir-picker__quick">
+            <span class="local-dir-picker__quick-label">常用</span>
+            <button
+              v-for="p in quickPaths"
+              :key="p"
+              type="button"
+              class="local-dir-picker__chip"
+              :class="{ active: currentPath === p }"
+              @click="go(p)"
+            >
+              {{ p }}
+            </button>
+          </div>
+
+          <div class="file-list folder-selector__list">
+            <div class="folder-table-header" role="row">
+              <div class="folder-table-heading col-name">
+                <span>名称</span>
+              </div>
+            </div>
+
+            <div class="folder-table-body">
+              <div v-if="loading" class="folder-state">加载中…</div>
+              <div v-else-if="error" class="folder-state error">{{ error }}</div>
+              <div v-else-if="!dirs.length" class="folder-state">没有子目录</div>
+              <template v-else>
+                <div
+                  v-for="dir in dirs"
+                  :key="dir.path"
+                  class="folder-table-row"
+                  @click="openDir(dir)"
+                  @dblclick="emit('select', dir.path)"
+                >
+                  <div class="folder-name-cell">
+                    <span class="folder-name-icon"><SvgIcon name="folder" :size="18" /></span>
+                    <span class="folder-name-text" :title="dir.name">{{ dir.name }}</span>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+        </div>
+
+        <div class="folder-selector__footer">
+          <AppButton
+            variant="primary"
+            class="folder-selector__confirm"
+            :disabled="loading || !currentPath"
+            @click="confirm"
+          >
+            {{ confirmText }}
+          </AppButton>
         </div>
       </div>
     </div>
-  </div>
+  </AppModal>
 </template>
 
-<script setup>
-import { ref, onMounted } from 'vue'
-import axios from 'axios'
-
-const props = defineProps({
-  initialPath: { type: String, default: '' },
-})
-const emit = defineEmits(['resolve', 'cancel'])
-
-const loading = ref(false)
-const error = ref('')
-const dirs = ref([])
-const currentPath = ref('')
-const parent = ref(null)
-const pathInput = ref('')
-
-const quickPaths = ['/app/strm', '/app', '/data', '/mnt', '/media', '/']
-
-const load = async (path) => {
-  loading.value = true
-  error.value = ''
-  try {
-    const resp = await axios.get('/api/admin/local-fs/browse', {
-      params: path ? { path } : {},
-    })
-    const data = resp.data?.data
-    if (resp.data?.success && data) {
-      currentPath.value = data.path
-      parent.value = data.parent
-      dirs.value = data.dirs || []
-      pathInput.value = data.path
-    } else {
-      error.value = resp.data?.message || '加载失败'
-      if (data) {
-        currentPath.value = data.path || ''
-        parent.value = data.parent
-        dirs.value = []
-        pathInput.value = currentPath.value
-      }
-    }
-  } catch (e) {
-    error.value = e?.response?.data?.message || e.message || '请求失败'
-  } finally {
-    loading.value = false
-  }
-}
-
-const go = (path) => {
-  if (!path) return
-  load(path.trim())
-}
-
-const confirm = (overridePath = null) => {
-  const finalPath = overridePath || currentPath.value
-  if (finalPath) {
-    emit('resolve', finalPath)
-  }
-}
-
-onMounted(() => {
-  load(props.initialPath || '')
-})
-</script>
-
 <style scoped>
-.ldb-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(15, 23, 42, 0.45);
-  z-index: 200000;
+.local-dir-picker {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
+  width: min(90vw, 680px);
+  height: min(86vh, 570px);
+  min-height: 0;
+  overflow: hidden;
+  border-radius: var(--radius-md);
 }
 
-.ldb-modal {
-  background: #fff;
-  border-radius: 12px;
-  width: 560px;
-  max-width: 100%;
-  max-height: 80vh;
+.folder-selector {
   display: flex;
   flex-direction: column;
-  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.25);
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  box-sizing: border-box;
 }
 
-.ldb-header {
+.folder-selector__header {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  padding: 16px 20px;
-  border-bottom: 1px solid #e5e7eb;
+  gap: 14px;
+  padding: 20px 24px 0;
 }
-
-.ldb-header h3 {
+.folder-selector__title {
   margin: 0;
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 600;
-  color: #1f2937;
-}
-
-.ldb-close {
-  background: none;
-  border: 0;
-  font-size: 22px;
-  color: #6b7280;
-  cursor: pointer;
-  line-height: 1;
-}
-
-.ldb-pathbar {
-  display: flex;
-  gap: 8px;
-  padding: 12px 20px;
-}
-
-.ldb-path-input {
+  color: var(--text);
   flex: 1;
-  height: 34px;
-  padding: 0 10px;
-  font-size: 13px;
-  border: 1px solid #d1d5db;
-  border-radius: 8px;
-  outline: none;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  min-width: 0;
 }
-
-.ldb-path-input:focus {
-  border-color: #3b82f6;
-}
-
-.ldb-btn {
-  height: 34px;
-  padding: 0 12px;
-  font-size: 13px;
-  background: #fff;
-  border: 1px solid #d1d5db;
-  border-radius: 8px;
+.folder-selector__close {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 20px;
+  line-height: 1;
+  width: 24px;
+  height: 24px;
+  padding: 0;
   cursor: pointer;
-  white-space: nowrap;
-  color: #374151;
+}
+.folder-selector__close:hover {
+  color: var(--text);
 }
 
-.ldb-btn:hover:not(:disabled) {
-  background: #f3f4f6;
+.folder-selector__content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 14px 24px 12px;
+  box-sizing: border-box;
+  overflow: visible;
+}
+.folder-selector__content :deep(.breadcrumb) {
+  flex: none;
 }
 
-.ldb-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.ldb-btn.primary {
-  background: #2563eb;
-  border-color: #2563eb;
-  color: #fff;
-}
-
-.ldb-btn.primary:hover:not(:disabled) {
-  background: #1d4ed8;
-}
-
-.ldb-btn.ghost {
-  background: transparent;
-}
-
-.ldb-error {
-  margin: 0 20px 8px;
-  padding: 6px 10px;
-  background: #fef2f2;
-  border: 1px solid #fecaca;
-  border-radius: 6px;
-  color: #b91c1c;
-  font-size: 12px;
-}
-
-.ldb-quick {
+.local-dir-picker__quick {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  padding: 0 20px 8px;
   align-items: center;
+  margin-top: 10px;
 }
-
-.ldb-quick-label {
+.local-dir-picker__quick-label {
   font-size: 12px;
-  color: #6b7280;
+  color: var(--text-muted);
   margin-right: 2px;
 }
-
-.ldb-chip {
+.local-dir-picker__chip {
   font-size: 12px;
-  padding: 2px 10px;
-  background: #f3f4f6;
-  border: 1px solid #e5e7eb;
-  border-radius: 999px;
-  color: #374151;
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
   cursor: pointer;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
-
-.ldb-chip:hover {
-  background: #e5e7eb;
+.local-dir-picker__chip:hover,
+.local-dir-picker__chip.active {
+  color: var(--brand);
+  border-color: color-mix(in srgb, var(--brand) 35%, var(--border));
+  background: var(--info-soft);
 }
 
-.ldb-list {
+.folder-selector__list {
   flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  margin-top: 6px;
+  overflow: hidden;
+}
+
+.folder-table-header,
+.folder-table-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+}
+.folder-table-header {
+  flex-shrink: 0;
+  min-height: 46px;
+  margin: 0 0 6px;
+  padding: 0 12px;
+  background: var(--surface-muted);
+  border-radius: var(--radius-md);
+}
+.folder-table-heading {
+  min-width: 0;
+  height: 100%;
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.folder-table-body {
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  padding: 4px 12px;
-  margin: 0 8px;
-  min-height: 200px;
+  padding-right: 2px;
 }
-
-.ldb-state {
-  padding: 20px;
-  text-align: center;
-  color: #9ca3af;
-  font-size: 13px;
+.folder-table-row {
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.15s ease;
 }
-
-.ldb-row {
+.folder-table-row:hover {
+  background: var(--surface-sunken);
+}
+.folder-name-cell {
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 10px;
-  width: 100%;
-  padding: 8px 12px;
-  background: transparent;
-  border: 0;
-  border-radius: 6px;
-  cursor: pointer;
+}
+.folder-name-icon {
+  flex-shrink: 0;
+  line-height: 0;
+  display: inline-flex;
+}
+.folder-name-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  color: var(--text-regular);
+}
+.folder-state {
+  padding: 36px 16px;
+  text-align: center;
+  color: var(--text-muted);
   font-size: 13px;
-  color: #374151;
-  text-align: left;
+}
+.folder-state.error {
+  color: var(--danger);
 }
 
-.ldb-row:hover {
-  background: #f3f4f6;
-}
-
-.ldb-row i {
-  color: #fbbf24;
-  width: 16px;
-}
-
-.ldb-row-name {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ldb-footer {
-  padding: 12px 20px;
-  border-top: 1px solid #e5e7eb;
+.folder-selector__footer {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  justify-content: flex-end;
   gap: 12px;
+  flex-shrink: 0;
+  padding: 0 24px 24px;
 }
-
-.ldb-footer-current {
-  font-size: 12px;
-  color: #6b7280;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: 1;
-}
-
-.ldb-footer-current code {
-  background: #f3f4f6;
-  padding: 1px 6px;
-  border-radius: 4px;
-  color: #374151;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-}
-
-.ldb-actions {
-  display: flex;
-  gap: 8px;
+.folder-selector__confirm {
+  flex-shrink: 0;
+  height: 38px;
+  min-width: 140px;
+  padding: 0 16px;
+  font-size: 14px;
 }
 </style>

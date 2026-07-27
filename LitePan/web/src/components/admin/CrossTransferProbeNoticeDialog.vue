@@ -1,10 +1,5 @@
 <template>
-  <div class="notice-dialog">
-    <div class="notice-title-row">
-      <div class="notice-title">试探秒传流程：</div>
-      <button type="button" class="notice-close" @click="$emit('cancel')">×</button>
-    </div>
-
+  <div class="notice-body">
     <div class="notice-card">
       <div class="notice-flow">
         <div class="notice-node">
@@ -19,7 +14,7 @@
         <div class="notice-arrow">→</div>
         <div class="notice-node">
           <div class="notice-icon"><SvgIcon name="cloud" :size="26" /></div>
-          <span>目标盘临时目录</span>
+          <span>目标网盘检测</span>
         </div>
       </div>
     </div>
@@ -31,85 +26,30 @@
       </div>
       <div class="notice-tip">
         <span class="notice-tip-bar" aria-hidden="true"></span>
-        <span>部分网盘（如 123）无法预检秒传，试探在临时目录进行，不影响目标目录。</span>
+        <span>支持预判的网盘只查询文件是否命中，不会真的转存一遍。</span>
       </div>
       <div class="notice-tip">
         <span class="notice-tip-bar" aria-hidden="true"></span>
-        <span>试探结束后自动删除临时目录，删除后可能留在回收站，请及时清空回收站。</span>
+        <span>无法预判的网盘（如 123）才会在临时目录真实试传；结束后自动删除，文件可能留在回收站。</span>
       </div>
-    </div>
-
-    <label class="notice-checkbox">
-      <input v-model="skipNextTime" type="checkbox">
-      <span>不再提示</span>
-    </label>
-
-    <div class="notice-actions">
-      <button type="button" class="notice-confirm" @click="confirmNotice">我知道了，继续</button>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
-import SvgIcon from '../icons/SvgIcon.vue'
-
-const props = defineProps({
-  skipChecked: {
-    type: Boolean,
-    default: false
-  }
-})
-
-const emit = defineEmits(['resolve', 'cancel'])
-
-const skipNextTime = ref(props.skipChecked)
-
-const confirmNotice = () => {
-  emit('resolve', {
-    confirmed: true,
-    skipNextTime: skipNextTime.value
-  })
-}
+import SvgIcon from "@/components/icons/SvgIcon.vue";
 </script>
 
 <style scoped>
-.notice-dialog {
+.notice-body {
   width: 100%;
-  max-width: 100%;
-  box-sizing: border-box;
-}
-
-.notice-title-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 16px;
-}
-
-.notice-title {
-  font-size: 17px;
-  font-weight: 700;
-  color: #111827;
-  line-height: 1.5;
-}
-
-.notice-close {
-  width: 24px;
-  height: 24px;
-  border: none;
-  background: transparent;
-  color: #64748b;
-  font-size: 24px;
-  line-height: 1;
-  cursor: pointer;
 }
 
 .notice-card {
   padding: 14px 16px;
-  border-radius: 14px;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: var(--surface-sunken);
+  border: 1px solid var(--border);
   overflow: hidden;
 }
 
@@ -128,9 +68,9 @@ const confirmNotice = () => {
   gap: 6px;
   padding: 10px 8px;
   border-radius: 12px;
-  background: #fff;
-  border: 1px solid #e5e7eb;
-  color: #334155;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-regular);
   font-size: 13px;
   text-align: center;
 }
@@ -147,7 +87,7 @@ const confirmNotice = () => {
 }
 
 .notice-arrow {
-  color: #94a3b8;
+  color: var(--text-muted);
   font-size: 20px;
 }
 
@@ -156,7 +96,7 @@ const confirmNotice = () => {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  color: #475569;
+  color: var(--text-regular);
   font-size: 14px;
   line-height: 1.8;
 }
@@ -171,34 +111,7 @@ const confirmNotice = () => {
   flex-shrink: 0;
   width: 4px;
   border-radius: 999px;
-  background: linear-gradient(135deg, #4c74df 0%, #02a6f0 100%);
-}
-
-.notice-checkbox {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 18px;
-  color: #64748b;
-  font-size: 14px;
-  cursor: pointer;
-}
-
-.notice-actions {
-  display: flex;
-  justify-content: center;
-  margin-top: 18px;
-}
-
-.notice-confirm {
-  min-width: 168px;
-  height: 38px;
-  border: none;
-  border-radius: 10px;
-  background: linear-gradient(135deg, #4c74df 0%, #02a6f0 100%);
-  color: #fff;
-  cursor: pointer;
-  font-size: 14px;
+  background: var(--brand-gradient);
 }
 
 @media (max-width: 640px) {
@@ -210,5 +123,16 @@ const confirmNotice = () => {
     justify-self: center;
     transform: rotate(90deg);
   }
+}
+
+:global(:root[data-skin="brutal"]) .notice-card,
+:global(:root[data-skin="brutal"]) .notice-node,
+:global(:root[data-skin="brutal"]) .notice-tip-bar {
+  border-radius: 0 !important;
+}
+
+:global(:root[data-skin="brutal"]) .notice-card,
+:global(:root[data-skin="brutal"]) .notice-node {
+  border: var(--brutal-bw) solid var(--brutal-ink);
 }
 </style>

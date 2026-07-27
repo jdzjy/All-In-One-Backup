@@ -1,812 +1,418 @@
+<script lang="ts">
+import { ref } from "vue";
+import type { LogEntry, LogStats } from "@/api/logs";
+import "@/styles/system-logs.css";
+
+  // 会话缓存保留日志和筛选，重新进入时先显示旧结果再后台刷新。
+const logs = ref<LogEntry[]>([]);
+const stats = ref<LogStats | null>(null);
+const level = ref<string | number>("");
+const module = ref("");
+const period = ref("all");
+const keyword = ref("");
+const page = ref(1);
+const hasMore = ref(false);
+</script>
+
+<script setup lang="ts">
+import { computed, onMounted, onUnmounted } from "vue";
+import { getApiErrorMessage } from "@/api/client";
+import {
+  LOG_LEVELS,
+  LOG_MODULE_GROUPS,
+  LOG_PERIODS,
+  logsApi,
+} from "@/api/logs";
+import AppBadge from "@/components/base/AppBadge.vue";
+import AppInput from "@/components/base/AppInput.vue";
+import AppSelect from "@/components/base/AppSelect.vue";
+import AppStateBlock from "@/components/base/AppStateBlock.vue";
+import StatCard from "@/components/base/StatCard.vue";
+import SvgIcon from "@/components/icons/SvgIcon.vue";
+import { confirm } from "@/composables/useConfirm";
+import { toast } from "@/composables/useToast";
+import { formatTime } from "@/utils/format";
+
+const api = logsApi();
+
+const loading = ref(false);
+const cleaningKeepToday = ref(false);
+const cleaningAll = ref(false);
+const expanded = ref<Set<number>>(new Set());
+const logsPanelRef = ref<HTMLElement | null>(null);
+
+const PAGE_SIZE = 50;
+
+const activeModuleCount = computed(() =>
+  stats.value?.by_module ? Object.keys(stats.value.by_module).length : 0,
+);
+
+let searchTimer: ReturnType<typeof setTimeout> | undefined;
+let loadSequence = 0;
+
+function levelClass(lv: number): string {
+  if (lv >= 40) return "error";
+  if (lv >= 30) return "warning";
+  if (lv >= 20) return "info";
+  return "debug";
+}
+
+function levelTone(lv: number): "neutral" | "info" | "warning" | "danger" {
+  if (lv >= 40) return "danger";
+  if (lv >= 30) return "warning";
+  if (lv >= 20) return "info";
+  return "neutral";
+}
+
+function periodRange(): { start_time?: string } {
+  const now = new Date();
+  if (period.value === "today") {
+    const start = new Date(now);
+    start.setHours(0, 0, 0, 0);
+    return { start_time: start.toISOString() };
+  }
+  if (period.value === "24h") {
+    return { start_time: new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString() };
+  }
+  if (period.value === "7d") {
+    return { start_time: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString() };
+  }
+  return {};
+}
+
+function buildQuery() {
+  const q: Record<string, string | number | undefined> = {
+    ...periodRange(),
+    // 多取一条仅用于判断是否还有下一页，页面仍只渲染 50 条。
+    limit: PAGE_SIZE + 1,
+    offset: (page.value - 1) * PAGE_SIZE,
+  };
+  if (level.value !== "") q.level = Number(level.value);
+  if (module.value) q.module = module.value;
+  const kw = keyword.value.trim();
+  if (kw) q.keyword = kw;
+  return q;
+}
+
+async function loadLogs(): Promise<boolean> {
+  const sequence = ++loadSequence;
+  // 仅在当前无内容时显示整块加载占位；有缓存时后台静默刷新，列表不空屏。
+  loading.value = true;
+  try {
+    const result = await api.list(buildQuery());
+    if (sequence !== loadSequence) return false;
+    hasMore.value = result.length > PAGE_SIZE;
+    logs.value = result.slice(0, PAGE_SIZE);
+    return true;
+  } catch (e) {
+    if (sequence === loadSequence) {
+      toast.error(getApiErrorMessage(e, "加载日志失败"));
+    }
+    return false;
+  } finally {
+    if (sequence === loadSequence) loading.value = false;
+  }
+}
+
+async function loadStats() {
+  try {
+    stats.value = await api.stats();
+  } catch {
+    /* 统计失败不阻断列表 */
+  }
+}
+
+async function refreshAll() {
+  resetPage();
+  await Promise.all([loadStats(), loadLogs()]);
+}
+
+async function loadInitialPage() {
+  const returningFromOlderPage = page.value > 1;
+  resetPage();
+  if (returningFromOlderPage) logs.value = [];
+  await loadLogs();
+  // 先返回首屏日志；全量统计使用缓存并在列表之后刷新，不阻塞日志展示。
+  void loadStats();
+}
+
+async function cleanupKeepToday() {
+  try {
+    await confirm({
+      title: "清理今天之外的日志？",
+      message: "将保留今天的日志，删除今天之前的全部旧日志文件。",
+      confirmText: "清理",
+      cancelText: "取消",
+      danger: true,
+    });
+  } catch {
+    return;
+  }
+  cleaningKeepToday.value = true;
+  try {
+    const result = await api.cleanupKeepToday();
+    toast.success(
+      result.deleted_files > 0 ? `已清理 ${result.deleted_files} 个今天之外的旧日志文件` : "无需清理，当前只有今天的日志",
+    );
+    await refreshAll();
+  } catch (e) {
+    toast.error(getApiErrorMessage(e, "清理日志失败"));
+  } finally {
+    cleaningKeepToday.value = false;
+  }
+}
+
+async function cleanupAllLogs() {
+  try {
+    await confirm({
+      title: "清理全部日志？",
+      message: "将删除全部日志文件，包括今天的日志。后续新日志会重新生成。",
+      confirmText: "全部清理",
+      cancelText: "取消",
+      danger: true,
+    });
+  } catch {
+    return;
+  }
+  cleaningAll.value = true;
+  try {
+    const result = await api.cleanupAll();
+    toast.success(result.deleted_files > 0 ? `已清理 ${result.deleted_files} 个日志文件` : "当前没有可清理的日志文件");
+    await refreshAll();
+  } catch (e) {
+    toast.error(getApiErrorMessage(e, "清理全部日志失败"));
+  } finally {
+    cleaningAll.value = false;
+  }
+}
+
+function onFilterChange() {
+  resetPage();
+  void loadLogs();
+}
+
+function onKeywordInput() {
+  clearTimeout(searchTimer);
+  resetPage();
+  searchTimer = setTimeout(() => void loadLogs(), 350);
+}
+
+function resetFilters() {
+  level.value = "";
+  module.value = "";
+  period.value = "all";
+  keyword.value = "";
+  void refreshAll();
+}
+
+function resetPage() {
+  page.value = 1;
+  hasMore.value = false;
+  expanded.value = new Set();
+}
+
+async function changePage(target: number) {
+  if (loading.value || target < 1 || (target > page.value && !hasMore.value)) return;
+  const previous = page.value;
+  page.value = target;
+  expanded.value = new Set();
+  if (!(await loadLogs())) {
+    page.value = previous;
+    return;
+  }
+  logsPanelRef.value?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function toggleDetails(id: number) {
+  const next = new Set(expanded.value);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
+  expanded.value = next;
+}
+
+function canShowDetails(log: LogEntry): boolean {
+  return log.level >= 40 && !!log.details && Object.keys(log.details).length > 0;
+}
+
+function detailsText(log: LogEntry): string {
+  return formatDetails(log.details ?? {});
+}
+
+function formatDetails(details: Record<string, unknown>) {
+  return JSON.stringify(details, null, 2);
+}
+
+onMounted(() => void loadInitialPage());
+onUnmounted(() => clearTimeout(searchTimer));
+</script>
+
 <template>
   <div class="logs-page">
-    <div v-if="stats" class="stats-grid">
-      <div class="stat-card">
-        <div class="stat-icon blue">
-          <i class="fas fa-file-alt"></i>
-        </div>
-        <div class="stat-content">
-          <div class="stat-value">{{ stats.total }}</div>
-          <div class="stat-label">总日志数</div>
-        </div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-icon red">
-          <i class="fas fa-exclamation-triangle"></i>
-        </div>
-        <div class="stat-content">
-          <div class="stat-value">{{ recentErrorCount }}</div>
-          <div class="stat-label">近 24 小时错误</div>
-        </div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-icon purple">
-          <i class="fas fa-cubes"></i>
-        </div>
-        <div class="stat-content">
-          <div class="stat-value">{{ activeModuleCount }}</div>
-          <div class="stat-label">活跃模块</div>
-        </div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-icon amber">
-          <i class="fas fa-list"></i>
-        </div>
-        <div class="stat-content">
-          <div class="stat-value">{{ logs.length }}</div>
-          <div class="stat-label">当前结果数</div>
-        </div>
-      </div>
+    <div v-if="stats" class="logs-stats">
+      <StatCard icon="fa-file-alt" :value="stats.total" label="总日志数" tone="blue" />
+      <StatCard icon="fa-exclamation-triangle" :value="stats.recent_errors" label="近 24 小时错误" tone="red" />
+      <StatCard icon="fa-cubes" :value="activeModuleCount" label="活跃模块" tone="purple" />
+      <StatCard icon="fa-list" :value="logs.length" label="本页结果数" tone="amber" />
     </div>
 
-    <div class="logs-controls">
-      <div class="controls-fields">
-        <div class="filter-item">
-          <label for="log-level-filter">级别</label>
-          <select id="log-level-filter" v-model="filters.level" @change="loadLogs">
-            <option value="">所有级别</option>
-            <option v-for="level in levels" :key="level.value" :value="level.value">
-              {{ level.emoji }} {{ level.name }}
-            </option>
-          </select>
+    <div class="logs-toolbar">
+      <div class="logs-filters">
+        <div class="logs-filter">
+          <label for="log-level">级别</label>
+          <AppSelect
+            id="log-level"
+            v-model="level"
+            :options="LOG_LEVELS.map((o) => ({ value: o.value, label: o.label }))"
+            @update:model-value="onFilterChange"
+          />
         </div>
-
-        <div class="filter-item">
-          <label for="log-module-filter">模块</label>
-          <select id="log-module-filter" v-model="filters.module" @change="loadLogs">
-            <option value="">所有模块</option>
-            <option v-for="module in modules" :key="module.value" :value="module.value">
-              {{ module.name }}
-            </option>
-          </select>
+        <div class="logs-filter">
+          <label for="log-module">模块</label>
+          <AppSelect
+            id="log-module"
+            v-model="module"
+            :options="LOG_MODULE_GROUPS.map((o) => ({ value: o.value, label: o.label }))"
+            @update:model-value="onFilterChange"
+          />
         </div>
-
-        <div class="filter-item">
-          <label for="log-period-filter">时间范围</label>
-          <select id="log-period-filter" v-model="filters.period" @change="loadLogs">
-            <option value="all">全部时间</option>
-            <option value="today">今天</option>
-            <option value="24h">近 24 小时</option>
-            <option value="7d">近 7 天</option>
-          </select>
+        <div class="logs-filter">
+          <label for="log-period">时间范围</label>
+          <AppSelect
+            id="log-period"
+            v-model="period"
+            :options="LOG_PERIODS.map((o) => ({ value: o.value, label: o.label }))"
+            @update:model-value="onFilterChange"
+          />
         </div>
-
-        <div class="filter-item search-item">
-          <label for="log-search">关键词</label>
-          <div class="search-box">
-            <i class="fas fa-search"></i>
-            <input
-              id="log-search"
-              v-model="filters.keyword"
-              type="text"
-              placeholder="搜索消息内容..."
-              @input="debouncedSearch"
-            >
-          </div>
+        <div class="logs-filter">
+          <label for="log-keyword">关键词</label>
+          <AppInput
+            id="log-keyword"
+            v-model="keyword"
+            placeholder="搜索消息内容…"
+            @update:model-value="onKeywordInput"
+          />
         </div>
       </div>
-
-      <div class="controls-actions">
+      <div class="logs-actions">
         <button
           type="button"
-          class="toolbar-btn icon-only primary"
+          class="logs-action-btn logs-action-btn--primary"
           :disabled="loading"
-          title="刷新日志"
+          title="刷新"
+          aria-label="刷新"
           @click="refreshAll"
         >
-          <i class="fas fa-sync-alt" :class="{ 'fa-spin': loading }"></i>
+          <span class="logs-action-btn__icon">
+            <SvgIcon :name="'fa-sync-alt'" :size="18" :class-name="loading ? 'logs-action-btn__icon-spin' : ''" />
+          </span>
         </button>
         <button
           type="button"
-          class="toolbar-btn icon-only"
-          title="重置筛选"
+          class="logs-action-btn"
+          title="重置"
+          aria-label="重置"
           @click="resetFilters"
         >
-          <i class="fas fa-undo-alt"></i>
+          <span class="logs-action-btn__icon"><SvgIcon name="fa-undo-alt" :size="18" /></span>
         </button>
         <button
           type="button"
-          class="toolbar-btn icon-only danger"
-          :disabled="cleanupLoading"
-          title="清理当前筛选日志"
-          @click="cleanupLogs"
+          class="logs-action-btn logs-action-btn--warning"
+          :disabled="cleaningKeepToday"
+          title="清理今天之外的"
+          aria-label="清理今天之外的"
+          @click="cleanupKeepToday"
         >
-          <i class="fas" :class="cleanupLoading ? 'fa-spinner fa-spin' : 'fa-eraser'"></i>
+          <span class="logs-action-btn__icon">
+            <SvgIcon
+              :name="cleaningKeepToday ? 'fa-sync-alt' : 'fa-eraser'"
+              :size="18"
+              :class-name="cleaningKeepToday ? 'logs-action-btn__icon-spin' : ''"
+            />
+          </span>
         </button>
         <button
           type="button"
-          class="toolbar-btn icon-only danger"
-          :disabled="clearAllLoading"
-          title="清空全部日志"
-          @click="clearAllLogs"
+          class="logs-action-btn logs-action-btn--danger"
+          :disabled="cleaningAll"
+          title="清理所有"
+          aria-label="清理所有"
+          @click="cleanupAllLogs"
         >
-          <i class="fas" :class="clearAllLoading ? 'fa-spinner fa-spin' : 'fa-trash-alt'"></i>
+          <span class="logs-action-btn__icon">
+            <SvgIcon
+              :name="cleaningAll ? 'fa-sync-alt' : 'fa-trash-alt'"
+              :size="18"
+              :class-name="cleaningAll ? 'logs-action-btn__icon-spin' : ''"
+            />
+          </span>
         </button>
       </div>
     </div>
 
-    <div class="logs-container">
-      <div v-if="loading" class="logs-state">
-        <i class="fas fa-spinner fa-spin"></i>
-        <span>正在加载日志...</span>
-      </div>
+    <div ref="logsPanelRef" class="logs-panel">
+      <AppStateBlock v-if="loading && logs.length === 0" message="正在加载日志…" loading min-height="360px" />
+      <AppStateBlock v-else-if="logs.length === 0" message="当前筛选条件下暂无日志" min-height="360px" />
+      <template v-else>
+        <div class="logs-list" :class="{ 'logs-list--loading': loading }">
+          <article
+            v-for="log in logs"
+            :key="log.id"
+            class="log-card"
+            :class="`log-card--${levelClass(log.level)}`"
+          >
+            <header class="log-card__head">
+              <div class="log-card__tags">
+                <AppBadge :tone="levelTone(log.level)">
+                  {{ log.level_emoji }} {{ log.level_name }}
+                </AppBadge>
+                <span
+                  class="log-badge log-badge--module"
+                  :style="{ '--module-color': log.module_color }"
+                >
+                  {{ log.module_name }}
+                </span>
+              </div>
+              <time class="log-card__time">{{ formatTime(log.timestamp) }}</time>
+            </header>
 
-      <div v-else-if="logs.length === 0" class="logs-state empty">
-        <i class="fas fa-inbox"></i>
-        <span>当前筛选条件下暂无日志</span>
-      </div>
+            <div class="log-card__message">{{ log.message }}</div>
 
-      <div v-else class="logs-list">
-        <article
-          v-for="log in logs"
-          :key="log.id"
-          class="log-card"
-          :class="getLogLevelClass(log.level)"
-        >
-          <header class="log-card-header">
-            <div class="log-card-main">
-              <span class="log-level-badge" :class="getLogLevelClass(log.level)">
-                {{ log.level_emoji }} {{ log.level_name }}
-              </span>
-              <span class="log-module-badge" :style="{ '--module-color': log.module_color }">
-                {{ log.module_name }}
-              </span>
+            <div v-if="log.driver_name || log.account_id" class="log-card__meta">
+              <span v-if="log.driver_name" class="log-meta-chip">驱动 {{ log.driver_name }}</span>
+              <span v-if="log.account_id" class="log-meta-chip">账号 {{ log.account_id }}</span>
             </div>
-            <time class="log-time">{{ formatDateTime(log.timestamp) }}</time>
-          </header>
 
-          <div class="log-message">{{ log.message }}</div>
-
-          <div v-if="log.driver_name || log.account_id" class="log-meta">
-            <span v-if="log.driver_name" class="meta-chip">
-              <i class="fas fa-plug"></i>
-              {{ log.driver_name }}
-            </span>
-            <span v-if="log.account_id" class="meta-chip">
-              <i class="fas fa-user-circle"></i>
-              账号 {{ log.account_id }}
-            </span>
-          </div>
-
-          <div v-if="log.details" class="log-details">
-            <button type="button" class="details-toggle" @click="toggleExpanded(log.id)">
-              <span>{{ expandedLogIds.has(log.id) ? '收起详细信息' : '查看详细信息' }}</span>
-              <i class="fas" :class="expandedLogIds.has(log.id) ? 'fa-chevron-up' : 'fa-chevron-down'"></i>
-            </button>
-            <pre v-if="expandedLogIds.has(log.id)" class="details-content">{{ formatDetails(log.details) }}</pre>
-          </div>
-        </article>
-      </div>
+            <div v-if="canShowDetails(log)" class="log-card__details">
+              <button type="button" class="log-card__details-toggle" @click="toggleDetails(log.id)">
+                <span>{{ expanded.has(log.id) ? "收起详细信息" : "查看详细信息" }}</span>
+                <span>{{ expanded.has(log.id) ? "▲" : "▼" }}</span>
+              </button>
+              <pre v-if="expanded.has(log.id)" class="log-card__details-pre">{{ detailsText(log) }}</pre>
+            </div>
+          </article>
+        </div>
+        <nav v-if="page > 1 || hasMore" class="logs-pagination" aria-label="日志分页">
+          <button
+            type="button"
+            class="logs-pagination__button"
+            :disabled="page <= 1 || loading"
+            @click="changePage(page - 1)"
+          >
+            上一页
+          </button>
+          <span class="logs-pagination__current" aria-live="polite">第 {{ page }} 页</span>
+          <button
+            type="button"
+            class="logs-pagination__button"
+            :disabled="!hasMore || loading"
+            @click="changePage(page + 1)"
+          >
+            下一页
+          </button>
+        </nav>
+      </template>
     </div>
   </div>
 </template>
-
-<script setup>
-import { computed, onMounted, ref } from 'vue'
-import axios from 'axios'
-import { useModal } from '../../composables/useModal'
-import { formatDateTime } from '../../utils/format.js'
-
-const logs = ref([])
-const stats = ref(null)
-const levels = ref([])
-const modules = ref([])
-const loading = ref(false)
-const cleanupLoading = ref(false)
-const clearAllLoading = ref(false)
-const expandedLogIds = ref(new Set())
-const { confirm } = useModal()
-
-const filters = ref({
-  level: '',
-  module: '',
-  period: 'all',
-  keyword: ''
-})
-
-const activeModuleCount = computed(() => {
-  if (!stats.value?.by_module) return 0
-  return Object.keys(stats.value.by_module).length
-})
-
-const recentErrorCount = computed(() => stats.value?.recent_errors || 0)
-
-let searchTimeout = null
-
-const getTimeRange = () => {
-  const now = new Date()
-
-  if (filters.value.period === 'today') {
-    const start = new Date(now)
-    start.setHours(0, 0, 0, 0)
-    return { start_time: start.toISOString() }
-  }
-
-  if (filters.value.period === '24h') {
-    return {
-      start_time: new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString()
-    }
-  }
-
-  if (filters.value.period === '7d') {
-    return {
-      start_time: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString()
-    }
-  }
-
-  return {}
-}
-
-const buildLogQueryParams = () => {
-  const params = {
-    ...getTimeRange()
-  }
-  if (filters.value.level) params.level = Number(filters.value.level)
-  if (filters.value.module) params.module = filters.value.module
-  if (filters.value.keyword.trim()) params.keyword = filters.value.keyword.trim()
-  return params
-}
-
-const hasActiveFilters = () => {
-  const params = buildLogQueryParams()
-  return Object.keys(params).length > 0
-}
-
-const loadLogs = async () => {
-  loading.value = true
-  try {
-    const response = await axios.get('/api/logs/', { params: buildLogQueryParams() })
-    logs.value = response.data
-  } catch (error) {
-    console.error('加载日志失败:', error)
-    window.appNotification?.error('加载日志失败')
-  } finally {
-    loading.value = false
-  }
-}
-
-const loadStats = async () => {
-  try {
-    const response = await axios.get('/api/logs/stats')
-    stats.value = response.data
-  } catch (error) {
-    console.error('加载日志统计失败:', error)
-  }
-}
-
-const loadOptions = async () => {
-  try {
-    const [levelsRes, modulesRes] = await Promise.all([
-      axios.get('/api/logs/levels'),
-      axios.get('/api/logs/modules')
-    ])
-    levels.value = levelsRes.data
-    modules.value = modulesRes.data
-  } catch (error) {
-    console.error('加载日志选项失败:', error)
-  }
-}
-
-const refreshAll = async () => {
-  await Promise.all([loadStats(), loadLogs()])
-}
-
-const cleanupLogs = async () => {
-  const activeFilters = hasActiveFilters()
-  try {
-    await confirm({
-      title: activeFilters ? '清理筛选日志' : '清理全部日志',
-      content: activeFilters
-        ? '确定要清理当前筛选条件匹配的日志吗？此操作无法恢复。'
-        : '当前没有筛选条件，将清空全部日志。确定继续吗？此操作无法恢复。',
-      confirmText: '清理',
-      confirmClass: 'btn-danger',
-      icon: 'trash'
-    })
-
-    cleanupLoading.value = true
-    const response = await axios.delete('/api/logs/filtered', { params: buildLogQueryParams() })
-    window.appNotification?.success(response.data?.message || '日志已清理')
-    expandedLogIds.value = new Set()
-    await refreshAll()
-  } catch (error) {
-    if (error.message !== 'Modal closed') {
-      console.error('清理日志失败:', error)
-      window.appNotification?.error('清理日志失败')
-    }
-  } finally {
-    cleanupLoading.value = false
-  }
-}
-
-const clearAllLogs = async () => {
-  try {
-    await confirm({
-      title: '清空全部日志',
-      content: '确定要清空全部日志吗？此操作会删除所有日志文件，且无法恢复。',
-      confirmText: '清空',
-      confirmClass: 'btn-danger',
-      icon: 'trash'
-    })
-
-    clearAllLoading.value = true
-    const response = await axios.delete('/api/logs/cleanup', {
-      params: { days: 0 }
-    })
-    window.appNotification?.success(response.data?.message || '日志已清空')
-    expandedLogIds.value = new Set()
-    await refreshAll()
-  } catch (error) {
-    if (error.message !== 'Modal closed') {
-      console.error('清空日志失败:', error)
-      window.appNotification?.error('清空日志失败')
-    }
-  } finally {
-    clearAllLoading.value = false
-  }
-}
-
-const resetFilters = async () => {
-  filters.value = {
-    level: '',
-    module: '',
-    period: 'all',
-    keyword: ''
-  }
-  expandedLogIds.value = new Set()
-  await refreshAll()
-}
-
-const debouncedSearch = () => {
-  clearTimeout(searchTimeout)
-  searchTimeout = setTimeout(() => {
-    loadLogs()
-  }, 350)
-}
-
-const toggleExpanded = (logId) => {
-  const next = new Set(expandedLogIds.value)
-  if (next.has(logId)) {
-    next.delete(logId)
-  } else {
-    next.add(logId)
-  }
-  expandedLogIds.value = next
-}
-
-const getLogLevelClass = (level) => {
-  const classes = {
-    10: 'debug',
-    20: 'info',
-    30: 'warning',
-    40: 'error',
-    50: 'critical'
-  }
-  return classes[level] || 'info'
-}
-
-
-
-
-const formatDetails = (details) => JSON.stringify(details, null, 2)
-
-onMounted(async () => {
-  await Promise.all([
-    loadOptions(),
-    loadStats(),
-    loadLogs()
-  ])
-})
-</script>
-
-<style scoped>
-.logs-page {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-
-.toolbar-btn {
-  height: 40px;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 16px;
-  border: 1px solid #dbe4f0;
-  border-radius: 10px;
-  background: #ffffff;
-  color: #334155;
-  cursor: pointer;
-  font-size: 14px;
-  font-weight: 600;
-  transition: all 0.2s ease;
-}
-
-.toolbar-btn:hover {
-  background: #f8fafc;
-  border-color: #cbd5e1;
-}
-
-.toolbar-btn.primary {
-  border-color: #c7d8ff;
-  background: #eef4ff;
-  color: #2f5fd0;
-}
-
-.toolbar-btn.primary:hover {
-  background: #e4eeff;
-}
-
-.toolbar-btn.danger {
-  color: #c2410c;
-  border-color: #fed7aa;
-  background: #fff7ed;
-}
-
-.toolbar-btn.danger:hover {
-  background: #ffedd5;
-  border-color: #fdba74;
-}
-
-.toolbar-btn:disabled {
-  opacity: 0.7;
-  cursor: not-allowed;
-}
-
-.toolbar-btn.icon-only {
-  width: 40px;
-  padding: 0;
-  justify-content: center;
-  flex: 0 0 auto;
-}
-
-.stats-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 16px;
-}
-
-.stat-card {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 20px 22px;
-  border-radius: 18px;
-  background: #ffffff;
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
-}
-
-.stat-icon {
-  width: 46px;
-  height: 46px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 14px;
-  color: #ffffff;
-  font-size: 18px;
-}
-
-.stat-icon.blue {
-  background: linear-gradient(135deg, #4c74df, #02a6f0);
-}
-
-.stat-icon.red {
-  background: linear-gradient(135deg, #ef4444, #f97316);
-}
-
-.stat-icon.purple {
-  background: linear-gradient(135deg, #7c3aed, #4f46e5);
-}
-
-.stat-icon.amber {
-  background: linear-gradient(135deg, #f59e0b, #f97316);
-}
-
-.stat-content {
-  min-width: 0;
-}
-
-.stat-value {
-  font-size: 26px;
-  font-weight: 700;
-  line-height: 1;
-  color: #111827;
-}
-
-.stat-label {
-  margin-top: 6px;
-  font-size: 13px;
-  color: #64748b;
-}
-
-.logs-controls {
-  display: flex;
-  align-items: stretch;
-  justify-content: space-between;
-  gap: 18px;
-  padding: 20px;
-  border-radius: 18px;
-  background: #ffffff;
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
-}
-
-.controls-fields {
-  flex: 1;
-  min-width: 0;
-  display: grid;
-  grid-template-columns: 160px 160px 170px minmax(260px, 1fr);
-  gap: 14px;
-}
-
-.controls-actions {
-  width: auto;
-  display: flex;
-  align-items: flex-end;
-  justify-content: flex-end;
-  gap: 10px;
-}
-
-.filter-item {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.filter-item label {
-  font-size: 13px;
-  font-weight: 600;
-  color: #475569;
-}
-
-.filter-item select,
-.search-box {
-  height: 42px;
-  border: 1px solid #dbe4f0;
-  border-radius: 10px;
-  background: #ffffff;
-}
-
-.filter-item select {
-  padding: 0 12px;
-  color: #334155;
-  font-size: 14px;
-  outline: none;
-}
-
-.search-box {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 0 12px;
-  color: #94a3b8;
-}
-
-.search-box input {
-  width: 100%;
-  border: none;
-  background: transparent;
-  outline: none;
-  color: #334155;
-  font-size: 14px;
-}
-
-.logs-container {
-  min-height: 360px;
-  border-radius: 20px;
-  background: #ffffff;
-  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
-  overflow: hidden;
-}
-
-.logs-state {
-  min-height: 360px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  color: #64748b;
-  font-size: 15px;
-}
-
-.logs-state i {
-  font-size: 24px;
-}
-
-.logs-state.empty i {
-  color: #94a3b8;
-}
-
-.logs-list {
-  display: flex;
-  flex-direction: column;
-}
-
-.log-card {
-  padding: 20px 24px;
-  border-bottom: 1px solid #eef2f7;
-  transition: background-color 0.18s ease;
-}
-
-.log-card:last-child {
-  border-bottom: none;
-}
-
-.log-card:hover {
-  background: #fafcff;
-}
-
-.log-card.warning {
-  background-image: linear-gradient(90deg, rgba(245, 158, 11, 0.08), transparent 36%);
-}
-
-.log-card.error,
-.log-card.critical {
-  background-image: linear-gradient(90deg, rgba(239, 68, 68, 0.08), transparent 36%);
-}
-
-.log-card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 16px;
-  margin-bottom: 12px;
-}
-
-.log-card-main {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.log-level-badge,
-.log-module-badge,
-.meta-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 28px;
-  padding: 0 10px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.log-level-badge.debug {
-  background: #eef2ff;
-  color: #4f46e5;
-}
-
-.log-level-badge.info {
-  background: #eff6ff;
-  color: #2563eb;
-}
-
-.log-level-badge.warning {
-  background: #fff7ed;
-  color: #c2410c;
-}
-
-.log-level-badge.error,
-.log-level-badge.critical {
-  background: #fef2f2;
-  color: #dc2626;
-}
-
-.log-module-badge {
-  background: #f8fafc;
-  color: var(--module-color);
-}
-
-.log-module-badge::before {
-  content: '';
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  background: var(--module-color);
-}
-
-.log-time {
-  font-size: 13px;
-  color: #64748b;
-  white-space: nowrap;
-}
-
-.log-message {
-  font-size: 14px;
-  line-height: 1.8;
-  color: #1f2937;
-  word-break: break-word;
-}
-
-.log-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 14px;
-}
-
-.meta-chip {
-  background: #f8fafc;
-  color: #475569;
-}
-
-.log-details {
-  margin-top: 14px;
-}
-
-.details-toggle {
-  width: 100%;
-  height: 38px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 0 14px;
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
-  background: #f8fafc;
-  color: #334155;
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.details-content {
-  margin: 10px 0 0;
-  padding: 14px 16px;
-  border-radius: 12px;
-  background: #0f172a;
-  color: #e2e8f0;
-  font-size: 12px;
-  line-height: 1.6;
-  overflow-x: auto;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-@media (max-width: 1100px) {
-  .logs-controls {
-    flex-direction: column;
-  }
-
-  .controls-fields {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .controls-actions {
-    width: 100%;
-    justify-content: flex-start;
-  }
-}
-
-@media (max-width: 768px) {
-  .stats-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .logs-controls {
-    padding: 16px;
-  }
-
-  .controls-fields {
-    grid-template-columns: 1fr;
-  }
-
-  .controls-actions,
-  .log-card-header {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .controls-actions {
-    align-items: flex-start;
-  }
-
-  .log-time {
-    white-space: normal;
-  }
-}
-</style>

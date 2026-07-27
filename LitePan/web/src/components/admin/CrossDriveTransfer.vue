@@ -1,64 +1,88 @@
 <template>
   <div class="cross-transfer">
-    <div class="flow-grid">
-      <div
-        v-for="r in routes"
-        :key="r.id"
-        class="flow-card"
-        :class="{ active: activeId === r.id }"
-        @click="selectRoute(r)"
+    <div class="flow-rail">
+      <button
+        v-show="flowHasOverflow"
+        type="button"
+        class="flow-nav flow-nav--prev"
+        :disabled="!flowCanScrollPrev"
+        aria-label="向左浏览秒传线路"
+        @click="scrollFlowRoutes(-1)"
       >
-        <div class="fc-body">
-          <div class="fc-slot">
-            <div class="fc-link">
-              <span class="fc-logo"><img :src="r.from.logo" :alt="r.from.name" @error="hideImg"></span>
-              <div class="fc-pulse-track">
-                <span v-if="r.bidirectional" class="fc-tri fc-tri-both">
-                  <i class="fas fa-arrows-rotate"></i>
-                </span>
-                <span v-else class="fc-tri">
-                  <i class="fas fa-chevron-right"></i>
-                  <i class="fas fa-chevron-right"></i>
-                  <i class="fas fa-chevron-right"></i>
-                  <i class="fas fa-chevron-right"></i>
-                  <i class="fas fa-chevron-right"></i>
-                </span>
+        <i class="fas fa-chevron-left"></i>
+      </button>
+
+      <div ref="flowGridRef" class="flow-grid" @scroll.passive="updateFlowScrollState">
+        <div
+          v-for="r in routes"
+          :key="r.id"
+          class="flow-card"
+          :class="{ active: activeId === r.id }"
+          @click="selectRoute(r)"
+        >
+          <div class="fc-body">
+            <div class="fc-slot">
+              <div class="fc-link">
+                <span class="fc-logo"><img :src="r.from.logo" :alt="r.from.name" @error="hideImg"></span>
+                <div class="fc-pulse-track">
+                  <span v-if="r.bidirectional" class="fc-tri fc-tri-both">
+                    <i class="fas fa-arrows-rotate"></i>
+                  </span>
+                  <span v-else class="fc-tri">
+                    <i class="fas fa-chevron-right"></i>
+                    <i class="fas fa-chevron-right"></i>
+                    <i class="fas fa-chevron-right"></i>
+                    <i class="fas fa-chevron-right"></i>
+                    <i class="fas fa-chevron-right"></i>
+                  </span>
+                </div>
+                <span class="fc-logo"><img :src="r.to.logo" :alt="r.to.name" @error="hideImg"></span>
               </div>
-              <span class="fc-logo"><img :src="r.to.logo" :alt="r.to.name" @error="hideImg"></span>
+            </div>
+            <div class="fc-meta">
+              <span class="fc-pill" :class="{ md5: r.method === 'md5' }">
+                <i class="fas fa-fingerprint"></i>
+                <span>{{ r.method_label }}</span>
+                <span v-if="r.bidirectional" class="biflag">双向</span>
+              </span>
             </div>
           </div>
-          <div class="fc-meta">
-            <span class="fc-pill" :class="{ md5: r.method === 'md5' }">
-              <i class="fas fa-fingerprint"></i>
-              <span>{{ r.method_label }}</span>
-              <span v-if="r.bidirectional" class="biflag">双向</span>
-            </span>
+        </div>
+
+        <div class="flow-card disabled" @click="notify('warning', '更多组合规划中')">
+          <div class="fc-body">
+            <div class="fc-slot">
+              <div class="fc-link">
+                <span class="fc-logo placeholder"><i class="fas fa-ellipsis"></i></span>
+                <div class="fc-pulse-track">
+                  <span class="fc-tri fc-tri-plain"><i class="fas fa-plus"></i></span>
+                </div>
+                <span class="fc-logo placeholder"><i class="fas fa-cloud"></i></span>
+              </div>
+            </div>
+            <div class="fc-meta">
+              <span class="fc-pill muted">
+                <span class="fc-pill-left">
+                  <i class="fas fa-screwdriver-wrench"></i>
+                  <span>更多组合</span>
+                </span>
+                <span class="fc-soon">规划中</span>
+              </span>
+            </div>
           </div>
         </div>
       </div>
 
-      <div class="flow-card disabled" @click="notify('warning', '更多组合规划中')">
-        <div class="fc-body">
-          <div class="fc-slot">
-            <div class="fc-link">
-              <span class="fc-logo placeholder"><i class="fas fa-ellipsis"></i></span>
-              <div class="fc-pulse-track">
-                <span class="fc-tri fc-tri-plain"><i class="fas fa-plus"></i></span>
-              </div>
-              <span class="fc-logo placeholder"><i class="fas fa-cloud"></i></span>
-            </div>
-          </div>
-          <div class="fc-meta">
-            <span class="fc-pill muted">
-              <span class="fc-pill-left">
-                <i class="fas fa-screwdriver-wrench"></i>
-                <span>更多组合</span>
-              </span>
-              <span class="fc-soon">规划中</span>
-            </span>
-          </div>
-        </div>
-      </div>
+      <button
+        v-show="flowHasOverflow"
+        type="button"
+        class="flow-nav flow-nav--next"
+        :disabled="!flowCanScrollNext"
+        aria-label="向右浏览秒传线路"
+        @click="scrollFlowRoutes(1)"
+      >
+        <i class="fas fa-chevron-right"></i>
+      </button>
     </div>
 
     <div class="transfer-shell">
@@ -111,10 +135,10 @@
             <span>{{ scanSummary.text }}</span>
           </div>
           <CrossTransferTree v-if="srcTree && srcTree.length" :nodes="srcTree" mode="src" :depth="0" />
-          <div v-else-if="!phaseStatus" class="tree-empty">选择源目录并试探后显示文件结构</div>
+          <div v-else-if="!phaseStatus" class="tree-empty">选择源目录后，扫描/试探会在此显示文件与秒传状态</div>
           <div v-if="phaseStatus && (!srcTree || !srcTree.length)" class="tree-phase-fill">
             <div class="tree-phase-card">
-              <i class="fas fa-spinner fa-spin tree-phase-spin"></i>
+              <BusySpinner class="tree-phase-spin" :size="22" color="var(--primary-color)" />
               <p class="tree-phase-title">{{ phaseStatus }}</p>
               <p v-if="isScanPhase" class="tree-phase-sub">{{ isBaiduMd5Route ? '扫描仅列目录，指纹在试探阶段从下载响应头获取' : '子目录较多时需等待片刻，请勿关闭页面' }}</p>
               <div v-if="isScanPhase" class="tree-phase-bar"><div class="tree-phase-bar-indeterminate"></div></div>
@@ -159,7 +183,7 @@
 
         <div class="ct-footer-center">
           <div v-if="showProgressBar" class="ft-center-progress">
-            <p v-if="running === 'probe'" class="ft-prog-hint">使用临时目录探测，结束后自动清理</p>
+            <p v-if="running === 'probe'" class="ft-prog-hint">正在检测目标盘；支持预判时不会实际转存</p>
             <div class="ft-prog-row">
               <div class="ft-track"><i :style="{ width: barWidth + '%' }"></i></div>
               <span class="ft-pct">{{ barWidth }}%</span>
@@ -216,11 +240,19 @@
                       <button
                         type="button"
                         class="ct-settings-opt"
+                        :class="{ active: effectiveConflict === 'skip' }"
+                        :disabled="targetSkipUnsupported"
+                        :title="targetSkipUnsupported ? `${dstName}不支持跳过` : '目标已有同名文件时不再传输'"
+                        @click="targetSkipUnsupported ? null : (conflict = 'skip')"
+                      >跳过</button>
+                      <button
+                        type="button"
+                        class="ct-settings-opt"
                         :class="{ active: effectiveConflict === 'rename' }"
                         :disabled="targetRenameUnsupported"
                         :title="targetRenameUnsupported ? `${dstName}不支持自动重命名` : ''"
                         @click="targetRenameUnsupported ? null : (conflict = 'rename')"
-                      >自动重命名</button>
+                      >重命名</button>
                       <button
                         type="button"
                         class="ct-settings-opt"
@@ -230,7 +262,16 @@
                         @click="targetOverwriteUnsupported ? null : (conflict = 'overwrite')"
                       >覆盖</button>
                     </div>
-                    <p v-if="targetOverwriteUnsupported" class="ct-settings-fallback-hint">
+                    <p v-if="effectiveConflict === 'skip'" class="ct-settings-fallback-hint">
+                      同名文件不再传输。
+                    </p>
+                    <p v-else-if="effectiveConflict === 'rename'" class="ct-settings-fallback-hint">
+                      同名文件自动改名。
+                    </p>
+                    <p v-else-if="effectiveConflict === 'overwrite'" class="ct-settings-fallback-hint">
+                      同名文件直接覆盖。
+                    </p>
+                    <p v-else-if="targetOverwriteUnsupported" class="ct-settings-fallback-hint">
                       {{ dstName }}不支持覆盖，同名文件将自动重命名。
                     </p>
                     <p v-else-if="targetRenameUnsupported" class="ct-settings-fallback-hint">
@@ -253,8 +294,8 @@
                         @click="fallback = 'on'"
                       >开启</button>
                     </div>
-                    <p v-if="fallback === 'on'" class="ct-settings-fallback-hint">
-                      开启兜底后，未命中文件由服务器从源盘下载后上传到目标盘。
+                    <p class="ct-settings-fallback-hint">
+                      {{ fallback === 'on' ? '未命中时中转上传。' : '只执行秒传匹配。' }}
                     </p>
                   </div>
                 </div>
@@ -282,19 +323,39 @@
         </div>
       </div>
     </div>
+
+    <FolderPickerModal
+      :open="pickerOpen"
+      selectable-account
+      :accounts="pickerAccounts"
+      :account-id="pickerInitialAccountId"
+      :initial-path="pickerInitialPath"
+      :title="pickerMode === 'src' ? '选择源目录' : '选择目标目录'"
+      show-refresh
+      @close="pickerOpen = false"
+      @resolve="onPickerResolve"
+    />
+
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
-import { useRouter } from 'vue-router'
-import axios from 'axios'
-import { useModal } from '../../composables/useModal'
-import CrossTransferTree from './CrossTransferTree.vue'
-import CrossTransferPickerModal from './CrossTransferPickerModal.vue'
-import CrossTransferProbeNoticeDialog from './CrossTransferProbeNoticeDialog.vue'
+import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from "vue";
+import { useRouter } from "vue-router";
+import CrossTransferTree from "./CrossTransferTree.vue";
+import BusySpinner from "@/components/base/BusySpinner.vue";
+import FolderPickerModal from "@/components/file/FolderPickerModal.vue";
+import { accountsApi } from "@/api/accounts";
+import {
+  executeCrossTransferStream,
+  listCrossTransferRoutes,
+  probeCrossTransferStream,
+  scanCrossTransferSource,
+} from "@/api/crossTransfer";
+import { useConfirm } from "@/composables/useConfirm";
+import { toast } from "@/composables/useToast";
 
-const { custom, confirm } = useModal()
+const { confirm, showConfirm } = useConfirm();
 
 const SOFT_FOLDER_LIMIT = 10
 const router = useRouter()
@@ -303,7 +364,7 @@ const CT_SETTINGS_STORAGE_KEY = 'litepan:cross-transfer:settings'
 const CT_PROBE_NOTICE_KEY = 'litepan:cross-transfer:probe-notice-dismissed'
 const FOOTER_TIP_INTERVAL_MS = 6000
 const footerScrollTips = [
-  { text: '先试探可避免覆盖误操作；临时目录结束后自动清理。点击查看说明。', action: 'probe-notice' },
+  { text: '支持预判的网盘只查询命中；其余网盘通过临时目录试传。点击查看说明。', action: 'probe-notice' },
   { text: '建议每次只选一部影片、一季或少量文件夹，子目录多请分批传输。' },
   { text: '大部分网盘接口不返回sha1或其他哈希值，暂时无法匹配秒传方案。' },
 ]
@@ -311,6 +372,11 @@ const footerScrollTips = [
 const routes = ref([])
 const activeId = ref('')
 const swapped = ref(false)
+const flowGridRef = ref(null)
+const flowHasOverflow = ref(false)
+const flowCanScrollPrev = ref(false)
+const flowCanScrollNext = ref(false)
+let flowResizeObserver = null
 
 const src = ref(null)
 const dst = ref(null)
@@ -318,14 +384,14 @@ const srcTree = ref(null)
 const dstTree = ref(null)
 const probeFiles = ref([])
 
-const conflict = ref('rename')
+const conflict = ref('skip')
 const fallback = ref('off')
 const settingsOpen = ref(false)
 const settingsMenuRef = ref(null)
 const settingsTriggerRef = ref(null)
 const settingsDropdownRef = ref(null)
 const settingsDropdownStyle = ref({})
-const SETTINGS_DROPDOWN_WIDTH = 296
+const SETTINGS_DROPDOWN_WIDTH = 304
 const footerTipIndex = ref(0)
 let footerTipTimer = null
 const running = ref('')
@@ -335,6 +401,12 @@ const metrics = reactive({ total: 0, ok: 0, no: 0, done: 0 })
 const relayNotice = ref(null)
 const phaseStatus = ref('')
 const scanSummary = ref(null)
+
+const pickerOpen = ref(false)
+const pickerMode = ref('src')
+const pickerAccounts = ref([])
+const pickerInitialAccountId = ref(null)
+const pickerInitialPath = ref('')
 
 const relayTasksHref = computed(() => (
   router.resolve({ path: '/', query: { taskPanel: 'relay' } }).href
@@ -369,11 +441,13 @@ const dstMeta = computed(() => {
 const dstName = computed(() => dstMeta.value?.name || '目标盘')
 const dstConflictPolicies = computed(() => {
   const p = dstMeta.value?.conflict_policies
-  return Array.isArray(p) && p.length ? p : ['rename', 'overwrite']
+  return Array.isArray(p) && p.length ? p : ['skip', 'rename', 'overwrite']
 })
+const targetSkipUnsupported = computed(() => !dstConflictPolicies.value.includes('skip'))
 const targetOverwriteUnsupported = computed(() => !dstConflictPolicies.value.includes('overwrite'))
 const targetRenameUnsupported = computed(() => !dstConflictPolicies.value.includes('rename'))
 const effectiveConflict = computed(() => {
+  if (conflict.value === 'skip' && targetSkipUnsupported.value) return 'rename'
   if (conflict.value === 'overwrite' && targetOverwriteUnsupported.value) return 'rename'
   if (conflict.value === 'rename' && targetRenameUnsupported.value) return 'overwrite'
   return conflict.value
@@ -394,7 +468,7 @@ function accountsFor(driver) {
 }
 
 const hideImg = (e) => { e.target.style.display = 'none' }
-const notify = (type, msg) => { window.appNotification?.[type]?.(msg) }
+const notify = (type, msg) => { toast[type](msg) }
 
 function clearRelayNotice() {
   relayNotice.value = null
@@ -448,21 +522,22 @@ function clearProbeNoticeSkipped() {
 }
 
 async function openProbeNoticeDialog() {
-  const result = await custom({
-    title: '',
-    size: 'medium',
-    closable: false,
-    hideFooter: true,
-    component: CrossTransferProbeNoticeDialog,
-    componentProps: {
-      skipChecked: isProbeNoticeDismissed(),
-    },
-  }).catch(() => null)
-
-  if (!result?.confirmed) return false
-  if (result.skipNextTime) markProbeNoticeSkipped()
-  else clearProbeNoticeSkipped()
-  return true
+  try {
+    const result = await showConfirm({
+      title: "试探秒传流程：",
+      preset: "cross-transfer-probe-notice",
+      checkboxLabel: "不再提示",
+      checkboxDefault: isProbeNoticeDismissed(),
+      showCancel: false,
+      danger: false,
+      actions: [{ id: "confirm", label: "我知道了，继续", variant: "primary" }],
+    })
+    if (result.checked) markProbeNoticeSkipped()
+    else clearProbeNoticeSkipped()
+    return result.action === "confirm"
+  } catch {
+    return false
+  }
 }
 
 async function confirmProbeNotice() {
@@ -494,16 +569,40 @@ async function confirmLargeBatch(scan) {
   if (folders <= SOFT_FOLDER_LIMIT) return true
   try {
     await confirm({
-      title: '子文件夹较多',
-      content: `所选目录下一至二级共有 ${folders} 个子文件夹（共 ${files} 个文件）。递归扫描需逐个目录请求，继续可能较慢。建议每次只选一部影片或一个子目录。`,
-      confirmText: '继续',
-      cancelText: '取消',
-      hideCancelButton: false,
-    })
+      title: "子文件夹较多",
+      message: `所选目录下一至二级共有 ${folders} 个子文件夹（共 ${files} 个文件）。递归扫描需逐个目录请求，继续可能较慢。建议每次只选一部影片或一个子目录。`,
+      confirmText: "继续",
+      cancelText: "取消",
+      danger: false,
+    });
     return true
   } catch {
     return false
   }
+}
+
+function collectTreeFilePaths(nodes) {
+  const paths = []
+  const walk = (list) => {
+    for (const n of list || []) {
+      if (n.type === 'dir') walk(n.children)
+      else if (n.rel_path) paths.push(n.rel_path)
+    }
+  }
+  walk(nodes)
+  return paths
+}
+
+function orderFilesByTree(fileList) {
+  const fileMap = {}
+  fileList.forEach(f => { fileMap[f.rel_path] = f })
+  const fileSet = new Set(fileList.map(f => f.rel_path))
+  const orderedPaths = collectTreeFilePaths(srcTree.value).filter(p => fileSet.has(p))
+  const seen = new Set(orderedPaths)
+  for (const f of fileList) {
+    if (!seen.has(f.rel_path)) orderedPaths.push(f.rel_path)
+  }
+  return orderedPaths.map(p => fileMap[p]).filter(Boolean)
 }
 
 function createFileRunContext(fileList) {
@@ -517,7 +616,12 @@ function createFileRunContext(fileList) {
   walk(srcTree.value)
   const fileMap = {}
   fileList.forEach(f => { fileMap[f.rel_path] = f })
-  const orderedPaths = fileList.map(f => f.rel_path)
+  const fileSet = new Set(fileList.map(f => f.rel_path))
+  const orderedPaths = collectTreeFilePaths(srcTree.value).filter(p => fileSet.has(p))
+  const seen = new Set(orderedPaths)
+  for (const f of fileList) {
+    if (!seen.has(f.rel_path)) orderedPaths.push(f.rel_path)
+  }
   const setNodeRun = (relPath, run) => {
     const node = nodeMap[relPath]
     if (!node) return
@@ -556,44 +660,39 @@ function stopRun() {
 }
 
 async function openPicker(mode) {
-  const driver = mode === 'src' ? srcDriver.value : dstDriver.value
-  const panName = panOf(driver).name || driver
-  const accs = accountsFor(driver)
+  const driver = mode === "src" ? srcDriver.value : dstDriver.value;
+  const panName = panOf(driver).name || driver;
+  const accs = accountsFor(driver);
   if (!accs.length) {
-    notify('warning', `没有可用的${panName}账号，请先到「存储管理」添加`)
-    return
+    notify("warning", `没有可用的${panName}账号，请先到「存储管理」添加`);
+    return;
   }
-  const cur = mode === 'src' ? src.value : dst.value
-  try {
-    const result = await custom({
-      title: '',
-      size: null,
-      closable: false,
-      hideFooter: true,
-      bodyClass: 'modal-body-flush',
-      component: CrossTransferPickerModal,
-      componentProps: {
-        mode,
-        panName,
-        accounts: accs,
-        initialAccId: cur?.accId || accs[0]?.id || '',
-        initialPath: cur?.path || ''
-      }
-    })
-    if (!result) return
-    const sel = { accId: result.accId, accName: result.accName, parentId: result.parentId, path: result.path }
-    if (mode === 'src') {
-      src.value = sel
-      srcTree.value = null
-      probeFiles.value = []
-      scanSummary.value = null
-    } else {
-      dst.value = sel
-    }
-    dstTree.value = null
-    resetMetrics()
-  } catch (e) {
+  const cur = mode === "src" ? src.value : dst.value;
+  pickerMode.value = mode;
+  pickerAccounts.value = accs;
+  pickerInitialAccountId.value = Number(cur?.accId || accs[0]?.id || 0) || null;
+  pickerInitialPath.value = cur?.path || "";
+  pickerOpen.value = true;
+}
+
+function onPickerResolve(payload) {
+  pickerOpen.value = false;
+  const sel = {
+    accId: payload.accountId,
+    accName: payload.accountName,
+    parentId: payload.parentId,
+    path: payload.path,
+  };
+  if (pickerMode.value === "src") {
+    src.value = sel;
+    srcTree.value = null;
+    probeFiles.value = [];
+    scanSummary.value = null;
+  } else {
+    dst.value = sel;
   }
+  dstTree.value = null;
+  resetMetrics();
 }
 
 async function scanSource(clearTree = true) {
@@ -605,20 +704,15 @@ async function scanSource(clearTree = true) {
   }
   phaseStatus.value = '正在扫描源目录…'
   try {
-    const resp = await axios.post('/api/cross-transfer/scan', {
-      source_account_id: src.value.accId,
+    const scan = await scanCrossTransferSource({
+      source_account_id: Number(src.value.accId),
       source_parent_id: src.value.parentId,
-      source_display_path: src.value.path || '',
+      source_display_path: src.value.path || "",
       method: curRoute.value.method,
-    }, { signal: abortCtrl.value?.signal })
-    if (!resp.data || !resp.data.success) {
-      notify('error', resp.data?.message || '扫描失败')
-      return null
-    }
-    const scan = resp.data.data
+    });
     decorateTree(scan.tree)
     srcTree.value = scan.tree
-    probeFiles.value = scan.files || []
+    probeFiles.value = orderFilesByTree(scan.files || [])
     metrics.total = scan.total
     if (clearTree) {
       metrics.ok = 0
@@ -630,8 +724,8 @@ async function scanSource(clearTree = true) {
     if (running.value) phaseStatus.value = ''
     return scan
   } catch (e) {
-    if (axios.isCancel?.(e) || e?.name === 'CanceledError') return null
-    notify('error', '扫描失败: ' + (e.response?.data?.message || e.message))
+    if (e?.name === 'CanceledError' || e?.name === 'AbortError') return null
+    notify('error', '扫描失败: ' + (e?.message || e))
     return null
   } finally {
     if (!running.value) phaseStatus.value = ''
@@ -658,7 +752,8 @@ async function probe() {
     return
   }
 
-  const { nodeMap, fileMap, orderedPaths, setNodeRun, clearAllRun, scrollToFile } = createFileRunContext(probeFiles.value)
+  const orderedProbeFiles = orderFilesByTree(probeFiles.value)
+  const { nodeMap, fileMap, orderedPaths, setNodeRun, clearAllRun, scrollToFile } = createFileRunContext(orderedProbeFiles)
   if (orderedPaths.length) {
     setNodeRun(orderedPaths[0], true)
     scrollToFile(orderedPaths[0])
@@ -666,82 +761,63 @@ async function probe() {
 
   let processed = 0
   const probeErrors = new Set()
+  let streamError = ''
   try {
-    const resp = await fetch('/api/cross-transfer/probe', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'same-origin',
-      signal: abortCtrl.value?.signal,
-      body: JSON.stringify({
-        source_account_id: src.value.accId,
-        target_account_id: dst.value.accId,
-        target_parent_id: dst.value.parentId,
-        method: curRoute.value.method,
-        files: probeFiles.value.map(f => ({
-          source_file_id: f.source_file_id,
-          rel_path: f.rel_path,
-          name: f.name,
-          size: f.size,
-          hash: f.hash,
-        }))
-      })
-    })
-    if (!resp.ok || !resp.body) {
-      notify('error', `试探失败 (HTTP ${resp.status})`)
-      return
-    }
-    const reader = resp.body.getReader()
-    const decoder = new TextDecoder()
-    let buffer = ''
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
-      let idx
-      while ((idx = buffer.indexOf('\n')) >= 0) {
-        const line = buffer.slice(0, idx).trim()
-        buffer = buffer.slice(idx + 1)
-        if (!line) continue
-        let msg
-        try { msg = JSON.parse(line) } catch { continue }
-        if (msg.event === 'hashing') {
-          const relPath = msg.rel_path
-          if (relPath) {
-            setNodeRun(relPath, true)
-            scrollToFile(relPath)
-          }
-        } else if (msg.event === 'item') {
-          const relPath = msg.rel_path
-          const node = nodeMap[relPath]
-          if (msg.hash) {
-            const f = fileMap[relPath]
-            if (f) f.hash = msg.hash
-          }
-          setNodeRun(relPath, false)
-          if (node) {
-            node.reuse = msg.reuse
-            delete node.state
-          }
-          const f = fileMap[relPath]
-          if (f) f.reuse = msg.reuse
-          if (msg.error) probeErrors.add(msg.error)
-          if (msg.reuse) metrics.ok++; else metrics.no++
-          processed++
-          barWidth.value = metrics.total ? Math.round(processed / metrics.total * 100) : 0
-          const nextPath = orderedPaths[processed]
-          if (nextPath) {
-            setNodeRun(nextPath, true)
-            scrollToFile(nextPath)
-          }
-        } else if (msg.event === 'end') {
-          metrics.ok = msg.ok
-          metrics.no = msg.no
-        } else if (msg.event === 'error') {
-          notify('error', msg.message || '试探失败')
+    for await (const msg of probeCrossTransferStream({
+      source_account_id: src.value.accId,
+      target_account_id: dst.value.accId,
+      target_parent_id: dst.value.parentId,
+      method: curRoute.value.method,
+      files: orderedProbeFiles.map((f) => ({
+        source_file_id: f.source_file_id,
+        rel_path: f.rel_path,
+        name: f.name,
+        size: f.size,
+        hash: f.hash,
+      })),
+    }, abortCtrl.value?.signal)) {
+      if (msg.event === "hashing") {
+        const relPath = String(msg.rel_path || "");
+        if (relPath) {
+          setNodeRun(relPath, true);
+          scrollToFile(relPath);
         }
+      } else if (msg.event === "item") {
+        const relPath = String(msg.rel_path || "");
+        const node = nodeMap[relPath];
+        if (msg.hash) {
+          const f = fileMap[relPath];
+          if (f) f.hash = String(msg.hash);
+          if (node) node.hash = String(msg.hash);
+        }
+        setNodeRun(relPath, false);
+        if (node) {
+          node.reuse = msg.reuse;
+          delete node.state;
+        }
+        const f = fileMap[relPath];
+        if (f) f.reuse = msg.reuse;
+        if (msg.error) probeErrors.add(String(msg.error));
+        if (msg.reuse) metrics.ok++;
+        else metrics.no++;
+        processed++;
+        barWidth.value = metrics.total ? Math.round((processed / metrics.total) * 100) : 0;
+        const nextPath = orderedPaths[processed];
+        if (nextPath) {
+          setNodeRun(nextPath, true);
+          scrollToFile(nextPath);
+        }
+      } else if (msg.event === "end") {
+        metrics.ok = Number(msg.ok || 0);
+        metrics.no = Number(msg.no || 0);
+      } else if (msg.event === "error") {
+        streamError = String(msg.message || "试探失败")
+        notify("error", streamError)
       }
     }
-    if (probeErrors.size) {
+    if (streamError) {
+      return
+    } else if (probeErrors.size) {
       const detail = Array.from(probeErrors).slice(0, 2).join('；')
       notify('warning', `目标盘试探报错：${detail}（可秒传 ${metrics.ok}/${metrics.total}，其余可能为未命中或受目标盘限制）`)
     } else {
@@ -781,7 +857,7 @@ async function start() {
     }
   }
 
-  const files = probeFiles.value.filter(f => f.hash || f.source_file_id)
+  const files = orderFilesByTree(probeFiles.value.filter(f => f.hash || f.source_file_id))
   if (!files.length) {
     notify('warning', '没有可处理的文件')
     running.value = ''
@@ -789,7 +865,7 @@ async function start() {
     return
   }
 
-  const { nodeMap, orderedPaths, setNodeRun, clearAllRun, scrollToFile } = createFileRunContext(files)
+  const { nodeMap, fileMap, orderedPaths, setNodeRun, clearAllRun, scrollToFile } = createFileRunContext(files)
   if (orderedPaths.length) {
     setNodeRun(orderedPaths[0], true)
     scrollToFile(orderedPaths[0])
@@ -799,108 +875,97 @@ async function start() {
   let processed = 0
   barWidth.value = 20
   try {
-    const resp = await fetch('/api/cross-transfer/execute', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'same-origin',
-      signal: abortCtrl.value?.signal,
-      body: JSON.stringify({
-        source_account_id: src.value.accId,
-        source_account_name: src.value.accName,
-        source_driver_type: srcDriver.value,
-        target_account_id: dst.value.accId,
-        target_account_name: dst.value.accName,
-        target_driver_type: dstDriver.value,
-        target_parent_id: dst.value.parentId,
-        target_display_path: dst.value.path,
-        method: curRoute.value.method,
-        files: files.map(f => ({
-          source_file_id: f.source_file_id,
-          rel_path: f.rel_path,
-          rel_dir: f.rel_dir,
-          name: f.name,
-          size: f.size,
-          hash: f.hash,
-        })),
-        conflict: effectiveConflict.value,
-        fallback: fallback.value === 'on',
-      }),
-    })
-    if (!resp.ok || !resp.body) {
-      notify('error', `传输失败 (HTTP ${resp.status})`)
-      return
-    }
-    const reader = resp.body.getReader()
-    const decoder = new TextDecoder()
-    let buffer = ''
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
-      let idx
-      while ((idx = buffer.indexOf('\n')) >= 0) {
-        const line = buffer.slice(0, idx).trim()
-        buffer = buffer.slice(idx + 1)
-        if (!line) continue
-        let msg
-        try { msg = JSON.parse(line) } catch { continue }
-        if (msg.event === 'start') {
-          metrics.done = 0
-        } else if (msg.event === 'item') {
-          const relPath = msg.rel_path
-          const item = msg
-          allResults.push({
-            rel_path: item.rel_path,
-            name: item.name,
-            success: item.success,
-            mode: item.mode,
-            file_id: item.file_id,
-            error: item.error,
-          })
-          setNodeRun(relPath, false)
-          const node = nodeMap[relPath]
-          if (node) {
-            if (item.mode === 'rapid' && item.success) {
-              node.transferred = true
-              delete node.relay
-            } else if (item.mode === 'relay') {
-              node.relay = true
-            }
-            delete node.state
+    for await (const msg of executeCrossTransferStream({
+      source_account_id: src.value.accId,
+      source_account_name: src.value.accName,
+      source_driver_type: srcDriver.value,
+      target_account_id: dst.value.accId,
+      target_account_name: dst.value.accName,
+      target_driver_type: dstDriver.value,
+      target_parent_id: dst.value.parentId,
+      target_display_path: dst.value.path,
+      method: curRoute.value.method,
+      files: files.map(f => ({
+        source_file_id: f.source_file_id,
+        rel_path: f.rel_path,
+        rel_dir: f.rel_dir,
+        name: f.name,
+        size: f.size,
+        hash: f.hash,
+      })),
+      conflict: effectiveConflict.value,
+      fallback: fallback.value === 'on',
+    }, abortCtrl.value?.signal)) {
+      if (msg.event === 'start') {
+        metrics.done = 0
+      } else if (msg.event === 'item') {
+        const relPath = msg.rel_path
+        allResults.push({
+          rel_path: msg.rel_path,
+          name: msg.name,
+          success: msg.success,
+          mode: msg.mode,
+          file_id: msg.file_id,
+          error: msg.error,
+        })
+        setNodeRun(relPath, false)
+        const node = nodeMap[relPath]
+        const file = fileMap[relPath]
+        if (node) {
+          if (msg.mode === 'rapid' && msg.success) {
+            node.reuse = true
+            node.transferred = true
+            delete node.relay
+            delete node.skipped
+          } else if (msg.mode === 'rapid') {
+            node.reuse = false
+            delete node.transferred
+            delete node.relay
+            delete node.skipped
+          } else if (msg.mode === 'relay') {
+            node.relay = true
+            delete node.skipped
+          } else if (msg.mode === 'skip' && msg.success) {
+            node.skipped = true
+            delete node.relay
           }
-          if (item.mode === 'rapid' && item.success) {
-            metrics.done++
-            applyTransferResults([item])
-          }
-          processed++
-          barWidth.value = files.length ? Math.round(20 + processed / files.length * 75) : 100
-          const nextPath = orderedPaths[processed]
-          if (nextPath) {
-            setNodeRun(nextPath, true)
-            scrollToFile(nextPath)
-          }
-        } else if (msg.event === 'end') {
-          metrics.done = msg.rapid_done ?? msg.done ?? metrics.done
-          metrics.ok = metrics.done
-          metrics.no = Math.max(0, files.length - metrics.done - (msg.relay_queued || 0))
-          const rapidResults = allResults.filter(r => r.mode === 'rapid' && r.success)
-          buildDstTree(rapidResults, files)
-          markRelayQueued(allResults)
-          barWidth.value = 100
-          const relayQueued = msg.relay_queued || 0
-          const message = `秒传完成 ${metrics.done}/${files.length}`
-          if (relayQueued > 0) {
-            relayNotice.value = {
-              rapidDone: metrics.done,
-              total: files.length,
-              relayQueued,
-            }
-          } else {
-            notify(metrics.done === files.length ? 'success' : 'warning', message)
-          }
-        } else if (msg.event === 'error') {
-          notify('error', msg.message || '传输失败')
+          delete node.state
         }
+        if (file && msg.mode === 'rapid') file.reuse = Boolean(msg.success)
+        if (msg.mode === 'rapid' && msg.success) {
+          metrics.done++
+          applyTransferResults([msg])
+        }
+        processed++
+        barWidth.value = files.length ? Math.round(20 + processed / files.length * 75) : 100
+        const nextPath = orderedPaths[processed]
+        if (nextPath) {
+          setNodeRun(nextPath, true)
+          scrollToFile(nextPath)
+        }
+      } else if (msg.event === 'end') {
+        metrics.done = msg.rapid_done ?? msg.done ?? metrics.done
+        metrics.ok = metrics.done
+        const skipped = allResults.filter(r => r.mode === 'skip' && r.success).length
+        metrics.no = Math.max(0, files.length - metrics.done - (msg.relay_queued || 0) - skipped)
+        const rapidResults = allResults.filter(r => r.mode === 'rapid' && r.success)
+        buildDstTree(rapidResults, files)
+        markRelayQueued(allResults)
+        barWidth.value = 100
+        const relayQueued = msg.relay_queued || 0
+        const skipText = skipped > 0 ? `，跳过 ${skipped}` : ''
+        const message = `秒传完成 ${metrics.done}/${files.length}${skipText}`
+        if (relayQueued > 0) {
+          relayNotice.value = {
+            rapidDone: metrics.done,
+            total: files.length,
+            relayQueued,
+          }
+        } else {
+          notify(metrics.done === files.length ? 'success' : 'warning', message)
+        }
+      } else if (msg.event === 'error') {
+        notify('error', msg.message || '传输失败')
       }
     }
   } catch (e) {
@@ -917,8 +982,14 @@ async function start() {
 
 function decorateTree(nodes) {
   for (const n of nodes || []) {
-    if (n.type === 'dir') { n.open = true; decorateTree(n.children) }
-    else { n.transferred = false }
+    if (n.type === 'dir') {
+      n.open = true
+      decorateTree(n.children)
+    } else {
+      n.transferred = false
+      delete n.skipped
+      if (n.eligible && n.reuse == null) delete n.reuse
+    }
   }
 }
 function markRelayQueued(results) {
@@ -983,23 +1054,44 @@ function reset() {
   resetMetrics()
 }
 
+function normalizeRouteDirection(route) {
+  if (!route?.bidirectional || route.from?.driver !== '123_open') return route
+  return { ...route, from: route.to, to: route.from }
+}
+
+function updateFlowScrollState() {
+  const el = flowGridRef.value
+  if (!el) return
+  const maxScroll = Math.max(0, el.scrollWidth - el.clientWidth)
+  const hasOverflow = maxScroll > 2
+  if (flowHasOverflow.value !== hasOverflow) {
+    flowHasOverflow.value = hasOverflow
+    nextTick(updateFlowScrollState)
+  }
+  flowCanScrollPrev.value = el.scrollLeft > 2
+  flowCanScrollNext.value = el.scrollLeft < maxScroll - 2
+}
+
+function scrollFlowRoutes(direction) {
+  flowGridRef.value?.scrollBy({ left: direction * 440, behavior: 'smooth' })
+}
+
 async function loadRoutes() {
   try {
-    const resp = await axios.get('/api/cross-transfer/routes')
-    if (resp.data && resp.data.success) {
-      routes.value = resp.data.data || []
-      if (routes.value.length && !activeId.value) activeId.value = routes.value[0].id
-    }
+    routes.value = (await listCrossTransferRoutes()).map(normalizeRouteDirection)
+    if (routes.value.length && !activeId.value) activeId.value = routes.value[0].id
+    await nextTick()
+    flowGridRef.value?.scrollTo({ left: 0 })
+    updateFlowScrollState()
   } catch (e) {
-    notify('error', '获取线路失败: ' + (e.response?.data?.message || e.message))
+    notify('error', '获取线路失败: ' + (e instanceof Error ? e.message : String(e)))
   }
 }
 async function loadAccounts() {
   try {
-    const resp = await axios.get('/api/admin/accounts')
-    if (resp.data && resp.data.success) accounts.value = resp.data.data || []
+    accounts.value = await accountsApi.list()
   } catch (e) {
-    notify('error', '获取账号失败: ' + (e.response?.data?.message || e.message))
+    notify('error', '获取账号失败: ' + (e instanceof Error ? e.message : String(e)))
   }
 }
 
@@ -1008,7 +1100,7 @@ function loadCtSettings() {
     const raw = localStorage.getItem(CT_SETTINGS_STORAGE_KEY)
     if (!raw) return
     const data = JSON.parse(raw)
-    if (data.conflict === 'rename' || data.conflict === 'overwrite') conflict.value = data.conflict
+    if (data.conflict === 'skip' || data.conflict === 'rename' || data.conflict === 'overwrite') conflict.value = data.conflict
     if (data.fallback === 'on' || data.fallback === 'off') fallback.value = data.fallback
   } catch {
   }
@@ -1029,8 +1121,9 @@ function updateSettingsDropdownPos() {
   if (!trigger) return
   const rect = trigger.getBoundingClientRect()
   const gap = 8
+  const center = rect.left + rect.width / 2
   const left = Math.min(
-    Math.max(8, rect.right - SETTINGS_DROPDOWN_WIDTH),
+    Math.max(8, center - SETTINGS_DROPDOWN_WIDTH / 2),
     window.innerWidth - SETTINGS_DROPDOWN_WIDTH - 8
   )
   settingsDropdownStyle.value = {
@@ -1062,6 +1155,15 @@ function onSettingsReposition() {
 }
 
 watch([conflict, fallback], saveCtSettings)
+watch(targetSkipUnsupported, (unsupported) => {
+  if (unsupported && conflict.value === 'skip') conflict.value = 'rename'
+})
+watch(targetOverwriteUnsupported, (unsupported) => {
+  if (unsupported && conflict.value === 'overwrite') conflict.value = 'rename'
+})
+watch(targetRenameUnsupported, (unsupported) => {
+  if (unsupported && conflict.value === 'rename') conflict.value = 'overwrite'
+})
 watch(showFooterScrollTips, (show) => {
   if (show) startFooterTipTimer()
   else stopFooterTipTimer()
@@ -1074,50 +1176,133 @@ onMounted(() => {
   document.addEventListener('click', onDocClick)
   window.addEventListener('scroll', onSettingsReposition, true)
   window.addEventListener('resize', onSettingsReposition)
+  window.addEventListener('resize', updateFlowScrollState)
+  nextTick(() => {
+    updateFlowScrollState()
+    if (typeof ResizeObserver === 'undefined' || !flowGridRef.value) return
+    flowResizeObserver = new ResizeObserver(updateFlowScrollState)
+    flowResizeObserver.observe(flowGridRef.value)
+  })
 })
 onUnmounted(() => {
   stopFooterTipTimer()
+  flowResizeObserver?.disconnect()
   document.removeEventListener('click', onDocClick)
   window.removeEventListener('scroll', onSettingsReposition, true)
   window.removeEventListener('resize', onSettingsReposition)
+  window.removeEventListener('resize', updateFlowScrollState)
 })
 </script>
 
 <style scoped>
 .cross-transfer {
-  color: var(--text-main);
+  color: var(--text);
+  --card-bg: var(--surface);
+  --app-bg: var(--bg);
+  --border-color: var(--border);
+  --text-main: var(--text);
+  --text-secondary: var(--text-muted);
+  --text-regular: var(--text-regular);
+  --primary-color: var(--brand);
+  --primary-color-end: var(--brand-end);
   --fc-pill-bg: rgba(76,116,223,.1);
   --fc-pill-fg: #2952cc;
   --fc-pill-md5-bg: rgba(124,58,237,.1);
   --fc-pill-md5-fg: #6d28d9;
 }
 
+.flow-rail {
+  position: relative;
+}
 .flow-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  display: flex;
+  flex-wrap: nowrap;
   gap: 10px;
+  padding: 8px 4px 10px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-behavior: smooth;
+  overscroll-behavior-inline: contain;
+  scrollbar-width: none;
+}
+.flow-grid::-webkit-scrollbar {
+  display: none;
+}
+.flow-nav {
+  position: absolute;
+  z-index: 6;
+  top: 50%;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--primary-color) 24%, var(--border-color));
+  border-radius: var(--radius-pill);
+  background: var(--card-bg);
+  color: var(--primary-color);
+  box-shadow: var(--shadow-soft);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%);
+  transition: color .16s ease, background .16s ease, opacity .16s ease, transform .16s ease;
+}
+.flow-nav--prev { left: 10px; }
+.flow-nav--next { right: 10px; }
+.flow-rail:hover .flow-nav:not(:disabled),
+.flow-rail:focus-within .flow-nav:not(:disabled) {
+  opacity: 1;
+  pointer-events: auto;
+}
+.flow-nav:hover:not(:disabled) {
+  background: var(--primary-color);
+  color: #fff;
+  transform: translateY(-50%) scale(1.06);
+}
+.flow-nav:disabled {
+  opacity: 0;
+  cursor: default;
+}
+.flow-nav i {
+  font-size: 12px;
 }
 .flow-card {
-  position: relative; border-radius: 14px; background: var(--card-bg); cursor: pointer; user-select: none; overflow: hidden;
-  border: 1px solid var(--border-color); box-shadow: 0 6px 18px rgba(15,23,42,.05); outline: 2px solid transparent;
+  flex: 0 0 210px;
+  width: 210px;
+  height: 72px;
+  box-sizing: border-box;
+  position: relative; border-radius: var(--radius-lg); background: var(--card-bg); cursor: pointer; user-select: none; overflow: hidden;
+  border: 1px solid var(--border-color); box-shadow: var(--shadow-soft); outline: 2px solid transparent;
   transition: box-shadow .18s ease, outline-color .18s ease, transform .18s ease;
 }
-.flow-card:hover { transform: translateY(-1px); box-shadow: 0 10px 26px rgba(15,23,42,.1); }
-.flow-card.active { outline-color: var(--primary-color); box-shadow: 0 10px 28px rgba(76,116,223,.18); }
+.flow-card:hover { transform: translateY(-1px); box-shadow: var(--shadow-soft); }
+.flow-card.active { outline-color: var(--primary-color); box-shadow: var(--shadow-soft); }
 .flow-card.disabled { opacity: .55; cursor: not-allowed; transform: none; }
-.fc-body { display: flex; flex-direction: column; }
+.fc-body { height: 100%; display: flex; flex-direction: column; }
 .fc-slot {
-  padding: 9px 10px 7px;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background: color-mix(in srgb, var(--app-bg) 55%, var(--card-bg));
   border-bottom: 1px solid var(--border-color);
 }
-.fc-link { display: flex; align-items: center; justify-content: center; gap: 12px; }
+.fc-link {
+  display: grid;
+  grid-template-columns: 30px 56px 30px;
+  align-items: center;
+  justify-content: center;
+  column-gap: 12px;
+}
 .fc-logo { width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; flex: 0 0 auto; }
-.fc-logo img { width: 30px; height: 30px; object-fit: contain; border-radius: 8px; }
-.fc-logo.placeholder { width: 30px; height: 30px; border-radius: 8px; background: var(--app-bg); color: var(--text-secondary); font-size: 13px; display: flex; align-items: center; justify-content: center; }
+.fc-logo img { width: 30px; height: 30px; object-fit: contain; border-radius: var(--radius-sm); }
+.fc-logo.placeholder { width: 30px; height: 30px; border-radius: var(--radius-sm); background: var(--app-bg); color: var(--text-secondary); font-size: 13px; display: flex; align-items: center; justify-content: center; }
 .fc-pulse-track {
-  flex: 0 0 auto; display: flex; align-items: center; justify-content: center;
-  min-height: 20px; padding: 0 4px;
+  width: 56px; min-height: 20px; padding: 0;
+  display: flex; align-items: center; justify-content: center;
 }
 .fc-tri { display: inline-flex; align-items: center; gap: 2px; }
 .fc-tri i { font-size: 8px; color: var(--primary-color); line-height: 1; opacity: .35; display: inline-block; }
@@ -1144,9 +1329,9 @@ onUnmounted(() => {
 .flow-card.active .fc-tri-both i { opacity: .9; animation: fc-both-spin 2.6s linear infinite; }
 @keyframes fc-both-spin { to { transform: rotate(360deg); } }
 .fc-tri-plain i { font-size: 9px; color: var(--text-secondary); opacity: .42; }
-.fc-meta { width: 100%; }
+.fc-meta { flex: 0 0 25px; width: 100%; min-height: 0; }
 .fc-pill {
-  width: 100%; font-size: 11px; font-weight: 600; padding: 6px 8px; border-radius: 0 0 13px 13px;
+  width: 100%; height: 100%; box-sizing: border-box; font-size: 11px; font-weight: 600; padding: 0 8px; border-radius: 0;
   display: flex; align-items: center; justify-content: center; gap: 5px;
   background: var(--fc-pill-bg); color: var(--fc-pill-fg);
 }
@@ -1155,35 +1340,18 @@ onUnmounted(() => {
 .fc-pill.muted { background: var(--app-bg); color: var(--text-secondary); justify-content: space-between; }
 .fc-pill-left { display: inline-flex; align-items: center; gap: 5px; }
 .fc-soon { font-size: 10px; color: var(--text-secondary); }
-.biflag { font-size: 9px; font-weight: 700; color: #7c3aed; background: rgba(124,58,237,.14); padding: 1px 6px; border-radius: 999px; margin-left: 2px; }
+.biflag { font-size: 9px; font-weight: 700; color: #7c3aed; background: rgba(124,58,237,.14); padding: 1px 6px; border-radius: var(--radius-pill); margin-left: 2px; }
 
 .logo-chip { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; }
-.logo-chip img { object-fit: contain; border-radius: 7px; }
+.logo-chip img { object-fit: contain; border-radius: var(--radius-sm); }
 .logo-chip.s26 { width: 26px; height: 26px; } .logo-chip.s26 img { width: 26px; height: 26px; }
-.logo-chip.s30 { width: 30px; height: 30px; } .logo-chip.s30 img { width: 30px; height: 30px; }
-
-.ct-usage-inline-hint {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  border-radius: 10px;
-  border: 1px solid rgba(76,116,223,.14);
-  background: rgba(76,116,223,.06);
-  color: var(--text-secondary);
-  font-size: 13px;
-  line-height: 1.35;
-  min-width: 0;
-}
-.ct-usage-inline-hint i { color: var(--primary-color); flex-shrink: 0; }
-.ct-usage-inline-hint > span { min-width: 0; }
 
 .transfer-shell {
   margin-top: 10px;
   background: var(--card-bg);
   border: 1px solid var(--border-color);
-  border-radius: 16px;
-  box-shadow: 0 6px 18px rgba(15,23,42,.05);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-soft);
   overflow: hidden;
 }
 .transfer-topbar {
@@ -1201,7 +1369,7 @@ onUnmounted(() => {
 .tb-title span { display: block; font-weight: 700; font-size: 14px; line-height: 1.25; }
 .tb-title small { display: block; font-size: 11px; font-weight: 500; color: var(--text-secondary); }
 .tb-title-dst { text-align: right; }
-.panel-role { flex-shrink: 0; font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 999px; }
+.panel-role { flex-shrink: 0; font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: var(--radius-pill); }
 .tb-src .panel-role { background: rgba(76,116,223,.12); color: #2952cc; }
 .dst-role { background: rgba(255,140,66,.16); color: #c2410c; }
 .tb-mid {
@@ -1217,7 +1385,7 @@ onUnmounted(() => {
 .tb-flow {
   width: 32px;
   height: 32px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   display: grid;
   place-items: center;
   font-size: 12px;
@@ -1228,7 +1396,7 @@ onUnmounted(() => {
 .tb-swap {
   width: 32px;
   height: 32px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   border: 1px solid rgba(76,116,223,.14);
   background: rgba(76,116,223,.08);
   color: var(--primary-color);
@@ -1246,19 +1414,42 @@ onUnmounted(() => {
 .transfer-body { display: grid; grid-template-columns: 1fr 1fr; align-items: stretch; }
 .panel { background: var(--card-bg); min-width: 0; overflow: hidden; display: flex; flex-direction: column; }
 .panel.src { border-right: 1px solid var(--border-color); }
-.panel-pick { padding: 12px 16px; border-bottom: 1px solid var(--border-color); }
-.combo { width: 100%; border: none; border-radius: 10px; padding: 11px 14px; background: var(--app-bg); color: var(--text-main); font-size: 14px; cursor: pointer; display: flex; align-items: center; gap: 10px; text-align: left; transition: background .15s; }
+.panel-pick { padding: 12px 16px; border-bottom: 1px solid var(--border-color); box-sizing: border-box; }
+.combo {
+  width: 100%;
+  height: 40px;
+  box-sizing: border-box;
+  border: none;
+  border-radius: var(--radius-md);
+  padding: 0 14px;
+  background: var(--app-bg);
+  color: var(--text-main);
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+  transition: background .15s;
+}
 .combo:hover { background: rgba(127,127,127,.12); }
-.combo .c-ic { color: var(--primary-color); flex: 0 0 auto; }
-.combo .c-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.combo .c-ic { color: var(--primary-color); flex: 0 0 auto; line-height: 1; }
+.combo .c-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 20px;
+}
 .combo .c-text.placeholder { color: var(--text-secondary); }
-.combo .c-caret { color: var(--text-secondary); flex: 0 0 auto; }
+.combo .c-caret { color: var(--text-secondary); flex: 0 0 auto; line-height: 1; }
 .tree { padding: 6px; height: 300px; overflow: auto; }
 .tree-host { position: relative; }
 .tree-empty { color: var(--text-secondary); padding: 28px 12px; text-align: center; }
 .tree-scan-banner {
   display: flex; align-items: flex-start; gap: 8px;
-  margin: 4px 6px 8px; padding: 8px 10px; border-radius: 10px;
+  margin: 4px 6px 8px; padding: 8px 10px; border-radius: var(--radius-md);
   font-size: 12px; line-height: 1.45; color: var(--text-secondary);
   background: rgba(76,116,223,.06); border: 1px solid rgba(76,116,223,.12);
 }
@@ -1268,22 +1459,21 @@ onUnmounted(() => {
 .tree-phase-fill {
   position: absolute; inset: 0; z-index: 2;
   display: flex; align-items: center; justify-content: center;
-  background: color-mix(in srgb, var(--card-bg) 82%, transparent);
-  backdrop-filter: blur(1px);
+  background: color-mix(in srgb, var(--card-bg) 88%, transparent);
 }
 .tree-phase-card {
   display: flex; flex-direction: column; align-items: center; gap: 8px;
   max-width: 240px; padding: 8px 12px; text-align: center;
 }
-.tree-phase-spin { font-size: 22px; color: var(--primary-color); }
+.tree-phase-spin { color: var(--primary-color); }
 .tree-phase-title { margin: 0; font-size: 14px; font-weight: 600; color: var(--text-main); }
 .tree-phase-sub { margin: 0; font-size: 12px; line-height: 1.45; color: var(--text-secondary); }
 .tree-phase-bar {
-  width: 160px; height: 4px; border-radius: 999px; overflow: hidden;
+  width: 160px; height: 4px; border-radius: var(--radius-pill); overflow: hidden;
   background: var(--app-bg); border: 1px solid var(--border-color);
 }
 .tree-phase-bar-indeterminate {
-  width: 40%; height: 100%; border-radius: 999px;
+  width: 40%; height: 100%; border-radius: var(--radius-pill);
   background: linear-gradient(90deg, var(--primary-color), var(--primary-color-end));
   animation: ct-scan-bar 1.2s ease-in-out infinite;
 }
@@ -1295,8 +1485,8 @@ onUnmounted(() => {
   margin-top: 10px;
   background: linear-gradient(180deg, var(--card-bg), color-mix(in srgb, var(--app-bg) 40%, var(--card-bg)));
   border: 1px solid var(--border-color);
-  border-radius: 16px;
-  box-shadow: 0 6px 18px rgba(15,23,42,.05);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-soft);
   overflow: visible;
 }
 .ct-footer-bar {
@@ -1340,7 +1530,7 @@ onUnmounted(() => {
   min-width: 0;
   border: 1px solid rgba(76,116,223,.14);
   background: rgba(76,116,223,.06);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   padding: 6px 10px;
   color: var(--text-secondary);
   font-size: 13px;
@@ -1402,14 +1592,14 @@ onUnmounted(() => {
 .ft-track {
   flex: 1;
   height: 2px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: #dde3ea;
   overflow: hidden;
 }
 .ft-track > i {
   display: block;
   height: 100%;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: #16a34a;
   transition: width .18s ease;
 }
@@ -1427,10 +1617,10 @@ onUnmounted(() => {
   gap: 6px;
   padding: 4px;
   flex-shrink: 0;
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   background: var(--card-bg);
   border: 1px solid var(--border-color);
-  box-shadow: 0 2px 8px rgba(15,23,42,.06);
+  box-shadow: var(--shadow-soft);
 }
 .footer-island .ct-settings-trigger { border: none; background: transparent; box-shadow: none; }
 .ct-relay-inline-hint {
@@ -1438,7 +1628,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 6px;
   padding: 6px 10px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   border: 1px solid rgba(37, 99, 235, .18);
   background: rgba(37, 99, 235, .06);
   color: #2563eb;
@@ -1461,23 +1651,27 @@ onUnmounted(() => {
 }
 .ct-settings-menu { position: relative; flex: 0 0 auto; }
 .ct-settings-trigger {
-  width: 38px; height: 38px; border: 1px solid var(--border-color); border-radius: 10px;
+  width: 38px; height: 38px; border: 1px solid var(--border-color); border-radius: var(--radius-md);
   background: var(--card-bg); color: var(--text-secondary); cursor: pointer;
   display: inline-flex; align-items: center; justify-content: center;
 }
 .ct-settings-trigger:hover { color: var(--primary-color); border-color: rgba(76,116,223,.35); }
 .ct-settings-dropdown {
-  padding: 14px; border-radius: 14px;
-  background: var(--card-bg); border: 1px solid var(--border-color);
-  box-shadow: 0 12px 32px rgba(15,23,42,.14);
+  padding: 12px;
+  border-radius: var(--radius-lg);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--surface) 92%, #fff), var(--surface));
+  border: 1px solid var(--border);
+  box-shadow: 0 14px 34px rgba(15,23,42,.14), 0 2px 8px rgba(15,23,42,.07);
 }
 .ct-settings-dropdown-portal {
   position: fixed;
+  z-index: 2000;
 }
 .ct-settings-panel {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
 .ct-settings-block {
   display: flex;
@@ -1486,36 +1680,40 @@ onUnmounted(() => {
 }
 .ct-settings-label {
   font-size: 12px;
-  font-weight: 600;
-  color: var(--text-secondary);
+  font-weight: 700;
+  color: var(--text-muted);
 }
 .ct-settings-seg {
   display: flex;
-  gap: 0;
+  gap: 3px;
   padding: 3px;
-  border-radius: 10px;
-  background: var(--app-bg);
-  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg) 86%, var(--surface));
+  border: 1px solid var(--border);
 }
 .ct-settings-opt {
   flex: 1;
   height: 32px;
   border: none;
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--text-secondary);
-  font-size: 13px;
+  color: var(--text-muted);
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   transition: background .15s ease, color .15s ease, box-shadow .15s ease;
 }
 .ct-settings-opt:hover:not(.active) {
-  color: var(--text-main);
+  color: var(--text);
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
 }
 .ct-settings-opt.active {
-  background: var(--card-bg);
-  color: var(--primary-color);
-  box-shadow: 0 1px 4px rgba(15,23,42,.08);
+  background: var(--surface);
+  color: var(--brand);
+  box-shadow: 0 1px 5px rgba(15,23,42,.1);
 }
 .ct-settings-opt:disabled {
   cursor: not-allowed;
@@ -1523,16 +1721,16 @@ onUnmounted(() => {
 }
 .ct-settings-fallback-hint {
   margin: 0;
-  font-size: 12px;
-  line-height: 1.45;
-  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-muted);
 }
 
-.ct-btn { display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px; border: 1px solid var(--border-color); border-radius: 10px; background: var(--card-bg); color: var(--text-regular); font-size: 14px; font-weight: 600; cursor: pointer; transition: filter .2s, opacity .2s; white-space: nowrap; }
+.ct-btn { display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--card-bg); color: var(--text-regular); font-size: 14px; font-weight: 600; cursor: pointer; transition: filter .2s, opacity .2s; white-space: nowrap; }
 .ct-btn:disabled { opacity: .5; cursor: not-allowed; }
-.ct-btn-primary { background: linear-gradient(135deg, var(--primary-color), var(--primary-color-end)); border-color: transparent; color: #fff; box-shadow: 0 2px 6px rgba(76,116,223,.22); }
+.ct-btn-primary { background: linear-gradient(135deg, var(--primary-color), var(--primary-color-end)); border-color: transparent; color: #fff; box-shadow: var(--shadow-brand); }
 .ct-btn-primary:not(:disabled):hover { filter: brightness(1.06); }
-.ct-btn-go { background: linear-gradient(135deg, #16a34a, #22c55e); border-color: transparent; color: #fff; box-shadow: 0 2px 6px rgba(22,163,74,.22); }
+.ct-btn-go { background: linear-gradient(135deg, #16a34a, #22c55e); border-color: transparent; color: #fff; box-shadow: var(--shadow-brand); }
 .ct-btn-go:not(:disabled):hover { filter: brightness(1.06); }
 .ct-btn-danger { background: rgba(239,68,68,.1); border-color: rgba(239,68,68,.3); color: #dc2626; }
 .ct-btn-danger:not(:disabled):hover { background: rgba(239,68,68,.18); }
@@ -1544,12 +1742,69 @@ onUnmounted(() => {
   --fc-pill-md5-fg: #c4b5fd;
 }
 
-@media (min-width: 1400px) {
-  .flow-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+:global(:root[data-theme="dark"]) .ct-settings-dropdown-portal {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--surface) 92%, #1f2937), var(--surface));
+  border-color: color-mix(in srgb, var(--border) 80%, #fff);
+  box-shadow: 0 18px 42px rgba(0,0,0,.42), 0 2px 8px rgba(0,0,0,.24);
 }
-@media (max-width: 720px) {
-  .flow-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+:global(:root[data-skin="brutal"]) .flow-nav {
+  border: var(--brutal-bw) solid var(--brutal-ink);
+  border-radius: 0;
+  background: #fff;
+  color: var(--brutal-ink);
+  box-shadow: 3px 3px 0 var(--brutal-ink);
 }
+
+:global(:root[data-skin="brutal"]) .flow-nav:hover:not(:disabled) {
+  background: var(--brutal-yellow);
+  color: var(--brutal-ink);
+}
+
+:global(:root[data-skin="brutal"]) .ct-settings-dropdown-portal {
+  border: var(--brutal-bw) solid var(--brutal-ink);
+  border-radius: 0;
+  background: #fff;
+  color: var(--brutal-ink);
+  box-shadow: 4px 4px 0 var(--brutal-ink);
+}
+
+:global(:root[data-skin="brutal"]) .ct-settings-label,
+:global(:root[data-skin="brutal"]) .ct-settings-fallback-hint {
+  color: var(--brutal-ink);
+}
+
+:global(:root[data-skin="brutal"]) .ct-settings-seg {
+  border: var(--brutal-bw) solid var(--brutal-ink);
+  border-radius: 0;
+  background: var(--brutal-ink);
+  padding: 0;
+  gap: 0;
+}
+
+:global(:root[data-skin="brutal"]) .ct-settings-opt {
+  border-radius: 0;
+  color: var(--brutal-yellow);
+  font-weight: 800;
+  box-shadow: none;
+}
+
+:global(:root[data-skin="brutal"]) .ct-settings-opt + .ct-settings-opt {
+  border-left: var(--brutal-bw) solid var(--brutal-ink);
+}
+
+:global(:root[data-skin="brutal"]) .ct-settings-opt:hover:not(.active) {
+  background: color-mix(in srgb, #fff 12%, var(--brutal-ink));
+  color: var(--brutal-yellow);
+}
+
+:global(:root[data-skin="brutal"]) .ct-settings-opt.active {
+  background: var(--brutal-yellow);
+  color: var(--brutal-ink);
+  box-shadow: none;
+}
+
 @media (max-width: 1080px) {
   .transfer-topbar { grid-template-columns: 1fr; gap: 8px; text-align: center; }
   .tb-side.tb-src, .tb-side.tb-dst { justify-content: center; }

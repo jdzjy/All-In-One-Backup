@@ -1,992 +1,752 @@
+<script setup lang="ts">
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { getApiErrorMessage } from "@/api/client";
+import {
+  fetchSystemConfig,
+  updateCredentials,
+} from "@/api/auth";
+import {
+  fetchSettings,
+  saveSettings,
+  type SettingCategory,
+  type SettingItem,
+} from "@/api/settings";
+import { toast } from "@/composables/useToast";
+import { useSettingsLoad } from "@/composables/useSettingsLoad";
+import { useSectionTabRoute } from "@/composables/useSectionTabRoute";
+import { useSettingsPageDirty } from "@/composables/useSettingsPageDirty";
+import { useAuthStore } from "@/stores/auth";
+import AppButton from "@/components/base/AppButton.vue";
+import AppInput from "@/components/base/AppInput.vue";
+import AppSelect from "@/components/base/AppSelect.vue";
+import SettingsSegment from "@/components/admin/SettingsSegment.vue";
+import SettingsBoolSegment from "@/components/admin/SettingsBoolSegment.vue";
+import SectionTabBar from "@/components/admin/SectionTabBar.vue";
+import SettingsCard from "@/components/admin/SettingsCard.vue";
+import SettingsRow from "@/components/admin/SettingsRow.vue";
+import SettingsHelpTooltip from "@/components/admin/SettingsHelpTooltip.vue";
+import ApiKeySettings from "@/components/admin/ApiKeySettings.vue";
+import { isCacheSettingKey } from "@/constants/cacheSettings";
+import { getSkinPref, previewSkin, restoreSavedSkin, setSkinPref, type SkinPref } from "@/utils/theme";
+import "@/styles/admin-shared.css";
+
+const props = withDefaults(
+  defineProps<{
+    forcePasswordChange?: boolean;
+    passwordChangeReason?: string;
+  }>(),
+  { forcePasswordChange: false, passwordChangeReason: "" },
+);
+
+const emit = defineEmits<{ "password-updated": []; "admin-ui-updated": [] }>();
+
+const SECURITY_TAB = "security";
+const HOMEPAGE_TAB = "homepage";
+const SERVICE_TAB = "services";
+const API_KEYS_TAB = "apiKeys";
+
+const SKIN_OPTIONS: { id: SkinPref; label: string; desc: string }[] = [
+  { id: "default", label: "经典主题", desc: "现行品牌风格，支持深色模式与顶栏光效。" },
+  { id: "brutal", label: "野兽风格", desc: "粗黑边 + 硬阴影 + 直角的高对比风格，不随深色模式变化。" },
+];
+const skinDraft = ref<SkinPref>(getSkinPref());
+const skinSaved = ref<SkinPref>(getSkinPref());
+
+function changeSkin(id: SkinPref) {
+  skinDraft.value = id;
+  previewSkin(id);
+}
+
+function commitSkinDraft() {
+  if (skinDraft.value === skinSaved.value) return;
+  setSkinPref(skinDraft.value);
+  skinSaved.value = skinDraft.value;
+}
+
+function revertSkinDraft() {
+  if (skinDraft.value === skinSaved.value) return;
+  skinDraft.value = skinSaved.value;
+  restoreSavedSkin();
+}
+
+const ACCENTS = ["var(--brand)", "#f59e0b", "#10b981", "#6366f1", "#ec4899"];
+
+const auth = useAuthStore();
+
+const { loading, runLoad } = useSettingsLoad();
+const saving = ref(false);
+const categories = ref<SettingCategory[]>([]);
+const items = ref<SettingItem[]>([]);
+const form = reactive<Record<string, string>>({});
+const original = reactive<Record<string, string>>({});
+
+const newPassword = ref("");
+const confirmPassword = ref("");
+const securityForm = reactive({
+  admin_username: "admin",
+  session_timeout: "2",
+});
+const securityOriginal = reactive({
+  admin_username: "admin",
+  session_timeout: "2",
+});
+const homepageForm = reactive({
+  public_index_enabled: true,
+  index_account_switch_mode: "dropdown" as "dropdown" | "floating",
+  admin_home_return_mode: "top_icon" as "sidebar" | "top_icon",
+  header_effects_enabled: true,
+  index_strm_auto_detect_enabled: true,
+});
+const homepageOriginal = reactive({
+  public_index_enabled: true,
+  index_account_switch_mode: "dropdown" as "dropdown" | "floating",
+  admin_home_return_mode: "top_icon" as "sidebar" | "top_icon",
+  header_effects_enabled: true,
+  index_strm_auto_detect_enabled: true,
+});
+const apiKeySettingsRef = ref<InstanceType<typeof ApiKeySettings> | null>(null);
+const apiKeyToolbar = reactive({ loading: true, keyCount: 0, maxKeys: 10 });
+const apiKeyAddDisabled = computed(
+  () => apiKeyToolbar.loading || apiKeyToolbar.keyCount >= apiKeyToolbar.maxKeys,
+);
+
+const tabs = computed(() => [
+  { key: SECURITY_TAB, label: "账号安全" },
+  { key: HOMEPAGE_TAB, label: "首页设置" },
+  { key: SERVICE_TAB, label: "其他设置", disabled: props.forcePasswordChange },
+  { key: API_KEYS_TAB, label: "API 秘钥", disabled: props.forcePasswordChange },
+]);
+
+const systemItems = computed(() => items.value.filter((it) => it.category === "system"));
+const systemChangedKeys = computed(() => systemItems.value.filter((it) => isChanged(it)).map((it) => it.key));
+const systemChangedCount = computed(() => systemChangedKeys.value.length);
+
+const passwordsMismatch = computed(
+  () =>
+    Boolean(newPassword.value && confirmPassword.value) &&
+    newPassword.value !== confirmPassword.value,
+);
+
+const securityDirty = computed(
+  () =>
+    securityForm.admin_username !== securityOriginal.admin_username ||
+    securityForm.session_timeout !== securityOriginal.session_timeout ||
+    newPassword.value !== "" ||
+    confirmPassword.value !== "",
+);
+
+const homepageDirty = computed(
+  () =>
+    homepageForm.public_index_enabled !== homepageOriginal.public_index_enabled ||
+    homepageForm.index_account_switch_mode !== homepageOriginal.index_account_switch_mode ||
+    homepageForm.admin_home_return_mode !== homepageOriginal.admin_home_return_mode ||
+    homepageForm.header_effects_enabled !== homepageOriginal.header_effects_enabled ||
+    homepageForm.index_strm_auto_detect_enabled !== homepageOriginal.index_strm_auto_detect_enabled ||
+    skinDraft.value !== skinSaved.value,
+);
+
+const servicesDirty = computed(() => systemChangedCount.value > 0);
+
+function revertSecurityDraft() {
+  securityForm.admin_username = securityOriginal.admin_username;
+  securityForm.session_timeout = securityOriginal.session_timeout;
+  newPassword.value = "";
+  confirmPassword.value = "";
+}
+
+function revertHomepageDraft() {
+  Object.assign(homepageForm, homepageOriginal);
+  revertSkinDraft();
+}
+
+function revertServicesDraft() {
+  for (const it of systemItems.value) form[it.key] = original[it.key];
+}
+
+function isTabDirty(tab: string): boolean {
+  if (tab === SECURITY_TAB) return securityDirty.value;
+  if (tab === HOMEPAGE_TAB) return homepageDirty.value;
+  if (tab === SERVICE_TAB) return servicesDirty.value;
+  return false;
+}
+
+function revertCurrentTab(tab = activeTab.value) {
+  if (tab === SECURITY_TAB) revertSecurityDraft();
+  else if (tab === HOMEPAGE_TAB) revertHomepageDraft();
+  else if (tab === SERVICE_TAB) revertServicesDraft();
+}
+
+const settingsDirty = computed(
+  () => securityDirty.value || homepageDirty.value || servicesDirty.value,
+);
+const { activeTab, setActiveTab } = useSectionTabRoute(
+  SECURITY_TAB,
+  [SECURITY_TAB, HOMEPAGE_TAB, SERVICE_TAB, API_KEYS_TAB],
+  {
+    beforeTabChange: async (from, to) => {
+      if (props.forcePasswordChange && to !== SECURITY_TAB) return false;
+      if (!isTabDirty(from)) return true;
+      return confirmDiscardChanges(() => isTabDirty(from));
+    },
+  },
+);
+const { confirmDiscardChanges } = useSettingsPageDirty(settingsDirty, revertCurrentTab);
+
+const isSecurityTab = computed(() => activeTab.value === SECURITY_TAB);
+const isHomepageTab = computed(() => activeTab.value === HOMEPAGE_TAB);
+const isServicesTab = computed(() => activeTab.value === SERVICE_TAB);
+const isApiKeysTab = computed(() => activeTab.value === API_KEYS_TAB);
+const accentColor = computed(() => {
+  if (isSecurityTab.value) return ACCENTS[0];
+  if (isHomepageTab.value) return ACCENTS[1];
+  if (isServicesTab.value) return ACCENTS[2];
+  if (isApiKeysTab.value) return ACCENTS[3];
+  return ACCENTS[0];
+});
+
+const canSave = computed(() => {
+  if (isSecurityTab.value) return securityDirty.value && !passwordsMismatch.value;
+  if (isHomepageTab.value) return homepageDirty.value;
+  if (isServicesTab.value) return servicesDirty.value;
+  return false;
+});
+
+function isChanged(it: SettingItem): boolean {
+  return form[it.key] !== original[it.key];
+}
+
+function displayLabel(it: SettingItem): string {
+  if (it.type === "int" && it.unit) return `${it.label}（${it.unit}）`;
+  return it.label;
+}
+
+function filterOutCacheSettings(payload: {
+  categories: SettingCategory[];
+  items: SettingItem[];
+}) {
+  const visibleItems = (payload.items ?? []).filter(
+    (it) => !isCacheSettingKey(it.key) && it.key !== "upload_task_concurrency",
+  );
+  const visibleCatIds = new Set(visibleItems.map((it) => it.category));
+  const visibleCategories = (payload.categories ?? []).filter((c) => visibleCatIds.has(c.id));
+  return { categories: visibleCategories, items: visibleItems };
+}
+
+function applyPayload(payload: { categories: SettingCategory[]; items: SettingItem[] }) {
+  const filtered = filterOutCacheSettings(payload);
+  categories.value = filtered.categories;
+  items.value = filtered.items;
+  for (const it of items.value) {
+    form[it.key] = it.value;
+    original[it.key] = it.value;
+  }
+}
+
+function applySystemConfig(config: {
+  admin_username: string;
+  session_timeout: number;
+  public_index_enabled: boolean;
+  index_account_switch_mode?: string;
+  admin_home_return_mode?: string;
+  header_effects_enabled?: boolean;
+  index_strm_auto_detect_enabled?: boolean;
+}) {
+  securityForm.admin_username = config.admin_username || "admin";
+  securityForm.session_timeout = String(config.session_timeout || 2);
+  securityOriginal.admin_username = securityForm.admin_username;
+  securityOriginal.session_timeout = securityForm.session_timeout;
+  homepageForm.public_index_enabled = config.public_index_enabled ?? true;
+  homepageOriginal.public_index_enabled = homepageForm.public_index_enabled;
+  const mode = config.index_account_switch_mode === "floating" ? "floating" : "dropdown";
+  homepageForm.index_account_switch_mode = mode;
+  homepageOriginal.index_account_switch_mode = mode;
+  const homeReturn = config.admin_home_return_mode === "sidebar" ? "sidebar" : "top_icon";
+  homepageForm.admin_home_return_mode = homeReturn;
+  homepageOriginal.admin_home_return_mode = homeReturn;
+  homepageForm.header_effects_enabled = config.header_effects_enabled ?? true;
+  homepageOriginal.header_effects_enabled = homepageForm.header_effects_enabled;
+  homepageForm.index_strm_auto_detect_enabled = config.index_strm_auto_detect_enabled ?? true;
+  homepageOriginal.index_strm_auto_detect_enabled = homepageForm.index_strm_auto_detect_enabled;
+}
+
+async function loadSystemConfig() {
+  const config = await fetchSystemConfig();
+  applySystemConfig(config);
+  if (props.forcePasswordChange || config.must_change_password) {
+    activeTab.value = SECURITY_TAB;
+  }
+}
+
+async function loadSettings() {
+  applyPayload(await fetchSettings());
+}
+
+async function load() {
+  await runLoad(async () => {
+    if (props.forcePasswordChange) {
+      await loadSystemConfig();
+    } else {
+      await Promise.all([loadSettings(), loadSystemConfig()]);
+    }
+  }, "加载设置失败");
+}
+
+onMounted(load);
+
+watch(
+  () => props.forcePasswordChange,
+  (locked) => {
+    if (locked) activeTab.value = SECURITY_TAB;
+  },
+);
+onBeforeUnmount(() => {
+  revertSkinDraft();
+});
+
+async function saveSecurity() {
+  if (props.forcePasswordChange && !newPassword.value) {
+    toast.error("当前管理员密码需要升级，请先设置新密码");
+    return;
+  }
+  if (newPassword.value && !confirmPassword.value) {
+    toast.error("请再次输入新密码进行确认");
+    return;
+  }
+  if (passwordsMismatch.value) {
+    toast.error("两次输入的密码不一致");
+    return;
+  }
+  const sessionTimeout = Number.parseFloat(securityForm.session_timeout);
+  if (!Number.isFinite(sessionTimeout) || sessionTimeout < 0.5 || sessionTimeout > 24) {
+    toast.error("会话超时时间必须在 0.5-24 小时之间");
+    return;
+  }
+
+  saving.value = true;
+  try {
+    await updateCredentials({
+      admin_username: securityForm.admin_username.trim(),
+      admin_password: newPassword.value || undefined,
+      session_timeout: sessionTimeout,
+    });
+    const passwordUpdated = Boolean(newPassword.value);
+    newPassword.value = "";
+    confirmPassword.value = "";
+    toast.success("账号与安全设置已保存");
+    await loadSystemConfig();
+    if (passwordUpdated) emit("password-updated");
+  } catch (e) {
+    toast.error(getApiErrorMessage(e, "保存失败"));
+  } finally {
+    saving.value = false;
+  }
+}
+
+async function saveHomepage() {
+  saving.value = true;
+  try {
+    await updateCredentials({
+      admin_username: securityForm.admin_username.trim(),
+      public_index_enabled: homepageForm.public_index_enabled,
+      index_account_switch_mode: homepageForm.index_account_switch_mode,
+      admin_home_return_mode: homepageForm.admin_home_return_mode,
+      header_effects_enabled: homepageForm.header_effects_enabled,
+      index_strm_auto_detect_enabled: homepageForm.index_strm_auto_detect_enabled,
+    });
+    commitSkinDraft();
+    toast.success("首页设置已保存");
+    await loadSystemConfig();
+    await auth.load();
+    emit("admin-ui-updated");
+  } catch (e) {
+    toast.error(getApiErrorMessage(e, "保存失败"));
+  } finally {
+    saving.value = false;
+  }
+}
+
+async function saveServices() {
+  if (!servicesDirty.value) return;
+  saving.value = true;
+  try {
+    const changed: Record<string, string> = {};
+    for (const key of systemChangedKeys.value) changed[key] = form[key];
+    if (Object.keys(changed).length > 0) {
+      applyPayload(await saveSettings(changed));
+    }
+    toast.success("其他设置已保存");
+  } catch (e) {
+    toast.error(getApiErrorMessage(e, "保存失败"));
+  } finally {
+    saving.value = false;
+  }
+}
+
+async function submit() {
+  if (isSecurityTab.value) {
+    await saveSecurity();
+    return;
+  }
+  if (isHomepageTab.value) {
+    await saveHomepage();
+    return;
+  }
+  if (isServicesTab.value) {
+    await saveServices();
+  }
+}
+</script>
+
 <template>
-  <div>
-    <div class="settings-header">
-      <div class="tab-nav">
-        <button class="tab-btn" :class="{ active: currentSettingsTab === 'security' }" @click="currentSettingsTab = 'security'">
-          <i class="fas fa-shield-alt"></i> 账号与安全
-        </button>
-        <button class="tab-btn" :class="{ active: currentSettingsTab === 'auth' }" :disabled="forcePasswordChange" @click="switchSettingsTab('auth')">
-          <i class="fas fa-user-lock"></i> 认证与授权
-        </button>
-        <button class="tab-btn" :class="{ active: currentSettingsTab === 'webdav' }" :disabled="forcePasswordChange" @click="switchSettingsTab('webdav')">
-          <i class="fas fa-cloud"></i> WebDAV设置
-        </button>
-        <button class="tab-btn" :class="{ active: currentSettingsTab === 'homepage' }" :disabled="forcePasswordChange" @click="switchSettingsTab('homepage')">
-          <i class="fas fa-home"></i> 首页设置
-        </button>
-        <button class="tab-btn" :class="{ active: currentSettingsTab === 'other' }" :disabled="forcePasswordChange" @click="switchSettingsTab('other')">
-          <i class="fas fa-sliders-h"></i> 其他设置
-        </button>
-      </div>
-      <button @click="saveSettings" class="btn btn-primary" :disabled="savingSettings">
-        <i class="fas fa-save"></i>
-        <span v-if="savingSettings">保存中...</span>
-        <span v-else>保存设置</span>
-      </button>
-    </div>
-    
-    <div v-if="currentSettingsTab === 'security'" class="settings-content">
-      <form @submit.prevent="saveSettings">
-        <div class="settings-group">
-          <div class="group-title"><i class="fas fa-user-shield"></i> 账户信息</div>
-          <div class="group-item">
-            <div class="group-label">管理员用户名</div>
-            <input type="text" id="admin_username" v-model="settings.admin_username" class="group-input" required>
-          </div>
-          <div class="group-item">
-            <div class="group-label">新密码</div>
-            <input type="password" id="admin_password" v-model="newPassword" class="group-input" placeholder="留空表示不修改" autocomplete="new-password">
-          </div>
-          <div class="group-item">
-            <div class="group-label">确认新密码</div>
-            <input type="password" id="confirm_password" v-model="confirmPassword" class="group-input" :class="{'is-invalid': passwordsDoNotMatch}" placeholder="再次输入新密码" autocomplete="new-password">
-          </div>
-        </div>
-        <div class="settings-group">
-          <div class="group-title"><i class="fas fa-shield-alt"></i> 安全设置</div>
-          <div class="group-item">
-            <div class="group-label">会话超时时间（小时）</div>
-            <input type="number" id="session_timeout" v-model.number="settings.session_timeout" class="group-input" min="0.5" max="24" step="0.5" required>
-          </div>
-        </div>
-      </form>
-    </div>
-    
-    <div v-if="currentSettingsTab === 'webdav'" class="settings-content">
-      <WebDAVSettings ref="webdavSettingsRef" :saving="savingSettings" />
-    </div>
+  <div class="settings">
+    <SectionTabBar :model-value="activeTab" :tabs="tabs" @update:model-value="setActiveTab">
+      <template #actions>
+        <AppButton
+          v-if="isApiKeysTab"
+          type="button"
+          variant="primary"
+          :disabled="apiKeyAddDisabled"
+          @click="apiKeySettingsRef?.openCreate()"
+        >
+          新增秘钥
+        </AppButton>
+        <AppButton
+          v-else
+          type="button"
+          variant="primary"
+          :disabled="!canSave || saving"
+          @click="submit"
+        >
+          {{ saving ? "保存中…" : "保存改动" }}
+        </AppButton>
+      </template>
+    </SectionTabBar>
 
-    <div v-if="currentSettingsTab === 'auth'" class="settings-content">
-      <form @submit.prevent="saveSettings">
-        <div class="settings-group">
-          <div class="group-title"><i class="fas fa-link"></i> 授权服务</div>
-          <div class="group-item">
-            <div class="group-label with-help">
-              <span>OAuth代理服务地址</span>
-              <span class="help-icon" @mouseover="oauthServerUrlTooltipVisible = true" @mouseleave="oauthServerUrlTooltipVisible = false">
-                <i class="fas fa-question-circle"></i>
-                <div class="tooltip" v-show="oauthServerUrlTooltipVisible">
-                  <div class="tooltip-content">
-                    <div class="tooltip-title">OAuth代理服务地址说明</div>
-                    <div class="tooltip-body">
-                      <p>用于主程序对接 OAuth 认证代理服务。</p>
-                      <p>会影响相关驱动的授权、刷新和回调地址处理。</p>
-                      <p>示例：<strong>https://oauth.litepan.top</strong></p>
-                    </div>
-                  </div>
-                </div>
-              </span>
-            </div>
-            <input type="url" id="oauth_server_url" v-model.trim="settings.oauth_server_url" class="group-input" placeholder="https://oauth.litepan.top">
-          </div>
-        </div>
-        <div class="settings-group">
-          <div class="group-title"><i class="fas fa-sync-alt"></i> 认证刷新</div>
-          <div class="group-item">
-            <div class="group-label with-help">
-              <span>智能主动认证刷新</span>
-              <span class="help-icon" @mouseover="authActiveRefreshTooltipVisible = true" @mouseleave="authActiveRefreshTooltipVisible = false">
-                <i class="fas fa-question-circle"></i>
-                <div class="tooltip" v-show="authActiveRefreshTooltipVisible">
-                  <div class="tooltip-content">
-                    <div class="tooltip-title">主动认证刷新说明</div>
-                    <div class="tooltip-body">
-                      <p>程序根据各网盘过期时间提前刷新 token，减少访问时遇到认证过期的概率。</p>
-                      <div class="section-title">推荐开启</div>
-                      <div class="priority-item">
-                        <span class="priority-dot on"></span>
-                        <span class="priority-text">NAS / Docker / 服务器 24 小时常驻：token 始终健康，缓存、STRM、Emby 反代等后台任务更稳定</span>
-                      </div>
-                      <div class="section-title">推荐关闭</div>
-                      <div class="priority-item">
-                        <span class="priority-dot off"></span>
-                        <span class="priority-text">桌面端临时使用、用完即关：无需后台维护 token，访问时被动刷新即可</span>
-                      </div>
-                      <div class="priority-item">
-                        <span class="priority-dot off"></span>
-                        <span class="priority-text">同一账号还在其他挂载工具或脚本里使用：避免多个程序争抢 refresh_token，尤其是 115 网盘</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </span>
-            </div>
-            <label class="inline-switch" for="auth_active_refresh_enabled">
-              <input
-                id="auth_active_refresh_enabled"
-                v-model="settings.auth_active_refresh_enabled"
-                type="checkbox"
-              >
-              <span class="inline-switch-slider"></span>
-            </label>
-          </div>
-        </div>
-      </form>
-    </div>
+    <div v-if="loading" class="settings__loading">加载中…</div>
 
-    <div v-if="currentSettingsTab === 'homepage'" class="settings-content">
-      <form @submit.prevent="saveSettings">
-        <div class="settings-group">
-          <div class="group-title"><i class="fas fa-home"></i> 首页访问</div>
-          <div class="group-item">
-            <div class="group-label with-help">
+    <template v-else>
+      <SettingsCard v-if="isSecurityTab" title="账号安全" :accent="accentColor">
+        <SettingsRow
+          :show-changed-badge="true"
+          :changed="securityForm.admin_username !== securityOriginal.admin_username"
+        >
+          <template #info>
+            <div class="settings-row__label">
+              <span>管理员用户名</span>
+            </div>
+          </template>
+          <template #control>
+            <div class="field-text">
+              <AppInput
+                v-model="securityForm.admin_username"
+                placeholder="admin"
+                autocomplete="username"
+              />
+            </div>
+          </template>
+        </SettingsRow>
+
+        <SettingsRow :show-changed-badge="true" :changed="Boolean(newPassword)">
+          <template #info>
+            <div class="settings-row__label">
+              <span>新密码</span>
+            </div>
+          </template>
+          <template #control>
+            <div class="field-text">
+              <AppInput
+                v-model="newPassword"
+                type="password"
+                placeholder="留空表示不修改"
+                autocomplete="new-password"
+                ignore-autofill
+              />
+            </div>
+          </template>
+        </SettingsRow>
+
+        <SettingsRow :show-changed-badge="true" :changed="Boolean(newPassword)">
+          <template #info>
+            <div class="settings-row__label">
+              <span>确认新密码</span>
+            </div>
+          </template>
+          <template #control>
+            <div class="field-text">
+              <AppInput
+                v-model="confirmPassword"
+                type="password"
+                placeholder="再次输入新密码"
+                autocomplete="new-password"
+                ignore-autofill
+              />
+              <p v-if="passwordsMismatch" class="field-error">两次输入的密码不一致</p>
+            </div>
+          </template>
+        </SettingsRow>
+
+        <SettingsRow
+          :show-changed-badge="true"
+          :changed="securityForm.session_timeout !== securityOriginal.session_timeout"
+        >
+          <template #info>
+            <div class="settings-row__label">
+              <span>会话超时时间（小时）</span>
+            </div>
+          </template>
+          <template #control>
+            <div class="field-num">
+              <AppInput v-model="securityForm.session_timeout" type="number" placeholder="2" />
+            </div>
+          </template>
+        </SettingsRow>
+      </SettingsCard>
+
+      <SettingsCard v-else-if="isHomepageTab" title="访问权限" :accent="accentColor">
+        <SettingsRow
+          :show-changed-badge="true"
+          :changed="homepageForm.public_index_enabled !== homepageOriginal.public_index_enabled"
+        >
+          <template #info>
+            <div class="settings-row__label">
               <span>允许匿名访问文件列表</span>
-              <span class="help-icon" @mouseover="publicIndexTooltipVisible = true" @mouseleave="publicIndexTooltipVisible = false">
-                <i class="fas fa-question-circle"></i>
-                <div class="tooltip" v-show="publicIndexTooltipVisible">
-                  <div class="tooltip-content">
-                    <div class="tooltip-title">匿名文件列表访问说明</div>
-                    <div class="tooltip-body">
-                      <p>开启后，访客无需登录即可访问首页并浏览文件列表。</p>
-                      <p>关闭后，未登录用户访问首页会自动跳转到登录页，匿名公开接口也会同时拒绝访问。</p>
-                    </div>
-                  </div>
-                </div>
-              </span>
+              <SettingsHelpTooltip title="匿名文件列表访问说明">
+                <p>开启后，访客无需登录即可访问首页并浏览文件列表。</p>
+                <p>关闭后，未登录用户访问首页会自动跳转到登录页，匿名公开接口也会同时拒绝访问。</p>
+              </SettingsHelpTooltip>
             </div>
-            <label class="inline-switch" for="public_index_enabled">
-              <input
-                id="public_index_enabled"
-                v-model="settings.public_index_enabled"
-                type="checkbox"
-              >
-              <span class="inline-switch-slider"></span>
-            </label>
-          </div>
-        </div>
-        <div class="settings-group">
-          <div class="group-title"><i class="fas fa-list"></i> 首页交互</div>
-          <div class="group-item">
-            <div class="group-label">账号切换方式</div>
-            <div
-              class="mode-segment"
-              role="radiogroup"
-              aria-label="账号切换方式"
-            >
-              <button
-                type="button"
-                class="mode-segment-btn"
-                :class="{ active: settings.index_account_switch_mode === 'dropdown' }"
-                role="radio"
-                :aria-checked="settings.index_account_switch_mode === 'dropdown'"
-                @click="settings.index_account_switch_mode = 'dropdown'"
-              >
-                <i class="fas fa-list"></i>
-                <span>顶部列表选择</span>
-              </button>
-              <button
-                type="button"
-                class="mode-segment-btn"
-                :class="{ active: settings.index_account_switch_mode === 'floating' }"
-                role="radio"
-                :aria-checked="settings.index_account_switch_mode === 'floating'"
-                @click="settings.index_account_switch_mode = 'floating'"
-              >
-                <i class="fas fa-grip-vertical"></i>
-                <span>左侧悬浮按键</span>
-              </button>
-            </div>
-          </div>
-          <div class="group-item">
-            <div class="group-label">主页返回方式</div>
-            <div
-              class="mode-segment mode-segment-three"
-              role="radiogroup"
-              aria-label="主页返回方式"
-            >
-              <button
-                type="button"
-                class="mode-segment-btn"
-                :class="{ active: settings.admin_home_return_mode === 'sidebar' }"
-                role="radio"
-                :aria-checked="settings.admin_home_return_mode === 'sidebar'"
-                @click="settings.admin_home_return_mode = 'sidebar'"
-              >
-                <i class="fas fa-bars"></i>
-                <span>左侧菜单</span>
-              </button>
-              <button
-                type="button"
-                class="mode-segment-btn"
-                :class="{ active: settings.admin_home_return_mode === 'top_icon' }"
-                role="radio"
-                :aria-checked="settings.admin_home_return_mode === 'top_icon'"
-                @click="settings.admin_home_return_mode = 'top_icon'"
-              >
-                <i class="fas fa-house"></i>
-                <span>右上角图标</span>
-              </button>
-              <button
-                type="button"
-                class="mode-segment-btn"
-                :class="{ active: settings.admin_home_return_mode === 'both' }"
-                role="radio"
-                :aria-checked="settings.admin_home_return_mode === 'both'"
-                @click="settings.admin_home_return_mode = 'both'"
-              >
-                <i class="fas fa-layer-group"></i>
-                <span>双兼容模式</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      </form>
-    </div>
+          </template>
+          <template #control>
+            <SettingsBoolSegment
+              v-model="homepageForm.public_index_enabled"
+              label="允许匿名访问文件列表"
+              off-label="不允许"
+              on-label="允许"
+            />
+          </template>
+        </SettingsRow>
+      </SettingsCard>
 
-    <div v-if="currentSettingsTab === 'other'" class="settings-content">
-      <form @submit.prevent="saveSettings">
-        <div class="settings-group">
-          <div class="group-title"><i class="fas fa-upload"></i> 上传设置</div>
-          <div class="group-item">
-            <div class="group-label">上传任务并发数（推荐 1 - 5）</div>
-            <input
-              type="number"
-              id="upload_task_concurrency"
-              v-model.number="settings.upload_task_concurrency"
-              class="group-input"
-              min="1"
-              max="5"
-              step="1"
-              required
-            >
-          </div>
-        </div>
-        <div class="settings-group">
-          <div class="group-title"><i class="fas fa-file-lines"></i> 日志设置</div>
-          <div class="group-item">
-            <div class="group-label">日志保留天数（1 - 365）</div>
-            <input
-              type="number"
-              id="log_retention_days"
-              v-model.number="settings.log_retention_days"
-              class="group-input"
-              min="1"
-              max="365"
-              step="1"
-              required
-            >
-          </div>
-        </div>
-      </form>
-    </div>
+      <SettingsCard v-if="isHomepageTab" title="STRM" :accent="accentColor">
+        <SettingsRow
+          :show-changed-badge="true"
+          :changed="homepageForm.index_strm_auto_detect_enabled !== homepageOriginal.index_strm_auto_detect_enabled"
+        >
+          <template #info>
+            <div class="settings-row__label">
+              <span>自动检测 STRM 变化</span>
+              <SettingsHelpTooltip title="自动检测 STRM 变化说明">
+                <p>开启后，管理员进入已配置 STRM 任务的目录时，会自动检测本地未生成的 STRM 与元数据，并在文件列表上方提示是否立即生成。</p>
+                <p>关闭后，进入目录不再发起检测请求，可节省开销；如需同步，请依赖 STRM 定时任务或在 STRM 管理页手动触发扫描。</p>
+              </SettingsHelpTooltip>
+            </div>
+          </template>
+          <template #control>
+            <SettingsBoolSegment
+              v-model="homepageForm.index_strm_auto_detect_enabled"
+              label="自动检测 STRM 变化"
+              off-label="关闭"
+              on-label="打开"
+            />
+          </template>
+        </SettingsRow>
+      </SettingsCard>
+
+      <SettingsCard v-if="isHomepageTab" title="界面显示" :accent="accentColor">
+        <SettingsRow :show-changed-badge="true" :changed="skinDraft !== skinSaved">
+          <template #info>
+            <div class="settings-row__label">
+              <span>主题风格</span>
+              <SettingsHelpTooltip title="主题风格说明">
+                <p>切换整站视觉风格，保存后生效并记忆在本机。</p>
+                <p><strong>经典主题</strong>：现行品牌风格，支持深色模式与顶栏光效。</p>
+                <p><strong>野兽风格</strong>：粗黑边 + 硬阴影 + 直角的高对比风格，不随深色模式变化。</p>
+              </SettingsHelpTooltip>
+            </div>
+          </template>
+          <template #control>
+            <SettingsSegment
+              :model-value="skinDraft"
+              label="主题风格"
+              :options="SKIN_OPTIONS.map((opt) => ({ value: opt.id, label: opt.label }))"
+              @update:model-value="changeSkin($event as SkinPref)"
+            />
+          </template>
+        </SettingsRow>
+
+        <SettingsRow
+          :show-changed-badge="true"
+          :changed="homepageForm.index_account_switch_mode !== homepageOriginal.index_account_switch_mode"
+        >
+          <template #info>
+            <div class="settings-row__label">
+              <span>账号切换方式</span>
+            </div>
+          </template>
+          <template #control>
+            <SettingsSegment
+              v-model="homepageForm.index_account_switch_mode"
+              label="账号切换方式"
+              :options="[
+                { value: 'dropdown', label: '顶栏切换' },
+                { value: 'floating', label: '悬浮切换' },
+              ]"
+            />
+          </template>
+        </SettingsRow>
+
+        <SettingsRow
+          :show-changed-badge="true"
+          :changed="homepageForm.header_effects_enabled !== homepageOriginal.header_effects_enabled"
+        >
+          <template #info>
+            <div class="settings-row__label">
+              <span>顶栏动效</span>
+              <SettingsHelpTooltip title="顶栏动效说明">
+                <p>开启后，前台首页顶栏会根据主题显示日光、飞机、粒子或星空流星效果。</p>
+                <p>关闭后，顶栏只保留静态渐变背景，不渲染任何装饰动效。</p>
+              </SettingsHelpTooltip>
+            </div>
+          </template>
+          <template #control>
+            <SettingsBoolSegment
+              v-model="homepageForm.header_effects_enabled"
+              label="顶栏动效"
+              off-label="关闭"
+              on-label="开启"
+            />
+          </template>
+        </SettingsRow>
+
+        <SettingsRow
+          :show-changed-badge="true"
+          :changed="homepageForm.admin_home_return_mode !== homepageOriginal.admin_home_return_mode"
+        >
+          <template #info>
+            <div class="settings-row__label">
+              <span>首页返回方式</span>
+              <SettingsHelpTooltip title="首页返回方式说明">
+                <p>控制从后台返回前台首页的入口位置。</p>
+                <p><strong>左侧菜单</strong>：在侧栏导航底部显示「返回首页」。</p>
+                <p><strong>顶栏图标</strong>：在顶栏右侧显示房子图标。</p>
+              </SettingsHelpTooltip>
+            </div>
+          </template>
+          <template #control>
+            <SettingsSegment
+              v-model="homepageForm.admin_home_return_mode"
+              label="首页返回方式"
+              :options="[
+                { value: 'top_icon', label: '顶栏图标' },
+                { value: 'sidebar', label: '左侧菜单' },
+              ]"
+            />
+          </template>
+        </SettingsRow>
+      </SettingsCard>
+
+      <template v-else-if="isServicesTab">
+        <SettingsCard v-if="systemItems.length" title="授权与日志" :accent="accentColor">
+          <SettingsRow
+            v-for="it in systemItems"
+            :key="it.key"
+            :show-changed-badge="true"
+            :changed="isChanged(it)"
+          >
+            <template #info>
+              <div class="settings-row__label">
+                <span>{{ displayLabel(it) }}</span>
+                <SettingsHelpTooltip
+                  v-if="it.key === 'oauth_server_url'"
+                  title="OAuth 代理服务地址说明"
+                >
+                  <p>用于主程序对接 OAuth 认证代理服务，会影响相关驱动的授权、刷新和回调地址处理。</p>
+                  <p>添加账号时「自动获取 Token」经此服务转发。留空或无效地址将回落默认值。</p>
+                  <p>示例：<strong>https://oauth.litepan.top</strong></p>
+                </SettingsHelpTooltip>
+                <SettingsHelpTooltip
+                  v-else-if="it.key === 'auth_active_refresh_enabled'"
+                  title="主动认证刷新说明"
+                >
+                  <p>程序根据各网盘过期时间提前刷新 token，减少访问时遇到认证过期的概率。</p>
+                  <div class="settings-help__section">推荐开启</div>
+                  <div class="settings-help__item">
+                    <span class="settings-help__dot settings-help__dot--on" />
+                    <span>NAS / Docker / 服务器 24 小时常驻：token 始终健康，缓存、STRM、反代等后台任务更稳定</span>
+                  </div>
+                  <div class="settings-help__section">推荐关闭</div>
+                  <div class="settings-help__item">
+                    <span class="settings-help__dot settings-help__dot--off" />
+                    <span>桌面端临时使用、用完即关：无需后台维护 token，访问时被动刷新即可</span>
+                  </div>
+                  <div class="settings-help__item">
+                    <span class="settings-help__dot settings-help__dot--off" />
+                    <span>同一账号还在其他挂载工具或脚本里使用：避免多个程序争抢 refresh_token，尤其是 115 网盘</span>
+                  </div>
+                </SettingsHelpTooltip>
+                <SettingsHelpTooltip
+                  v-else-if="it.description"
+                  :title="`${displayLabel(it)}说明`"
+                >
+                  <p>{{ it.description }}</p>
+                </SettingsHelpTooltip>
+              </div>
+            </template>
+            <template #control>
+              <div class="settings-row__field">
+                <SettingsBoolSegment
+                  v-if="it.type === 'bool'"
+                  :model-value="form[it.key] === 'true'"
+                  :label="displayLabel(it)"
+                  @update:model-value="form[it.key] = $event ? 'true' : 'false'"
+                />
+
+                <div v-else-if="it.type === 'select'" class="field-select">
+                  <AppSelect
+                    :model-value="form[it.key]"
+                    :options="it.options || []"
+                    @update:model-value="form[it.key] = String($event)"
+                  />
+                </div>
+
+                <div v-else-if="it.type === 'int'" class="field-num">
+                  <AppInput v-model="form[it.key]" type="number" :placeholder="it.default" />
+                </div>
+
+                <div v-else class="field-text">
+                  <AppInput v-model="form[it.key]" :placeholder="it.default" autocomplete="off" />
+                </div>
+              </div>
+            </template>
+          </SettingsRow>
+        </SettingsCard>
+      </template>
+
+      <ApiKeySettings
+        v-else-if="isApiKeysTab"
+        ref="apiKeySettingsRef"
+        :accent="accentColor"
+        @toolbar-state="Object.assign(apiKeyToolbar, $event)"
+      />
+    </template>
   </div>
 </template>
 
-<script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
-import axios from 'axios'
-import WebDAVSettings from './WebDAVSettings.vue'
-
-const props = defineProps({
-  forcePasswordChange: {
-    type: Boolean,
-    default: false
-  },
-  passwordChangeReason: {
-    type: String,
-    default: ''
-  }
-})
-const emit = defineEmits(['password-updated', 'settings-updated'])
-
-// 响应式数据
-const currentSettingsTab = ref('security')
-const savingSettings = ref(false)
-const newPassword = ref('')
-const confirmPassword = ref('')
-const confirmPasswordTouched = ref(false)
-const oauthServerUrlTooltipVisible = ref(false)
-const publicIndexTooltipVisible = ref(false)
-const authActiveRefreshTooltipVisible = ref(false)
-
-const settings = reactive({
-  admin_username: '',
-  session_timeout: 2,
-  oauth_server_url: 'https://oauth.litepan.top',
-  public_index_enabled: true,
-  index_account_switch_mode: 'dropdown',
-  admin_home_return_mode: 'top_icon',
-  upload_task_concurrency: 3,
-  log_retention_days: 30,
-  auth_active_refresh_enabled: true
-})
-
-// 计算属性
-const passwordsDoNotMatch = computed(() => {
-  if (newPassword.value && confirmPassword.value) {
-    return newPassword.value !== confirmPassword.value
-  }
-  return false
-})
-
-const switchSettingsTab = (tab) => {
-  if (props.forcePasswordChange && tab !== 'security') {
-    window.appNotification?.warning('请先修改管理员密码')
-    currentSettingsTab.value = 'security'
-    return
-  }
-  if (currentSettingsTab.value === 'security' && tab !== 'security') {
-    newPassword.value = ''
-    confirmPassword.value = ''
-    confirmPasswordTouched.value = false
-  }
-  currentSettingsTab.value = tab
-}
-
-// 加载系统配置
-const loadSystemConfig = async () => {
-  try {
-    const response = await axios.get('/api/admin/system-config')
-    if (response.data.success) {
-      const config = response.data.data
-      settings.admin_username = config.admin_username || 'admin'
-      settings.session_timeout = config.session_timeout || 2
-      settings.oauth_server_url = config.oauth_server_url || 'https://oauth.litepan.top'
-      settings.public_index_enabled = config.public_index_enabled ?? true
-      settings.index_account_switch_mode = ['dropdown', 'floating'].includes(config.index_account_switch_mode)
-        ? config.index_account_switch_mode
-        : 'dropdown'
-      settings.admin_home_return_mode = ['sidebar', 'top_icon', 'both'].includes(config.admin_home_return_mode)
-        ? config.admin_home_return_mode
-        : 'top_icon'
-      settings.upload_task_concurrency = config.upload_task_concurrency || 3
-      settings.log_retention_days = config.log_retention_days || 30
-      settings.auth_active_refresh_enabled = config.auth_active_refresh_enabled ?? true
-      if (props.forcePasswordChange || config.must_change_password) {
-        currentSettingsTab.value = 'security'
-      }
-    } else {
-      console.error('加载配置失败:', response.data.message)
-      window.appNotification.error('加载配置失败: ' + response.data.message)
-    }
-  } catch (error) {
-    console.error('加载配置失败:', error)
-    window.appNotification.error('加载配置失败: ' + error.message)
-  }
-}
-
-// 组件挂载时加载配置
-onMounted(() => {
-  loadSystemConfig()
-})
-
-
-const webdavSettingsRef = ref(null)
-
-// 保存设置
-const saveSettings = async () => {
-  if (props.forcePasswordChange) {
-    currentSettingsTab.value = 'security'
-  }
-  if (currentSettingsTab.value === 'security' || currentSettingsTab.value === 'auth' || currentSettingsTab.value === 'homepage' || currentSettingsTab.value === 'other') {
-    // 保存安全设置
-    await saveSecuritySettings()
-  } else if (currentSettingsTab.value === 'webdav') {
-    // 保存WebDAV设置
-    if (webdavSettingsRef.value) {
-      await webdavSettingsRef.value.saveSettings()
-    }
-  }
-}
-
-// 保存安全设置
-const saveSecuritySettings = async () => {
-  if (props.forcePasswordChange && !newPassword.value) {
-    window.appNotification.error('当前管理员密码需要升级，请先设置新密码')
-    return
-  }
-
-  if (currentSettingsTab.value === 'security' && newPassword.value && !confirmPassword.value) {
-    window.appNotification.error('请再次输入新密码进行确认')
-    return
-  }
-
-  if (currentSettingsTab.value === 'security' && newPassword.value && confirmPassword.value && passwordsDoNotMatch.value) {
-    window.appNotification.error("两次输入的密码不一致！")
-    return
-  }
-
-  if (!Number.isInteger(settings.upload_task_concurrency) || settings.upload_task_concurrency < 1 || settings.upload_task_concurrency > 5) {
-    window.appNotification.error('上传任务并发数必须是 1-5 之间的整数')
-    return
-  }
-
-  if (!Number.isInteger(settings.log_retention_days) || settings.log_retention_days < 1 || settings.log_retention_days > 365) {
-    window.appNotification.error('日志保留天数必须是 1-365 之间的整数')
-    return
-  }
-  
-  savingSettings.value = true
-  try {
-    const payload = { ...settings }
-    if (newPassword.value) {
-      payload.admin_password = newPassword.value
-    }
-    const response = await axios.post('/api/admin/update-credentials', payload)
-    
-    if (response.data.success) {
-      const passwordUpdated = Boolean(newPassword.value)
-      let successMessage = '账号与安全设置保存成功！'
-      if (currentSettingsTab.value === 'auth') {
-        successMessage = '认证与授权设置保存成功！'
-      } else if (currentSettingsTab.value === 'homepage') {
-        successMessage = '首页设置保存成功！'
-      } else if (currentSettingsTab.value === 'other') {
-        successMessage = '其他设置保存成功！'
-      }
-      window.appNotification.success(successMessage)
-      newPassword.value = ''
-      confirmPassword.value = ''
-      confirmPasswordTouched.value = false
-      await loadSystemConfig()
-      if (passwordUpdated) {
-        emit('password-updated')
-      }
-      emit('settings-updated')
-    } else {
-      window.appNotification.error(response.data.message || '保存失败')
-    }
-  } catch (error) {
-    console.error('保存设置失败:', error)
-    window.appNotification.error('保存失败: ' + error.message)
-  } finally {
-    savingSettings.value = false
-  }
-}
-
-</script>
-
 <style scoped>
-/* 系统设置页面样式 */
-
-/* 设置选项卡 */
-.settings-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 24px;
+.settings {
+  padding-bottom: 24px;
 }
 
-.settings-header .tab-nav {
-  flex: 1;
+.field-error {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: #dc2626;
+  text-align: right;
 }
 
-.settings-header .btn {
-  margin-left: 20px;
+.field-text,
+.field-num,
+.field-select {
+  width: 100%;
 }
-
-.tab-nav {
-  display: flex;
-  gap: 4px;
-  background: #f8fafc;
-  padding: 4px;
-  border-radius: 12px;
-  border: 1px solid #e2e8f0;
-}
-
-.tab-btn {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 20px;
-  border: none;
-  background: transparent;
-  color: #64748b;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  border-radius: 8px;
-  transition: all 0.2s ease;
-  position: relative;
-}
-
-.tab-btn:hover:not(:disabled) {
-  background: linear-gradient(135deg, #3b5bdb, #1e88e5);
-  color: #fff;
-}
-
-.tab-btn.active {
-  background: linear-gradient(135deg, #4C74DF, #02A6F0);
-  color: #fff;
-  box-shadow: 0 2px 4px rgba(76, 116, 223, 0.3);
-}
-
-.tab-btn:disabled {
-  cursor: not-allowed;
-  opacity: 0.6;
-}
-
-/* 设置内容区域 */
-.settings-content {
-  animation: fadeInUp 0.3s ease-out;
-}
-
-
-@keyframes fadeInUp {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-/* 设置分组样式 */
-.settings-group {
-  background: white;
-  border-radius: 12px;
-  padding: 20px;
-  border-left: 4px solid #4C74DF;
-  margin-bottom: 24px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-}
-
-.group-title {
-  font-size: 18px;
-  font-weight: 600;
-  color: #2d3748;
-  margin-bottom: 20px;
-  display: flex;
-  align-items: center;
-}
-
-.group-title i {
-  margin-right: 12px;
-  color: #4C74DF;
-}
-
-.group-item {
-  display: grid;
-  grid-template-columns: 1fr 2fr;
-  gap: 20px;
-  align-items: center;
-  padding: 12px 0;
-  position: relative;
-}
-
-.group-item:not(:last-child)::after {
-  content: '';
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  width: 33.33%;
-  height: 1px;
-  background: linear-gradient(to right, 
-    #e2e8f0 0%, 
-    rgba(226, 232, 240, 0.8) 25%, 
-    rgba(226, 232, 240, 0.6) 50%, 
-    rgba(226, 232, 240, 0.4) 75%, 
-    transparent 100%
-  );
-}
-
-.group-label {
-  font-weight: 500;
-  color: #4a5568;
-}
-
-.group-label.with-help {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.help-icon {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  cursor: help;
-}
-
-.help-icon i {
-  color: #94a3b8;
-  font-size: 14px;
-  transition: color 0.2s ease;
-}
-
-.help-icon:hover i {
-  color: #4C74DF;
-}
-
-.tooltip {
-  position: absolute;
-  top: 50%;
-  left: 25px;
-  transform: translateY(-50%);
-  z-index: 1000;
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.12);
-  padding: 0;
-  min-width: 380px;
-  max-width: 480px;
-  color: #2d3748;
-  overflow: hidden;
-}
-
-.tooltip::before {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: -7px;
-  transform: translateY(-50%);
-  width: 0;
-  height: 0;
-  border-top: 7px solid transparent;
-  border-bottom: 7px solid transparent;
-  border-right: 7px solid #e1e8ed;
-}
-
-.tooltip::after {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: -6px;
-  transform: translateY(-50%);
-  width: 0;
-  height: 0;
-  border-top: 6px solid transparent;
-  border-bottom: 6px solid transparent;
-  border-right: 6px solid #ffffff;
-}
-
-.tooltip-content {
-  padding: 0;
-}
-
-.tooltip-title {
-  background: #f8fafc;
-  color: #4C74DF;
-  padding: 16px 20px;
-  font-weight: 600;
-  font-size: 15px;
-  border-bottom: 1px solid #e2e8f0;
-}
-
-.tooltip-body {
-  padding: 20px;
-}
-
-.tooltip-body p {
-  margin: 0 0 16px 0;
-  color: #475569;
-  font-size: 14px;
-  line-height: 1.6;
-}
-
-.tooltip-body p:last-child {
-  margin-bottom: 0;
-}
-
-.section-title {
-  color: #4C74DF;
-  font-weight: 600;
-  font-size: 14px;
-  margin: 20px 0 12px 0;
-}
-
-.priority-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 8px;
-  padding: 4px 0;
-}
-
-.priority-item:last-child {
-  margin-bottom: 0;
-}
-
-.priority-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.priority-dot.on {
-  background: #10b981;
-}
-
-.priority-dot.off {
-  background: #ef4444;
-}
-
-.priority-text {
-  color: #475569;
-  font-size: 13px;
-  line-height: 1.5;
-  flex: 1;
-}
-
-.group-input {
-  padding: 12px 16px;
-  border: none;
-  border-radius: 8px;
-  font-size: 14px;
-  transition: all 0.2s ease;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-}
-
-.group-input:focus {
-  outline: none;
-  border-color: #4C74DF;
-  box-shadow: 0 0 0 2px rgba(76, 116, 223, 0.1);
-}
-
-.group-input.is-invalid {
-  border-color: #ef4444 !important;
-  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.1) !important;
-}
-
-.mode-segment {
-  --segment-count: 2;
-  --segment-item-width: 210px;
-  display: inline-grid;
-  grid-template-columns: repeat(var(--segment-count), minmax(0, var(--segment-item-width)));
-  width: max-content;
-  max-width: 100%;
-  padding: 3px;
-  gap: 3px;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
-}
-
-.mode-segment-three {
-  --segment-count: 3;
-}
-
-.mode-segment-btn {
-  min-height: 34px;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  color: #64748b;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  padding: 0 12px;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  white-space: nowrap;
-}
-
-.mode-segment-btn:hover {
-  color: #4C74DF;
-  background: #eef4ff;
-}
-
-.mode-segment-btn.active {
-  color: #fff;
-  background: linear-gradient(135deg, #4C74DF, #02A6F0);
-  box-shadow: 0 2px 6px rgba(76, 116, 223, 0.18);
-}
-
-.mode-segment-btn i {
-  font-size: 13px;
-}
-
-.inline-switch {
-  display: inline-flex;
-  align-items: center;
-  cursor: pointer;
-  user-select: none;
-}
-
-.inline-switch input {
-  display: none;
-}
-
-.inline-switch-slider {
-  position: relative;
-  width: 48px;
-  height: 26px;
-  border-radius: 999px;
-  background: #cbd5e1;
-  transition: background 0.2s ease;
-  flex-shrink: 0;
-}
-
-.inline-switch-slider::after {
-  content: '';
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
-  transition: transform 0.2s ease;
-}
-
-.inline-switch input:checked + .inline-switch-slider {
-  background: linear-gradient(135deg, #4C74DF, #02A6F0);
-}
-
-.inline-switch input:checked + .inline-switch-slider::after {
-  transform: translateX(22px);
-}
-
-/* 按钮样式 */
-.btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 16px;
-  border: none;
-  border-radius: 8px;
-  background: #fff;
-  color: #374151;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  text-decoration: none;
-  white-space: nowrap;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
-}
-
-.btn:hover {
-  background: #f8fafc;
-  color: #1e293b;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-}
-
-.btn-primary {
-  background: linear-gradient(135deg, #4C74DF, #02A6F0);
-  color: #fff;
-  box-shadow: 0 2px 4px rgba(76, 116, 223, 0.3);
-}
-
-.btn-primary:hover {
-  background: linear-gradient(135deg, #3b5bdb, #1e88e5);
-  color: #fff;
-  box-shadow: 0 4px 12px rgba(76, 116, 223, 0.4);
-}
-
-.btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-  transform: none !important;
-  box-shadow: none !important;
-}
-
-/* 占位内容样式 */
-.placeholder-content {
-  background: #fff;
-  padding: 48px;
-  border-radius: 12px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-  text-align: center;
-  color: #64748b;
-}
-
-.placeholder-icon {
-  font-size: 48px;
-  color: #cbd5e1;
-  margin-bottom: 16px;
-  display: block;
-}
-
-.placeholder-content p {
-  font-size: 16px;
-  margin: 0;
-}
-
-/* 响应式设计 */
-@media (max-width: 768px) {
-  .tab-nav {
-    flex-direction: column;
-    gap: 2px;
-  }
-  
-  .tab-btn {
-    justify-content: center;
-    padding: 10px 16px;
-  }
-  
-  .group-item {
-    grid-template-columns: 1fr;
-    gap: 16px;
-  }
-
-  .mode-segment {
-    width: 100%;
-    grid-template-columns: repeat(var(--segment-count), minmax(0, 1fr));
-  }
-
-  .mode-segment-btn {
-    padding: 0 10px;
-    font-size: 13px;
-  }
-
-  .mode-segment-three {
-    grid-template-columns: 1fr;
-  }
-
-  .tooltip {
-    max-width: 340px;
-    left: 0;
-    top: 50%;
-    transform: translateY(-50%);
-    min-width: 320px;
-  }
-
-  .tooltip::before {
-    top: -7px;
-    left: 20px;
-    border-left: 7px solid transparent;
-    border-right: 7px solid transparent;
-    border-bottom: 7px solid #e1e8ed;
-    border-top: none;
-    transform: none;
-  }
-
-  .tooltip::after {
-    top: -6px;
-    left: 21px;
-    border-left: 6px solid transparent;
-    border-right: 6px solid transparent;
-    border-bottom: 6px solid #ffffff;
-    border-top: none;
-    transform: none;
-  }
-
-  .tooltip-title {
-    padding: 14px 16px;
-    font-size: 14px;
-  }
-
-  .tooltip-body {
-    padding: 16px;
-  }
-  
-  .settings-header {
-    flex-direction: column;
-    gap: 16px;
-    align-items: stretch;
-  }
-  
-  .settings-header .btn {
-    margin-left: 0;
-    align-self: center;
-  }
-  
-  .placeholder-content {
-    padding: 32px 16px;
-  }
-  
-  .placeholder-icon {
-    font-size: 36px;
-  }
-}
-</style> 
+</style>

@@ -30,7 +30,8 @@
       <span class="t-name">{{ node.name }}</span>
       <span class="t-meta">{{ fmtSize(node.size) }}</span>
       <span v-if="mode === 'src'" class="tag" :class="statusClass(node)">
-        <i class="fas" :class="statusIcon(node)"></i>
+        <BusySpinner v-if="node.state === 'run'" :size="12" />
+        <i v-else class="fas" :class="statusIcon(node)"></i>
         {{ statusText(node) }}
       </span>
     </div>
@@ -38,6 +39,8 @@
 </template>
 
 <script setup>
+import BusySpinner from "@/components/base/BusySpinner.vue";
+
 defineOptions({ name: 'CrossTransferTree' })
 
 const props = defineProps({
@@ -62,6 +65,7 @@ const countOk = (node) => {
 
 const statusClass = (n) => {
   if (n.transferred) return 'done'
+  if (n.skipped) return 'skipped'
   if (n.relay) return 'run'
   if (n.state === 'run') return 'run'
   if (n.reuse === true) return 'ok'
@@ -70,14 +74,16 @@ const statusClass = (n) => {
 }
 const statusIcon = (n) => {
   if (n.transferred) return 'fa-check'
+  if (n.skipped) return 'fa-forward-step'
   if (n.relay) return 'fa-truck-fast'
-  if (n.state === 'run') return 'fa-spinner fa-spin'
+  if (n.state === 'run') return ''
   if (n.reuse === true) return 'fa-bolt'
   if (n.reuse === false) return 'fa-ban'
   return 'fa-clock'
 }
 const statusText = (n) => {
   if (n.transferred) return '已转存'
+  if (n.skipped) return '已跳过'
   if (n.relay) return '兜底传输中'
   if (n.state === 'run') return '验证中'
   if (n.reuse === true) return '可秒传'
@@ -87,23 +93,36 @@ const statusText = (n) => {
 </script>
 
 <style scoped>
-.tnode { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; color: var(--text-main); }
+.tnode { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; color: var(--text-main, var(--text)); }
 .tnode:hover { background: rgba(127,127,127,.1); }
-.tnode.file.probing { background: rgba(217,119,6,.1); }
+.tnode.file.probing { background: rgba(217,119,6,.12); outline: 1px solid rgba(217,119,6,.25); }
 .tnode.folder { cursor: pointer; }
-.caret { width: 14px; color: var(--text-secondary); font-size: 12px; transition: transform .14s; flex: 0 0 auto; }
+.caret { width: 14px; color: var(--text-secondary, var(--text-muted)); font-size: 12px; transition: transform .14s; flex: 0 0 auto; }
 .caret.open { transform: rotate(90deg); }
 .caret-spacer { width: 14px; flex: 0 0 auto; }
 .t-ic { width: 26px; height: 26px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 13px; flex: 0 0 auto; }
 .t-ic.dir { color: #f5b942; background: rgba(245,185,66,.16); }
 .t-ic.file { color: #7c93b3; background: rgba(124,147,179,.16); }
 .t-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
-.t-meta { color: var(--text-secondary); font-size: 12px; white-space: nowrap; }
+.t-meta { color: var(--text-secondary, var(--text-muted)); font-size: 12px; white-space: nowrap; }
 .folder-count { font-size: 12px; padding: 2px 9px; border-radius: 999px; white-space: nowrap; border: 1px solid rgba(76,116,223,.22); background: rgba(76,116,223,.08); color: #1d4ed8; }
 .tag { font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius: 999px; white-space: nowrap; display: inline-flex; align-items: center; gap: 5px; }
 .tag.ok { color: #16a34a; background: #dcfce7; }
 .tag.no { color: #94a3b8; background: #eef2f7; }
 .tag.run { color: #d97706; background: #fef3c7; }
 .tag.done { color: #16a34a; background: #dcfce7; }
+.tag.skipped { color: #64748b; background: #e2e8f0; }
 .tag.pending { color: #64748b; background: #f1f5f9; }
+
+:global(:root[data-skin="brutal"] .cross-transfer) .tnode,
+:global(:root[data-skin="brutal"] .cross-transfer) .t-ic,
+:global(:root[data-skin="brutal"] .cross-transfer) .folder-count,
+:global(:root[data-skin="brutal"] .cross-transfer) .tag {
+  border-radius: 0;
+}
+
+:global(:root[data-skin="brutal"] .cross-transfer) .tag {
+  border: 1px solid var(--brutal-ink);
+  color: var(--brutal-ink);
+}
 </style>
