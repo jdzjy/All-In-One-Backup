@@ -148,6 +148,9 @@ class Chat(Object):
         sign_messages (``bool``, *optional*):
             True, if messages sent to the channel contains name of the sender. This field is only applicable to channels.
 
+        emoji_status (:obj:`~pyrogram.types.EmojiStatus`, *optional*):
+            Emoji status.
+
         dc_id (``int``, *optional*):
             The chat assigned DC (data center). Available only in case the chat has a photo.
             Note that this information is approximate; it is based on where Telegram stores the current chat photo.
@@ -581,6 +584,7 @@ class Chat(Object):
         description: Optional[str] = None,
         show_message_sender_name: Optional[bool] = None,
         sign_messages: Optional[bool] = None,
+        emoji_status: Optional["types.EmojiStatus"] = None,
         dc_id: Optional[int] = None,
         folder_id: Optional[int] = None,
         has_protected_content: Optional[bool] = None,
@@ -726,6 +730,7 @@ class Chat(Object):
         self.description = description
         self.show_message_sender_name = show_message_sender_name
         self.sign_messages = sign_messages
+        self.emoji_status = emoji_status
         self.dc_id = dc_id
         self.folder_id = folder_id
         self.has_protected_content = has_protected_content
@@ -884,6 +889,7 @@ class Chat(Object):
             restrictions=types.List([types.Restriction._parse(r) for r in user.restriction_reason])
             or None,
             dc_id=getattr(getattr(user, "photo", None), "dc_id", None),
+            emoji_status=types.EmojiStatus._parse(client, user.emoji_status),
             reply_color=types.ChatColor._parse(user.color),
             profile_color=types.ChatColor._parse_profile_color(user.profile_color),
             paid_message_star_count=user.send_paid_messages_stars,
@@ -996,6 +1002,7 @@ class Chat(Object):
             permissions=types.ChatPermissions._parse(channel.default_banned_rights),
             members_count=channel.participants_count,
             dc_id=getattr(getattr(channel, "photo", None), "dc_id", None),
+            emoji_status=types.EmojiStatus._parse(client, channel.emoji_status),
             has_protected_content=channel.noforwards,
             level=channel.level,
             reply_color=types.ChatColor._parse(channel.color),

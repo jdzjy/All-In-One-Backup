@@ -71,7 +71,7 @@ class SendRichMessage:
 
             direct_messages_topic_id (``int``, *optional*):
                 Unique identifier of the topic in a channel direct messages chat administered by the current user.
-                For directs only only.
+                For direct chats only.only.
 
             effect_id (``int``, *optional*):
                 Unique identifier of the message effect.

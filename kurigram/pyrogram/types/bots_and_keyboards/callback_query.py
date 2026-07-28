@@ -71,12 +71,12 @@ class CallbackQuery(Object, Update):
         client: "pyrogram.Client" = None,
         id: str,
         from_user: "types.User",
-        chat_instance: str,
-        message: "types.Message" = None,
-        inline_message_id: str = None,
-        data: Union[str, bytes] = None,
-        game_short_name: str = None,
-        matches: List[Match] = None
+        chat_instance: Optional[str] = None,
+        message: Optional["types.Message"] = None,
+        inline_message_id: Optional[str] = None,
+        data: Optional[Union[str, bytes]] = None,
+        game_short_name: Optional[str] = None,
+        matches: Optional[List[Match]] = None
     ):
         super().__init__(client)
 
@@ -129,6 +129,15 @@ class CallbackQuery(Object, Update):
                 business_connection_id=callback_query.connection_id,
                 raw_reply_to_message=getattr(callback_query, "reply_to_message", None)
             )
+        elif isinstance(callback_query, raw.types.UpdateEphemeralBotCallbackQuery):
+            message = await types.Message._parse(
+                client,
+                callback_query.message,
+                users,
+                chats,
+                replies=0
+            )
+
         # Try to decode callback query data into string. If that fails, fallback to bytes instead of decoding by
         # ignoring/replacing errors, this way, button clicks will still work.
         data = getattr(callback_query, "data", None)
@@ -144,7 +153,7 @@ class CallbackQuery(Object, Update):
             from_user=types.User._parse(client, users[callback_query.user_id]),
             message=message,
             inline_message_id=inline_message_id,
-            chat_instance=str(callback_query.chat_instance),
+            chat_instance=str(callback_query.chat_instance) if hasattr(callback_query, "chat_instance") else None,
             data=data,
             game_short_name=getattr(callback_query, "game_short_name", None),
             client=client
