@@ -2447,6 +2447,7 @@ class Message(Object, Update):
         * direct_messages_topic_id
         * business_connection_id
         * reply_parameters
+        * receiver_user_id
 
         Parameters:
             animation (``str``):
@@ -2568,8 +2569,12 @@ class Message(Object, Update):
         """
         if reply_parameters is None:
             reply_parameters = types.ReplyParameters(
-                message_id=self.id
+                message_id=None if self.ephemeral_message_id else self.id,
+                ephemeral_message_id=self.ephemeral_message_id
             )
+
+        if receiver_user_id is None:
+            receiver_user_id = self.from_user.id
 
         if quote is not None:
             log.warning(
@@ -2661,6 +2666,7 @@ class Message(Object, Update):
         * message_thread_id
         * direct_messages_topic_id
         * business_connection_id
+        * receiver_user_id
 
         Parameters:
             animation (``str``):
@@ -2780,6 +2786,9 @@ class Message(Object, Update):
         Raises:
             RPCError: In case of a Telegram RPC error.
         """
+        if receiver_user_id is None:
+            receiver_user_id = self.from_user.id
+
         if message_thread_id is None:
             message_thread_id = self.message_thread_id
 
@@ -2861,6 +2870,7 @@ class Message(Object, Update):
         * direct_messages_topic_id
         * business_connection_id
         * reply_parameters
+        * receiver_user_id
 
         Parameters:
             audio (``str``):
@@ -2976,8 +2986,12 @@ class Message(Object, Update):
         """
         if reply_parameters is None:
             reply_parameters = types.ReplyParameters(
-                message_id=self.id
+                message_id=None if self.ephemeral_message_id else self.id,
+                ephemeral_message_id=self.ephemeral_message_id
             )
+
+        if receiver_user_id is None:
+            receiver_user_id = self.from_user.id
 
         if quote is not None:
             log.warning(
@@ -3065,6 +3079,7 @@ class Message(Object, Update):
         * message_thread_id
         * direct_messages_topic_id
         * business_connection_id
+        * receiver_user_id
 
         Parameters:
             audio (``str``):
@@ -3178,6 +3193,9 @@ class Message(Object, Update):
         Raises:
             RPCError: In case of a Telegram RPC error.
         """
+        if receiver_user_id is None:
+            receiver_user_id = self.from_user.id
+
         if message_thread_id is None:
             message_thread_id = self.message_thread_id
 
@@ -3249,6 +3267,7 @@ class Message(Object, Update):
         * direct_messages_topic_id
         * business_connection_id
         * reply_parameters
+        * receiver_user_id
 
         Parameters:
             phone_number (``str``):
@@ -3312,8 +3331,12 @@ class Message(Object, Update):
         """
         if reply_parameters is None:
             reply_parameters = types.ReplyParameters(
-                message_id=self.id
+                message_id=None if self.ephemeral_message_id else self.id,
+                ephemeral_message_id=self.ephemeral_message_id
             )
+
+        if receiver_user_id is None:
+            receiver_user_id = self.from_user.id
 
         if quote is not None:
             log.warning(
@@ -3384,6 +3407,7 @@ class Message(Object, Update):
         * message_thread_id
         * direct_messages_topic_id
         * business_connection_id
+        * receiver_user_id
 
         Parameters:
             phone_number (``str``):
@@ -3445,6 +3469,9 @@ class Message(Object, Update):
         Raises:
             RPCError: In case of a Telegram RPC error.
         """
+        if receiver_user_id is None:
+            receiver_user_id = self.from_user.id
+
         if message_thread_id is None:
             message_thread_id = self.message_thread_id
 
@@ -3515,6 +3542,7 @@ class Message(Object, Update):
         * direct_messages_topic_id
         * business_connection_id
         * reply_parameters
+        * receiver_user_id
 
         Parameters:
             document (``str``):
@@ -3633,8 +3661,12 @@ class Message(Object, Update):
         """
         if reply_parameters is None:
             reply_parameters = types.ReplyParameters(
-                message_id=self.id
+                message_id=None if self.ephemeral_message_id else self.id,
+                ephemeral_message_id=self.ephemeral_message_id
             )
+
+        if receiver_user_id is None:
+            receiver_user_id = self.from_user.id
 
         if quote is not None:
             log.warning(
@@ -3722,6 +3754,7 @@ class Message(Object, Update):
         * message_thread_id
         * direct_messages_topic_id
         * business_connection_id
+        * receiver_user_id
 
         Parameters:
             document (``str``):
@@ -3838,6 +3871,9 @@ class Message(Object, Update):
         Raises:
             RPCError: In case of a Telegram RPC error.
         """
+        if receiver_user_id is None:
+            receiver_user_id = self.from_user.id
+
         if message_thread_id is None:
             message_thread_id = self.message_thread_id
 
@@ -4504,6 +4540,7 @@ class Message(Object, Update):
         * direct_messages_topic_id
         * business_connection_id
         * reply_parameters
+        * receiver_user_id
 
         Parameters:
             latitude (``float``):
@@ -4577,8 +4614,12 @@ class Message(Object, Update):
         """
         if reply_parameters is None:
             reply_parameters = types.ReplyParameters(
-                message_id=self.id
+                message_id=None if self.ephemeral_message_id else self.id,
+                ephemeral_message_id=self.ephemeral_message_id
             )
+
+        if receiver_user_id is None:
+            receiver_user_id = self.from_user.id
 
         if quote is not None:
             log.warning(
@@ -4652,6 +4693,7 @@ class Message(Object, Update):
         * message_thread_id
         * direct_messages_topic_id
         * business_connection_id
+        * receiver_user_id
 
         Parameters:
             latitude (``float``):
@@ -4723,6 +4765,9 @@ class Message(Object, Update):
         Raises:
             RPCError: In case of a Telegram RPC error.
         """
+        if receiver_user_id is None:
+            receiver_user_id = self.from_user.id
+
         if message_thread_id is None:
             message_thread_id = self.message_thread_id
 
@@ -4974,6 +5019,7 @@ class Message(Object, Update):
         * direct_messages_topic_id
         * business_connection_id
         * reply_parameters
+        * receiver_user_id
 
         Parameters:
             text (``str``):
@@ -5053,8 +5099,12 @@ class Message(Object, Update):
         """
         if reply_parameters is None:
             reply_parameters = types.ReplyParameters(
-                message_id=self.id
+                message_id=None if self.ephemeral_message_id else self.id,
+                ephemeral_message_id=self.ephemeral_message_id
             )
+
+        if receiver_user_id is None:
+            receiver_user_id = self.from_user.id
 
         if quote is not None:
             log.warning(
@@ -5137,6 +5187,7 @@ class Message(Object, Update):
         * message_thread_id
         * direct_messages_topic_id
         * business_connection_id
+        * receiver_user_id
 
         Parameters:
             text (``str``):
@@ -5214,6 +5265,9 @@ class Message(Object, Update):
         Raises:
             RPCError: In case of a Telegram RPC error.
         """
+        if receiver_user_id is None:
+            receiver_user_id = self.from_user.id
+
         if message_thread_id is None:
             message_thread_id = self.message_thread_id
 
@@ -5408,8 +5462,12 @@ class Message(Object, Update):
         """
         if reply_parameters is None:
             reply_parameters = types.ReplyParameters(
-                message_id=self.id
+                message_id=None if self.ephemeral_message_id else self.id,
+                ephemeral_message_id=self.ephemeral_message_id
             )
+
+        if receiver_user_id is None:
+            receiver_user_id = self.from_user.id
 
         if quote is not None:
             log.warning(
@@ -5499,6 +5557,7 @@ class Message(Object, Update):
         * message_thread_id
         * direct_messages_topic_id
         * business_connection_id
+        * receiver_user_id
 
         Parameters:
             photo (``str``):
@@ -5615,6 +5674,9 @@ class Message(Object, Update):
         Raises:
             RPCError: In case of a Telegram RPC error.
         """
+        if receiver_user_id is None:
+            receiver_user_id = self.from_user.id
+
         if message_thread_id is None:
             message_thread_id = self.message_thread_id
 
@@ -6316,6 +6378,7 @@ class Message(Object, Update):
         * direct_messages_topic_id
         * business_connection_id
         * reply_parameters
+        * receiver_user_id
 
         Parameters:
             sticker (``str``):
@@ -6419,8 +6482,12 @@ class Message(Object, Update):
         """
         if reply_parameters is None:
             reply_parameters = types.ReplyParameters(
-                message_id=self.id
+                message_id=None if self.ephemeral_message_id else self.id,
+                ephemeral_message_id=self.ephemeral_message_id
             )
+
+        if receiver_user_id is None:
+            receiver_user_id = self.from_user.id
 
         if quote is not None:
             log.warning(
@@ -6502,6 +6569,7 @@ class Message(Object, Update):
         * message_thread_id
         * direct_messages_topic_id
         * business_connection_id
+        * receiver_user_id
 
         Parameters:
             sticker (``str``):
@@ -6603,6 +6671,9 @@ class Message(Object, Update):
         Raises:
             RPCError: In case of a Telegram RPC error.
         """
+        if receiver_user_id is None:
+            receiver_user_id = self.from_user.id
+
         if message_thread_id is None:
             message_thread_id = self.message_thread_id
 
@@ -6673,6 +6744,7 @@ class Message(Object, Update):
         * direct_messages_topic_id
         * business_connection_id
         * reply_parameters
+        * receiver_user_id
 
         Parameters:
             latitude (``float``):
@@ -6743,8 +6815,12 @@ class Message(Object, Update):
         """
         if reply_parameters is None:
             reply_parameters = types.ReplyParameters(
-                message_id=self.id
+                message_id=None if self.ephemeral_message_id else self.id,
+                ephemeral_message_id=self.ephemeral_message_id
             )
+
+        if receiver_user_id is None:
+            receiver_user_id = self.from_user.id
 
         if quote is not None:
             log.warning(
@@ -6819,6 +6895,7 @@ class Message(Object, Update):
         * message_thread_id
         * direct_messages_topic_id
         * business_connection_id
+        * receiver_user_id
 
         Parameters:
             latitude (``float``):
@@ -6887,6 +6964,9 @@ class Message(Object, Update):
         Raises:
             RPCError: In case of a Telegram RPC error.
         """
+        if receiver_user_id is None:
+            receiver_user_id = self.from_user.id
+
         if message_thread_id is None:
             message_thread_id = self.message_thread_id
 
@@ -6967,6 +7047,7 @@ class Message(Object, Update):
         * direct_messages_topic_id
         * business_connection_id
         * reply_parameters
+        * receiver_user_id
 
         Parameters:
             video (``str``):
@@ -7114,8 +7195,12 @@ class Message(Object, Update):
         """
         if reply_parameters is None:
             reply_parameters = types.ReplyParameters(
-                message_id=self.id
+                message_id=None if self.ephemeral_message_id else self.id,
+                ephemeral_message_id=self.ephemeral_message_id
             )
+
+        if receiver_user_id is None:
+            receiver_user_id = self.from_user.id
 
         if quote is not None:
             log.warning(
@@ -7219,6 +7304,7 @@ class Message(Object, Update):
         * message_thread_id
         * direct_messages_topic_id
         * business_connection_id
+        * receiver_user_id
 
         Parameters:
             video (``str``):
@@ -7364,6 +7450,9 @@ class Message(Object, Update):
         Raises:
             RPCError: In case of a Telegram RPC error.
         """
+        if receiver_user_id is None:
+            receiver_user_id = self.from_user.id
+
         if message_thread_id is None:
             message_thread_id = self.message_thread_id
 
@@ -7450,6 +7539,7 @@ class Message(Object, Update):
         * direct_messages_topic_id
         * business_connection_id
         * reply_parameters
+        * receiver_user_id
 
         Parameters:
             video_note (``str``):
@@ -7559,8 +7649,12 @@ class Message(Object, Update):
         """
         if reply_parameters is None:
             reply_parameters = types.ReplyParameters(
-                message_id=self.id
+                message_id=None if self.ephemeral_message_id else self.id,
+                ephemeral_message_id=self.ephemeral_message_id
             )
+
+        if receiver_user_id is None:
+            receiver_user_id = self.from_user.id
 
         if quote is not None:
             log.warning(
@@ -7645,6 +7739,7 @@ class Message(Object, Update):
         * message_thread_id
         * direct_messages_topic_id
         * business_connection_id
+        * receiver_user_id
 
         Parameters:
             video_note (``str``):
@@ -7752,6 +7847,9 @@ class Message(Object, Update):
         Raises:
             RPCError: In case of a Telegram RPC error.
         """
+        if receiver_user_id is None:
+            receiver_user_id = self.from_user.id
+
         if message_thread_id is None:
             message_thread_id = self.message_thread_id
 
@@ -7827,6 +7925,7 @@ class Message(Object, Update):
         * direct_messages_topic_id
         * business_connection_id
         * reply_parameters
+        * receiver_user_id
 
         Parameters:
             voice (``str``):
@@ -7934,8 +8033,12 @@ class Message(Object, Update):
         """
         if reply_parameters is None:
             reply_parameters = types.ReplyParameters(
-                message_id=self.id
+                message_id=None if self.ephemeral_message_id else self.id,
+                ephemeral_message_id=self.ephemeral_message_id
             )
+
+        if receiver_user_id is None:
+            receiver_user_id = self.from_user.id
 
         if quote is not None:
             log.warning(
@@ -8019,6 +8122,7 @@ class Message(Object, Update):
         * message_thread_id
         * direct_messages_topic_id
         * business_connection_id
+        * receiver_user_id
 
         Parameters:
             voice (``str``):
@@ -8124,6 +8228,9 @@ class Message(Object, Update):
         Raises:
             RPCError: In case of a Telegram RPC error.
         """
+        if receiver_user_id is None:
+            receiver_user_id = self.from_user.id
+
         if message_thread_id is None:
             message_thread_id = self.message_thread_id
 
