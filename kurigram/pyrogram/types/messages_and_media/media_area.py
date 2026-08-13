@@ -16,7 +16,7 @@
 #  You should have received a copy of the GNU Lesser General Public License
 #  along with Pyrogram.  If not, see <http://www.gnu.org/licenses/>.
 
-from typing import Optional, Union
+from typing import Dict, Optional, Union
 
 import pyrogram
 from pyrogram import enums, raw, types
@@ -102,14 +102,14 @@ class MediaArea(Object):
     def __init__(
         self,
         *,
-        client: "pyrogram.Client" = None,
+        client: Optional["pyrogram.Client"] = None,
         x: float,
         y: float,
         width: float,
         height: float,
         rotation: float,
         type: "enums.MediaAreaType",
-        radius: float = None,
+        radius: Optional[float] = None,
         sender_chat: Optional["types.Chat"] = None,
         message_id: Optional[int] = None,
         message: Optional["types.Message"] = None,
@@ -151,7 +151,7 @@ class MediaArea(Object):
     async def _parse(
         client: "pyrogram.Client",
         area: "raw.base.MediaArea",
-        chats: dict = None
+        chats: Dict[int, "raw.base.Chat"]
     ) -> "MediaArea":
         sender_chat = None
         message_id = None
