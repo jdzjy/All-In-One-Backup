@@ -26,6 +26,7 @@ import re
 import shutil
 import sys
 import time
+from collections import OrderedDict
 from concurrent.futures.thread import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from hashlib import sha256
@@ -33,11 +34,12 @@ from importlib import import_module
 from io import BytesIO
 from mimetypes import MimeTypes
 from pathlib import Path
-from typing import AsyncIterator, Callable, List, Optional, Type, Union
+from typing import Any, AsyncIterator, Callable, List, Optional, Type, Union
 
 import pyrogram
 from pyrogram import __license__, __version__, enums, raw, utils
-from pyrogram.connection.transport.tcp import ProxyDict
+from pyrogram.connection import Proxy
+from pyrogram.connection.proxy import ProxyDict, normalize_proxy
 from pyrogram.crypto import aes
 from pyrogram.errors import (
     AuthBytesInvalid,
@@ -55,7 +57,7 @@ from pyrogram.handlers.handler import Handler
 from pyrogram.methods import Methods
 from pyrogram.qrlogin import QRLogin
 from pyrogram.session import Auth, Session
-from pyrogram.storage import SQLiteStorage, Storage
+from pyrogram.storage import SQLiteStorage, Storage, UpdateState
 from pyrogram.types import LinkPreviewOptions, TermsOfService, User
 from pyrogram.utils import ainput
 
@@ -115,11 +117,21 @@ class Client(Methods):
             after which the server address will be updated (works both ways).
             Defaults to False (IPv4).
 
-        proxy (``str`` | ``dict``, *optional*):
-            The Proxy settings as url or dict.
+        proxy (``str`` | ``dict`` | :obj:`~pyrogram.connection.Proxy`, *optional*):
+            The Proxy settings as a url, a dict, or one of the
+            :obj:`~pyrogram.connection.Proxy` dataclasses.
             E.g.: *dict(scheme="socks5", hostname="11.22.33.44", port=1234, username="user", password="pass")*
-            or *"http://11.22.33.44:1234"* or *"socks5://user:pass@11.22.33.44:1234"* or *"tg://user:pass@11.22.33.44:1234"*.
+            or *"http://11.22.33.44:1234"* or *"socks5://user:pass@11.22.33.44:1234"* or *"tg://socks?server=11.22.33.44&port=1234"*.
             The *username* and *password* can be omitted if the proxy doesn't require authorization.
+            A WEB proxy takes *dict(scheme="web", hostname="relay.example.com", secret="...")* and a
+            classic MTProxy *dict(scheme="mtproxy", hostname="11.22.33.44", port=443, secret="...")*
+            or its ordinary share link *"tg://proxy?server=11.22.33.44&port=443&secret=..."*. A
+            secret is read as hex, base64url or base64. The mtproxy scheme also takes an ee-prefixed
+            secret, which appends the domain the connection then imitates a TLS session with;
+            the web scheme cannot, because the relay speaks obfuscated2 to its own MTProxy and
+            never adds the TLS record layer. A secret longer than 16 bytes - dd-prefixed or
+            ee-prefixed - asks for random padding, and the transport that sends it is picked
+            from the secret, so *proxy* is the only argument either scheme needs.
 
         test_mode (``bool``, *optional*):
             Enable or disable login to the test servers.
@@ -287,7 +299,7 @@ class Client(Methods):
         lang_code: str = LANG_CODE,
         system_lang_code: str = SYSTEM_LANG_CODE,
         ipv6: Optional[bool] = False,
-        proxy: Optional[Union[str, ProxyDict]] = None,
+        proxy: Optional[Union[str, ProxyDict, Proxy]] = None,
         test_mode: Optional[bool] = False,
         bot_token: Optional[str] = None,
         session_string: Optional[str] = None,
@@ -331,7 +343,7 @@ class Client(Methods):
         self.lang_code = lang_code.lower()
         self.system_lang_code = system_lang_code.lower()
         self.ipv6 = ipv6
-        self.proxy = proxy
+        self.proxy = normalize_proxy(proxy)
         self.test_mode = test_mode
         self.bot_token = bot_token
         self.session_string = session_string
@@ -467,7 +479,9 @@ class Client(Methods):
 
             if datetime.now() - self.last_update_time > timedelta(seconds=self.UPDATES_WATCHDOG_INTERVAL):
                 await self.invoke(raw.functions.updates.GetState())
-                await self.recover_gaps()
+
+                if not self.skip_updates:
+                    await self.recover_gaps()
 
     async def authorize(self) -> User:
         if self.bot_token:
@@ -830,15 +844,18 @@ class Client(Methods):
 
                 pts = getattr(update, "pts", None)
                 pts_count = getattr(update, "pts_count", None)
+                qts = getattr(update, "qts", None)
 
-                if pts:
-                    await self.storage.update_state(
-                        (
-                            utils.get_channel_id(channel_id) if channel_id else 0,
+                if pts is not None or qts is not None:
+                    state_id = utils.get_channel_id(channel_id) if channel_id else 0
+
+                    await self.storage.set_update_state(
+                        UpdateState(
+                            state_id,
                             pts,
+                            qts,
                             None,
-                            updates.date,
-                            updates.seq
+                            None,
                         )
                     )
 
@@ -872,15 +889,13 @@ class Client(Methods):
                                 chats.update({c.id: c for c in diff.chats})
 
                 self.dispatcher.updates_queue.put_nowait((update, users, chats))
+
+            await self.storage.set_update_state(
+                UpdateState(0, None, None, updates.date, updates.seq)
+            )
         elif isinstance(updates, (raw.types.UpdateShortMessage, raw.types.UpdateShortChatMessage)):
-            await self.storage.update_state(
-                (
-                    0,
-                    updates.pts,
-                    None,
-                    updates.date,
-                    None
-                )
+            await self.storage.set_update_state(
+                UpdateState(0, updates.pts, None, updates.date, None)
             )
 
             diff = await self.invoke(
@@ -891,19 +906,22 @@ class Client(Methods):
                 )
             )
 
-            if diff.new_messages:
+            users = {u.id: u for u in diff.users}
+            chats = {c.id: c for c in diff.chats}
+
+            for message in diff.new_messages:
                 self.dispatcher.updates_queue.put_nowait((
                     raw.types.UpdateNewMessage(
-                        message=diff.new_messages[0],
+                        message=message,
                         pts=updates.pts,
                         pts_count=updates.pts_count
                     ),
-                    {u.id: u for u in diff.users},
-                    {c.id: c for c in diff.chats}
+                    users,
+                    chats
                 ))
-            else:
-                if diff.other_updates:  # The other_updates list can be empty
-                    self.dispatcher.updates_queue.put_nowait((diff.other_updates[0], {}, {}))
+
+            for update in diff.other_updates:
+                self.dispatcher.updates_queue.put_nowait((update, users, chats))
         elif isinstance(updates, raw.types.UpdateShort):
             self.dispatcher.updates_queue.put_nowait((updates.update, {}, {}))
         elif isinstance(updates, raw.types.UpdatesTooLong):
@@ -1547,18 +1565,37 @@ class Client(Methods):
 
 class Cache:
     def __init__(self, capacity: int):
+        if capacity <= 0:
+            raise ValueError("capacity must be greater than 0")
+
         self.capacity = capacity
-        self.store = {}
+        self._cache: OrderedDict[Any, Any] = OrderedDict()
+        self._lock = asyncio.Lock()
 
-    def __getitem__(self, key):
-        return self.store.get(key, None)
+    def __len__(self) -> int:
+        return len(self._cache)
 
-    def __setitem__(self, key, value):
-        if key in self.store:
-            del self.store[key]
+    def __contains__(self, key: Any) -> bool:
+        return key in self._cache
 
-        self.store[key] = value
+    def __bool__(self) -> bool:
+        return bool(self._cache)
 
-        if len(self.store) > self.capacity:
-            for _ in range(self.capacity // 2 + 1):
-                del self.store[next(iter(self.store))]
+    def __repr__(self) -> str:
+        return f"{type(self).__name__}(capacity={self.capacity}, size={len(self)})"
+
+    async def get(self, key: Any, default: Any = None) -> Any:
+        async with self._lock:
+            if key not in self._cache:
+                return default
+
+            self._cache.move_to_end(key)
+            return self._cache[key]
+
+    async def set(self, key: Any, value: Any) -> None:
+        async with self._lock:
+            self._cache[key] = value
+            self._cache.move_to_end(key)
+
+            if len(self._cache) > self.capacity:
+                self._cache.popitem(last=False)
