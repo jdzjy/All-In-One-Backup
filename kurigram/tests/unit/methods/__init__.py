@@ -15,34 +15,3 @@
 #
 #  You should have received a copy of the GNU Lesser General Public License
 #  along with Pyrogram.  If not, see <http://www.gnu.org/licenses/>.
-
-from typing import Dict
-
-import pyrogram
-from pyrogram import raw, types
-
-from ..object import Object
-
-
-class CommunityChatAdded(Object):
-    """Describes a service message about a chat being added to a community.
-
-    Parameters:
-        community (:obj:`~pyrogram.types.Community`):
-            The new community to which the chat belongs.
-    """
-
-    def __init__(self, *, community: "types.Community"):
-        super().__init__()
-
-        self.community = community
-
-    @staticmethod
-    async def _parse(
-        client: "pyrogram.Client",
-        action: "raw.types.MessageActionChangeCommunity",
-        chats: Dict[int, "raw.base.Chat"],
-    ) -> "CommunityChatAdded":
-        return CommunityChatAdded(
-            community=await types.Community._parse(client, chats.get(action.community_id)),
-        )
