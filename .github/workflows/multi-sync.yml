@@ -19,7 +19,7 @@ jobs:
         with:
           path: main-repo
 
-      # 2. 拉取所有的目标仓库 (共8个)
+      # 2. 拉取所有的目标仓库 (共9个)
       - name: Checkout Target Repo 1
         uses: actions/checkout@v3
         with:
@@ -68,6 +68,12 @@ jobs:
           repository: KurimuzonAkuma/kurigram
           path: temp/kurigram
 
+      - name: Checkout Target Repo 9
+        uses: actions/checkout@v3
+        with:
+          repository: weige146/123Cloud
+          path: temp/123Cloud
+
       # 3. 核心处理、精准差异化提取与优雅通知
       - name: Process, Commit and Notify
         env:
@@ -77,7 +83,7 @@ jobs:
           cd main-repo
           
           # 断开与原作者的命运绑定
-          rm -rf ../temp/p115client/.git ../temp/p123client/.git ../temp/pansou/.git ../temp/pansou-web/.git ../temp/LitePan/.git ../temp/pyTelegramBotAPI/.git ../temp/pyrofork/.git ../temp/kurigram/.git
+          rm -rf ../temp/p115client/.git ../temp/p123client/.git ../temp/pansou/.git ../temp/pansou-web/.git ../temp/LitePan/.git ../temp/pyTelegramBotAPI/.git ../temp/pyrofork/.git ../temp/kurigram/.git ../temp/123Cloud/.git
           
           # 增量同步文件
           rsync -a --delete ../temp/p115client/ ./p115client/
@@ -88,6 +94,7 @@ jobs:
           rsync -a --delete ../temp/pyTelegramBotAPI/ ./pyTelegramBotAPI/
           rsync -a --delete ../temp/pyrofork/ ./pyrofork/
           rsync -a --delete ../temp/kurigram/ ./kurigram/
+          rsync -a --delete ../temp/123Cloud/ ./123Cloud/
           
           # 配置 Git 机器人身份
           git config user.name 'GitHub Actions Bot'
@@ -103,7 +110,7 @@ jobs:
           fi
           
           # 定义需要监控的模块列表
-          repos=("p115client" "p123client" "pansou" "pansou-web" "LitePan" "pyTelegramBotAPI" "pyrofork" "kurigram")
+          repos=("p115client" "p123client" "pansou" "pansou-web" "LitePan" "pyTelegramBotAPI" "pyrofork" "kurigram" "123Cloud")
           
           # 定义每个仓库的超链接映射字典
           declare -A repo_urls=(
@@ -115,6 +122,7 @@ jobs:
             ["pyTelegramBotAPI"]="https://github.com/eternnoir/pyTelegramBotAPI"
             ["pyrofork"]="https://github.com/Mayuri-Chan/pyrofork"
             ["kurigram"]="https://github.com/KurimuzonAkuma/kurigram"
+            ["123Cloud"]="https://github.com/weige146/123Cloud"
           )
           
           TABLE_ROWS=""
