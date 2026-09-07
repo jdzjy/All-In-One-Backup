@@ -3,7 +3,12 @@ import type {
   AdminStatus,
   AccountCooldown,
   Pan115Device,
+  Pan115DirectLinksStatus,
+  Pan115HelperActionResult,
   Pan115HelperStatus,
+  Pan123DirectLinksStatus,
+  Pan123BrowseItem,
+  Pan123BrowseResult,
   SubmissionConfig,
   SubmissionDraft,
   SubmissionStatus,
@@ -14,6 +19,8 @@ import type {
   TransferTask,
   Channel,
   Routing,
+  TelegramSessionStartResult,
+  TelegramSessionVerifyResult,
 } from "./types";
 
 export interface MyChannelConfig {
@@ -62,6 +69,14 @@ export const submissionApi = {
     api.post<{ ok: boolean; preview: SubmissionDisplayPreview }>("/api/submission/display/preview", { config, sample }),
   status: () => api.get<SubmissionStatus>("/api/submission/status"),
   testBot: (token: string) => api.post<{ ok: boolean; message: string }>("/api/submission/test/bot", { token }),
+  testTelegramApi: (payload: { apiId: string; apiHash: string; session: string }) =>
+    api.post<{ ok: boolean; message: string }>("/api/submission/test/tg-api", payload),
+  startTelegramSession: (payload: { apiId: string; apiHash: string; phone: string }) =>
+    api.post<TelegramSessionStartResult>("/api/submission/telegram/session/start", payload),
+  verifyTelegramSession: (payload: { loginId: string; code: string; password?: string }) =>
+    api.post<TelegramSessionVerifyResult>("/api/submission/telegram/session/verify", payload),
+  cancelTelegramSession: (loginId: string) =>
+    api.post<{ ok: boolean }>("/api/submission/telegram/session/cancel", { loginId }),
   drafts: (limit = 100) => api.get<{ ok: boolean; drafts: SubmissionDraft[]; count: number }>(`/api/submission/drafts?limit=${limit}`),
   clearDrafts: () => api.delete<{ ok: boolean }>("/api/submission/drafts"),
   deleteDraft: (id: string) => api.delete<{ ok: boolean }>(`/api/submission/drafts/${encodeURIComponent(id)}`),
@@ -99,6 +114,12 @@ export const pan115HelperApi = {
   status: () => api.get<Pan115HelperStatus>("/api/pan115-helper/status"),
   offline: (text: string) => api.post("/api/pan115-helper/offline", { text }),
   emptyRecycle: () => api.post("/api/pan115-helper/recycle/empty", {}),
+  dlinks: () => api.get<Pan115DirectLinksStatus>("/api/pan115-helper/dlinks"),
+  dlinksOffline: (keys: string[]) => api.post<Pan115HelperActionResult>("/api/pan115-helper/dlinks/offline", { keys }),
+  urlsOffline: (urls: string[]) => api.post<Pan115HelperActionResult>("/api/pan115-helper/urls/offline", { urls }),
+  pan123Dlinks: () => api.get<Pan123DirectLinksStatus>("/api/pan115-helper/pan123/dlinks"),
+  pan123DlinksOffline: (keys: string[]) => api.post<Pan115HelperActionResult>("/api/pan115-helper/pan123/dlinks/offline", { keys }),
+  pan123Browse: (parentId = 0) => api.get<Pan123BrowseResult>(`/api/pan115-helper/pan123/browse?parentId=${parentId || 0}`),
 };
 
 // ====== 115 搬运 ======
@@ -118,3 +139,49 @@ export const transferApi = {
   accountCooldowns: () => api.get<{ ok: boolean; accounts: AccountCooldown[]; cooldownMinutes: number }>("/api/transfer/account-cooldowns"),
   clearAccountCooldowns: () => api.delete<{ ok: boolean; cleared: number; accounts: string[] }>("/api/transfer/account-cooldowns"),
 };
+
+// ====== 秒传池（管理员自用：目录搜索 + SHA1 秒传） ======
+export interface PoolSearchResult {
+  sha1: string;
+  size: number;
+  name: string;
+}
+
+export interface PoolSearchResponse {
+  available: boolean;
+  results: PoolSearchResult[];
+  cached: boolean;
+  error?: string;
+}
+
+export interface PoolReuseItemResult {
+  sha1: string;
+  name: string;
+  size: number;
+  ok: boolean;
+  fileId?: number;
+  error?: string;
+}
+
+export interface PoolTokenStatus {
+  override: boolean;
+  overridePreview: string | null;
+  defaultPreview: string | null;
+}
+
+export const poolApi = {
+  search: (keyword: string, limit = 50) =>
+    api.get<PoolSearchResponse>(`/api/pool/search?keyword=${encodeURIComponent(keyword)}&limit=${limit}`),
+  reuse: (dirId: string, items: PoolSearchResult[]) =>
+    api.post<{ ok: boolean; results: PoolReuseItemResult[] }>("/api/pool/reuse", { dirId, items }),
+  tokenStatus: () => api.get<PoolTokenStatus>("/api/pool/token"),
+  setToken: (token: string) =>
+    api.post<{ ok: boolean; override: boolean; overridePreview: string | null }>("/api/pool/token", { token }),
+  resetToken: () => api.delete<{ ok: boolean; override: boolean }>("/api/pool/token"),
+};
+
+export interface PoolTokenStatus {
+  override: boolean;
+  overridePreview: string | null;
+  defaultPreview: string | null;
+}

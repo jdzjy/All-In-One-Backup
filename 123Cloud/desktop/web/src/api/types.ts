@@ -114,6 +114,36 @@ export interface TelegramApi {
   session?: string;
 }
 
+export interface TelegramAccount {
+  userId?: number;
+  username?: string;
+  displayName?: string;
+  phone?: string;
+}
+
+/** 第一步：发送验证码的结果。 */
+export interface TelegramSessionStartResult {
+  ok: boolean;
+  loginId?: string;
+  phone?: string;
+  delivery?: string;
+  expiresInSeconds?: number;
+  message?: string;
+}
+
+/** 第二步：验证码换 Session 的结果；needPassword 时需要补两步验证密码再提交一次。 */
+export interface TelegramSessionVerifyResult {
+  ok: boolean;
+  loginId?: string;
+  needPassword?: boolean;
+  session?: string;
+  apiId?: string;
+  apiHash?: string;
+  account?: TelegramAccount | null;
+  saved?: boolean;
+  message?: string;
+}
+
 export interface Templates {
   shareName?: string;
   shareUrl?: string;
@@ -130,6 +160,64 @@ export interface Pan115HelperConfig {
   dailyRecycleCleanupTime?: string;
   dailyRecycleCleanupTimeZone?: string;
   requestIntervalMs?: number;
+  directLinkRoot?: string;
+  publicBaseUrl?: string;
+  pan123SourceDirId?: string;
+  pan123SourceDirPath?: string;
+}
+
+export interface DirectLinkFile {
+  name: string;
+  rel: string;
+  size: number;
+  mtime: number;
+  url: string;
+}
+
+export interface Pan115DirectLinksStatus {
+  ok: boolean;
+  enabled?: boolean;
+  message?: string;
+  root?: string;
+  baseUrl?: string;
+  files?: DirectLinkFile[];
+}
+
+export interface Pan115HelperActionResult {
+  ok?: boolean;
+  actionOk?: boolean;
+  total?: number;
+  success?: number;
+  failed?: number;
+  results?: { ok?: boolean; type?: string; label?: string; link?: string; message?: string }[];
+}
+
+export interface Pan123PanLinkFile {
+  fileId: number;
+  name: string;
+  rel: string;
+  size: number;
+  url: string;
+}
+
+export interface Pan123DirectLinksStatus {
+  ok: boolean;
+  sourceDirId: number;
+  baseUrl: string;
+  files: Pan123PanLinkFile[];
+}
+
+export interface Pan123BrowseItem {
+  fileId: number;
+  name: string;
+  size: number;
+}
+
+export interface Pan123BrowseResult {
+  ok: boolean;
+  parentId: number;
+  directories: Pan123BrowseItem[];
+  files: Pan123BrowseItem[];
 }
 
 export interface SubmissionConfig {

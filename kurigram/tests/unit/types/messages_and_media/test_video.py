@@ -16,24 +16,27 @@
 #  You should have received a copy of the GNU Lesser General Public License
 #  along with Pyrogram.  If not, see <http://www.gnu.org/licenses/>.
 
-from typing import Optional
+from pyrogram import types
 
 
-class FakeClient:
-    def __init__(self):
-        self.me = User("username")
-
-    async def get_me(self):
-        return self.me
-
-
-class User:
-    def __init__(self, username: Optional[str] = None):
-        self.username = username
+def _video() -> "types.Video":
+    return types.Video(
+        file_id="file-id",
+        file_unique_id="file-unique-id",
+        width=1,
+        height=1,
+        codec="h264",
+        duration=1,
+    )
 
 
-class Message:
-    def __init__(self, text: Optional[str] = None, caption: Optional[str] = None):
-        self.text = text
-        self.caption = caption
-        self.command = None
+def test_two_videos_do_not_share_one_alternative_videos_list() -> None:
+    first = _video()
+    second = _video()
+
+    assert first.alternative_videos is None
+    assert second.alternative_videos is None
+
+    first.alternative_videos = [second]
+
+    assert second.alternative_videos is None

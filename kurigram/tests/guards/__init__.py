@@ -16,24 +16,9 @@
 #  You should have received a copy of the GNU Lesser General Public License
 #  along with Pyrogram.  If not, see <http://www.gnu.org/licenses/>.
 
-from typing import Optional
+"""Tests that assert a property of the repository rather than the behaviour of one module.
 
-
-class FakeClient:
-    def __init__(self):
-        self.me = User("username")
-
-    async def get_me(self):
-        return self.me
-
-
-class User:
-    def __init__(self, username: Optional[str] = None):
-        self.username = username
-
-
-class Message:
-    def __init__(self, text: Optional[str] = None, caption: Optional[str] = None):
-        self.text = text
-        self.caption = caption
-        self.command = None
+A test belongs here when it mirrors no single source file: it walks the tree - the package,
+the docstrings, whatever else the repository carries - and fails on the first violation
+anywhere in it. Anything that covers one module lives beside that module, under `tests/unit`.
+"""

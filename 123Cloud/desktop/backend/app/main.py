@@ -16,7 +16,7 @@ from urllib.parse import parse_qs, urlparse
 from zoneinfo import ZoneInfo
 
 import httpx
-from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
@@ -30,6 +30,7 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 DATA_DIR = Path(os.environ.get("DATA_DIR") or ROOT_DIR / "data")
 setup_logging(DATA_DIR)
 
+from .directlink import read_directlink_status, serve_directlink_file, submit_arbitrary_urls_offline, submit_directlink_offline
 from .pan115 import CODE_RE as PAN123_CODE_RE, empty_115_recycle, extract_pan115_offline_links, helper_status, submit_115_offline_from_text
 from .pan115_cookie import (
     PAN115_QR_DEVICES,
@@ -49,7 +50,9 @@ from .pan123 import (
     parse_pan123_share_url,
 )
 from .pan115_transfer import extract_115_links
+from .panlink import browse_pan123_dir, list_pan123_links, proxy_pan123_download, submit_pan123_offline
 from .session_store import SessionStore, positive_user_ids
+from . import sha1_cloud, sha1_pool
 from .submission import (
     build_submission_display_preview,
     clear_submission_drafts,
@@ -72,6 +75,13 @@ from .submission import (
     telegram_message_id,
     telegram_message_text,
     telegram_user_allowed,
+)
+from .telegram_history import TelegramHistoryCleaner, reset_telegram_client_state
+from .telegram_session import (
+    TelegramLoginError,
+    cancel_login,
+    start_login,
+    verify_code,
 )
 from .transfer_service import PAN115_ACCOUNT_COOLDOWN_MS, TransferService
 
@@ -155,6 +165,8 @@ store = SessionStore(DATA_DIR)
 pan123 = Pan123Client()
 transfer_service = TransferService(store)
 logger = logging.getLogger(__name__)
+# 恢复设置页里保存的秒传池 Token 覆盖（无则用安装包内置的分发 Token）
+sha1_cloud.set_pool_token_override(str(store.read_value("sha1PoolTokenOverride") or "") or None)
 pan115_recycle_cleanup_task: Optional[asyncio.Task[None]] = None
 telegram_callback_polling_task: Optional[asyncio.Task[None]] = None
 PAN123_COPY_PASSWORD_PENDING_PREFIX = "telegram_pan123_copy_password:"
@@ -1122,6 +1134,28 @@ class BotTestRequest(BaseModel):
     token: str = ""
 
 
+class TelegramApiTestRequest(BaseModel):
+    apiId: str = ""
+    apiHash: str = ""
+    session: str = ""
+
+
+class TelegramSessionStartRequest(BaseModel):
+    apiId: str = ""
+    apiHash: str = ""
+    phone: str = ""
+
+
+class TelegramSessionVerifyRequest(BaseModel):
+    loginId: str = ""
+    code: str = ""
+    password: str = ""
+
+
+class TelegramSessionCancelRequest(BaseModel):
+    loginId: str = ""
+
+
 class OwnUserChannelConfigRequest(BaseModel):
     """Configuration submitted from the Telegram Web App for the current user only."""
 
@@ -1137,6 +1171,14 @@ class DraftSubmitRequest(BaseModel):
 class TextActionRequest(BaseModel):
     text: str = ""
     targetUserId: Optional[int] = None
+
+
+class Pan115DirectLinkOfflineRequest(BaseModel):
+    keys: List[str] = Field(default_factory=list)
+
+
+class Pan115UrlOfflineRequest(BaseModel):
+    urls: List[str] = Field(default_factory=list)
 
 
 class TransferConfigRequest(BaseModel):
@@ -1171,6 +1213,15 @@ class TransferLocalTaskRequest(BaseModel):
 class Transfer123to115TaskRequest(BaseModel):
     sourceDirId: str = "0"
     targetUserId: Optional[int] = None
+
+
+class PoolReuseRequest(BaseModel):
+    dirId: str = "0"
+    items: List[Dict[str, Any]] = []
+
+
+class PoolTokenRequest(BaseModel):
+    token: str = ""
 
 
 class Pan115QrSessionRequest(BaseModel):
@@ -1433,6 +1484,65 @@ async def test_submission_bot(request: BotTestRequest) -> Dict[str, Any]:
     return {"ok": True, "message": f"Bot 已连接：{result.get('username') or result.get('first_name') or 'unknown'}", "result": result}
 
 
+@app.post("/api/submission/test/tg-api")
+async def test_submission_telegram_api(request: TelegramApiTestRequest) -> Dict[str, Any]:
+    """用当前配置的用户 Session 连一次 Telegram，验证旧帖清理能不能用。"""
+    try:
+        message = await TelegramHistoryCleaner().test({
+            "apiId": str(request.apiId or "").strip(),
+            "apiHash": str(request.apiHash or "").strip(),
+            "session": str(request.session or "").strip(),
+        })
+    except Exception as error:
+        raise HTTPException(status_code=502, detail=str(error))
+    return {"ok": True, "message": message}
+
+
+@app.post("/api/submission/telegram/session/start")
+async def start_telegram_session(request: TelegramSessionStartRequest) -> Dict[str, Any]:
+    """第一步：给手机号发登录验证码。"""
+    try:
+        return await start_login(request.apiId, request.apiHash, request.phone)
+    except TelegramLoginError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+    except Exception as error:
+        raise HTTPException(status_code=502, detail=str(error))
+
+
+@app.post("/api/submission/telegram/session/verify")
+async def verify_telegram_session(request: TelegramSessionVerifyRequest) -> Dict[str, Any]:
+    """第二步：验证码（+ 两步验证密码）换 Session，成功后写回投稿配置。"""
+    try:
+        result = await verify_code(request.loginId, request.code, request.password)
+    except TelegramLoginError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+    except Exception as error:
+        raise HTTPException(status_code=502, detail=str(error))
+
+    session = str(result.get("session") or "").strip()
+    if session:
+        config = store.read_submission_config()
+        telegram_api = config.get("telegramApi") if isinstance(config.get("telegramApi"), dict) else {}
+        telegram_api = {
+            **telegram_api,
+            "apiId": str(result.get("apiId") or telegram_api.get("apiId") or "").strip(),
+            "apiHash": str(result.get("apiHash") or telegram_api.get("apiHash") or "").strip(),
+            "session": session,
+        }
+        config["telegramApi"] = telegram_api
+        store.write_submission_config(config)
+        # 旧帖清理用的 client 单例记着旧 session，换 session 后必须让它重建
+        reset_telegram_client_state()
+        result["saved"] = True
+    return result
+
+
+@app.post("/api/submission/telegram/session/cancel")
+async def cancel_telegram_session(request: TelegramSessionCancelRequest) -> Dict[str, Any]:
+    """放弃进行中的登录（断开连接、丢弃验证码会话）。"""
+    return await cancel_login(request.loginId)
+
+
 @app.post("/api/submission/submit")
 async def submit_submission(request: SubmissionSubmitRequest) -> Dict[str, Any]:
     text = str(request.text or "").strip()
@@ -1570,6 +1680,112 @@ async def empty_pan115_helper_recycle() -> Dict[str, Any]:
     return {**result, "actionOk": bool(result.get("ok")), "ok": True}
 
 
+@app.get("/api/pan115-helper/dlinks")
+async def get_pan115_helper_dlinks(request: Request) -> Dict[str, Any]:
+    submission = store.read_submission_config()
+    helper = submission.get("pan115Helper") if isinstance(submission.get("pan115Helper"), dict) else {}
+    if not helper.get("enabled"):
+        return {"ok": True, "enabled": False, "message": "115 助手未启用"}
+    try:
+        return read_directlink_status(helper, request)
+    except Exception as error:
+        raise HTTPException(status_code=400, detail=str(error))
+
+
+@app.post("/api/pan115-helper/dlinks/offline")
+async def submit_pan115_helper_dlinks_offline(request: Pan115DirectLinkOfflineRequest, http_request: Request) -> Dict[str, Any]:
+    submission = store.read_submission_config()
+    helper = submission.get("pan115Helper") if isinstance(submission.get("pan115Helper"), dict) else {}
+    try:
+        result = await submit_directlink_offline(helper, request.keys, http_request)
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise HTTPException(status_code=400, detail=str(error))
+    return {**result, "actionOk": bool(result.get("ok")), "ok": True}
+
+
+@app.post("/api/pan115-helper/urls/offline")
+async def submit_pan115_helper_urls_offline(request: Pan115UrlOfflineRequest) -> Dict[str, Any]:
+    submission = store.read_submission_config()
+    helper = submission.get("pan115Helper") if isinstance(submission.get("pan115Helper"), dict) else {}
+    try:
+        result = await submit_arbitrary_urls_offline(helper, request.urls)
+    except Exception as error:
+        raise HTTPException(status_code=400, detail=str(error))
+    return {**result, "actionOk": bool(result.get("ok")), "ok": True}
+
+
+@app.get("/dlink/{rel:path}")
+async def get_directlink_file(rel: str) -> FileResponse:
+    submission = store.read_submission_config()
+    helper = submission.get("pan115Helper") if isinstance(submission.get("pan115Helper"), dict) else {}
+    try:
+        return await serve_directlink_file(helper, rel)
+    except Exception as error:
+        raise HTTPException(status_code=404, detail=str(error))
+
+
+async def _authorized_pan123_client() -> Any:
+    """返回已授权的 123 OpenAPI 客户端（复用 123→115 搬运通道的授权登录态）。
+
+    直链代理 / 网盘列目录 / 推离线都依赖这个登录态；未授权时 create_status_pan123_client
+    会抛 RuntimeError，由调用方转成 HTTPException 呈现给前端。
+    """
+    return await transfer_service.create_status_pan123_client()
+
+
+@app.get("/dpan/123/{file_id}")
+async def proxy_pan123_file(file_id: int, request: Request):
+    submission = store.read_submission_config()
+    helper = submission.get("pan115Helper") if isinstance(submission.get("pan115Helper"), dict) else {}
+    try:
+        client = await _authorized_pan123_client()
+        return await proxy_pan123_download(client, helper, file_id, request)
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise HTTPException(status_code=502, detail=str(error))
+
+
+@app.get("/api/pan115-helper/pan123/dlinks")
+async def get_pan115_helper_pan123_dlinks(request: Request) -> Dict[str, Any]:
+    submission = store.read_submission_config()
+    helper = submission.get("pan115Helper") if isinstance(submission.get("pan115Helper"), dict) else {}
+    try:
+        client = await _authorized_pan123_client()
+        return await list_pan123_links(client, helper, request)
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise HTTPException(status_code=400, detail=str(error))
+
+
+@app.post("/api/pan115-helper/pan123/dlinks/offline")
+async def submit_pan115_helper_pan123_dlinks_offline(request: Pan115DirectLinkOfflineRequest, http_request: Request) -> Dict[str, Any]:
+    submission = store.read_submission_config()
+    helper = submission.get("pan115Helper") if isinstance(submission.get("pan115Helper"), dict) else {}
+    try:
+        client = await _authorized_pan123_client()
+        result = await submit_pan123_offline(client, helper, request.keys, http_request)
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise HTTPException(status_code=400, detail=str(error))
+    return {**result, "actionOk": bool(result.get("ok")), "ok": True}
+
+
+@app.get("/api/pan115-helper/pan123/browse")
+async def browse_pan115_helper_pan123(parent_id: int = 0) -> Dict[str, Any]:
+    try:
+        client = await _authorized_pan123_client()
+        return await browse_pan123_dir(client, parent_id)
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise HTTPException(status_code=400, detail=str(error))
+
+
 @app.get("/api/transfer/config")
 async def read_transfer_config() -> Dict[str, Any]:
     return normalize_transfer_config(store.read_config())
@@ -1619,6 +1835,67 @@ async def create_pan123to115_transfer_task(request: Transfer123to115TaskRequest)
     except Exception as error:
         raise HTTPException(status_code=400, detail=str(error))
     return {"ok": True, "task": task}
+
+
+@app.get("/api/pool/search")
+async def search_sha1_pool(keyword: str = "", limit: int = 50) -> Dict[str, Any]:
+    """秒传池目录搜索（仅管理员 Token 可用，守则见 sha1_pool 模块注释）。"""
+    return await sha1_pool.pool_search_client.search(keyword, limit)
+
+
+def _mask_token(token: str) -> Optional[str]:
+    token = str(token or "").strip()
+    return f"{token[:8]}…" if len(token) > 12 else None
+
+
+@app.get("/api/pool/token")
+async def read_pool_token() -> Dict[str, Any]:
+    override = str(store.read_value("sha1PoolTokenOverride") or "").strip()
+    return {
+        "override": bool(override),
+        "overridePreview": _mask_token(override),
+        "defaultPreview": _mask_token(str(os.environ.get("SHA1_POOL_API_TOKEN") or "")),
+    }
+
+
+@app.post("/api/pool/token")
+async def write_pool_token(request: PoolTokenRequest) -> Dict[str, Any]:
+    token = str(request.token or "").strip()
+    if len(token) < 20:
+        raise HTTPException(status_code=400, detail="Token 看起来不对：长度应不少于 20 个字符")
+    store.write_value("sha1PoolTokenOverride", token)
+    sha1_cloud.set_pool_token_override(token)
+    sha1_pool.pool_search_client.reset_state()
+    logger.info("秒传池 Token 已切换为自定义 Token（前缀 %s…），目录搜索已按新 Token 权限工作", token[:8])
+    return {"ok": True, "override": True, "overridePreview": _mask_token(token)}
+
+
+@app.delete("/api/pool/token")
+async def reset_pool_token() -> Dict[str, Any]:
+    store.delete_value("sha1PoolTokenOverride")
+    sha1_cloud.set_pool_token_override(None)
+    sha1_pool.pool_search_client.reset_state()
+    logger.info("秒传池 Token 已重置为安装包内置的默认 Token")
+    return {"ok": True, "override": False}
+
+
+@app.post("/api/pool/reuse")
+async def reuse_sha1_pool_items(request: PoolReuseRequest) -> Dict[str, Any]:
+    try:
+        client = await _authorized_pan123_client()
+        results = await sha1_pool.reuse_via_sha1(client, str(request.dirId or "0"), request.items)
+    except HTTPException:
+        raise
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+    except Exception as error:
+        raise HTTPException(status_code=400, detail=str(error))
+    hit = sum(1 for item in results if item.get("ok"))
+    logger.info(
+        "秒传池秒传完成：成功 %d/%d → 123 目录 %s（未命中的内容 123 已不存在）",
+        hit, len(results), str(request.dirId or "0"),
+    )
+    return {"ok": True, "results": results}
 
 
 @app.post("/api/transfer/kick")
