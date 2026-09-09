@@ -16,7 +16,9 @@
 #  You should have received a copy of the GNU Lesser General Public License
 #  along with Pyrogram.  If not, see <http://www.gnu.org/licenses/>.
 
-from typing import Callable, Optional, Union
+from __future__ import annotations as _annotations
+
+from collections.abc import Callable
 
 import pyrogram
 from pyrogram.filters import Filter
@@ -26,8 +28,8 @@ from .unbound_arguments import unbound_arguments
 
 class OnDeletedBusinessMessages:
     def on_deleted_business_messages(
-        self: Union["OnDeletedBusinessMessages", Filter, None] = None,
-        filters: Optional[Filter] = None,
+        self: OnDeletedBusinessMessages | Filter | None = None,
+        filters: Filter | None = None,
         group: int = 0,
     ) -> Callable[[HandlerType], HandlerType]:
         """Decorator for handling deleted messages from business connection.
@@ -48,7 +50,9 @@ class OnDeletedBusinessMessages:
 
         def decorator(func: HandlerType) -> HandlerType:
             if isinstance(self, pyrogram.Client):
-                self.add_handler(pyrogram.handlers.DeletedBusinessMessagesHandler(func, filters), group)
+                self.add_handler(
+                    pyrogram.handlers.DeletedBusinessMessagesHandler(func, filters), group
+                )
             elif isinstance(self, Filter) or self is None:
                 if not hasattr(func, "handlers"):
                     func.handlers = []
@@ -58,7 +62,7 @@ class OnDeletedBusinessMessages:
                 func.handlers.append(
                     (
                         pyrogram.handlers.DeletedBusinessMessagesHandler(func, arguments.filters),
-                        arguments.group
+                        arguments.group,
                     )
                 )
 

@@ -16,7 +16,7 @@
 #  You should have received a copy of the GNU Lesser General Public License
 #  along with Pyrogram.  If not, see <http://www.gnu.org/licenses/>.
 
-"""What the sweeps over the package share: which files they read, and how they read a name.
+"""What the sweeps share: which files they read, and how they read a name.
 
 The name sweeps ask the same question of a different kind of text: does this name exist.
 Neither can answer it statically, because the tree is one import cycle wide and half the
@@ -24,23 +24,51 @@ names it writes are only bound under `TYPE_CHECKING`, so both resolve against th
 package.
 """
 
+from __future__ import annotations as _annotations
+
 import importlib
 import pathlib
-from typing import Any, Final, Iterator, Sequence
+from typing import Any, Final
+from collections.abc import Iterator, Sequence
 
 REPOSITORY_ROOT: Final[pathlib.Path] = pathlib.Path(__file__).resolve().parents[2]
 PACKAGE_ROOT: Final[pathlib.Path] = REPOSITORY_ROOT / "pyrogram"
 
-# The generated tree is rewritten wholesale by `make api` from the TL schema, so a repair
-#  there lives until the next schema update and no longer.
-GENERATED_TREE: Final[pathlib.Path] = PACKAGE_ROOT / "raw"
+# What `make api` writes, and only that: `pyrogram/raw/core` sits inside `raw` and is
+#  hand-written. A repair anywhere below lives until the next schema update and no longer.
+#  Same list as `[tool.ruff].extend-exclude` and `[tool.ty.src].exclude` in `pyproject.toml`.
+GENERATED: Final[tuple[pathlib.Path, ...]] = (
+    PACKAGE_ROOT / "raw" / "base",
+    PACKAGE_ROOT / "raw" / "functions",
+    PACKAGE_ROOT / "raw" / "types",
+    PACKAGE_ROOT / "raw" / "all.py",
+    PACKAGE_ROOT / "errors" / "exceptions",
+)
+
+
+# Everything a person maintains that is not the package. Nothing here is generated, and
+#  nothing here ships: `[tool.hatch.build.targets.wheel]` packages `pyrogram` alone.
+TOOLING_ROOTS: Final[tuple[pathlib.Path, ...]] = (
+    REPOSITORY_ROOT / "tests",
+    REPOSITORY_ROOT / "compiler",
+)
+
+
+def is_generated(path: pathlib.Path) -> bool:
+    return path in GENERATED or any(tree in path.parents for tree in GENERATED)
 
 
 def hand_written_files() -> Iterator[pathlib.Path]:
     """Every module of the package a person wrote and a person can repair."""
     for path in sorted(PACKAGE_ROOT.rglob("*.py")):
-        if GENERATED_TREE not in path.parents:
+        if not is_generated(path):
             yield path
+
+
+def tooling_files() -> Iterator[pathlib.Path]:
+    """Every module beside the package: the suite and the code generators."""
+    for root in TOOLING_ROOTS:
+        yield from sorted(root.rglob("*.py"))
 
 
 def attribute_chain(root: Any, *, names: Sequence[str]) -> bool:

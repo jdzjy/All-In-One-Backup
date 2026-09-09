@@ -16,6 +16,8 @@
 #  You should have received a copy of the GNU Lesser General Public License
 #  along with Pyrogram.  If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import annotations as _annotations
+
 from pyrogram import raw
 from ..object import Object
 
@@ -105,16 +107,16 @@ class ChatAdministratorRights(Object):
         can_promote_members: bool = False,
         can_change_info: bool = False,
         can_invite_users: bool = False,
-        can_post_stories: bool = False,   # Channels only
-        can_edit_stories: bool = False,   # Channels only
-        can_delete_stories: bool = False,   # Channels only
+        can_post_stories: bool = False,  # Channels only
+        can_edit_stories: bool = False,  # Channels only
+        can_delete_stories: bool = False,  # Channels only
         can_post_messages: bool = False,  # Channels only
         can_edit_messages: bool = False,  # Channels only
         can_pin_messages: bool = False,  # Groups and supergroups only
-        can_manage_topics: bool = False, # Supergroups only
+        can_manage_topics: bool = False,  # Supergroups only
         can_manage_direct_messages: bool = False,  # Channels only
-        can_manage_tags: bool = False, # Groups and supergroups only
-        can_send_welcome_messages: bool = False
+        can_manage_tags: bool = False,  # Groups and supergroups only
+        can_send_welcome_messages: bool = False,
     ):
         super().__init__(None)
 
@@ -138,7 +140,7 @@ class ChatAdministratorRights(Object):
         self.can_send_welcome_messages: bool = can_send_welcome_messages
 
     @staticmethod
-    def _parse(admin_rights: "raw.base.ChatAdminRights") -> "ChatAdministratorRights":
+    def _parse(admin_rights: raw.base.ChatAdminRights) -> ChatAdministratorRights:
         if admin_rights is None:
             return None
 
@@ -160,7 +162,8 @@ class ChatAdministratorRights(Object):
             can_manage_topics=admin_rights.manage_topics,
             can_manage_direct_messages=admin_rights.manage_direct_messages,
             can_manage_tags=admin_rights.manage_ranks,
-            can_send_welcome_messages=admin_rights.manage_welcome_messages
+            can_send_welcome_messages=admin_rights.manage_welcome_messages,
         )
+
 
 ChatPrivileges = ChatAdministratorRights

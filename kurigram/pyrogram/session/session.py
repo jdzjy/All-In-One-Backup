@@ -16,6 +16,8 @@
 #  You should have received a copy of the GNU Lesser General Public License
 #  along with Pyrogram.  If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import annotations as _annotations
+
 import asyncio
 import bisect
 import logging
@@ -23,7 +25,8 @@ import os
 from enum import Enum, auto
 from hashlib import sha1
 from io import BytesIO
-from typing import Any, Coroutine, Dict, List, Optional, Set
+from typing import Any
+from collections.abc import Coroutine
 
 import pyrogram
 from pyrogram import raw, utils
@@ -95,7 +98,7 @@ class Session:
 
     def __init__(
         self,
-        client: "pyrogram.Client",
+        client: pyrogram.Client,
         dc_id: int,
         server_address: str,
         port: int,
@@ -113,7 +116,7 @@ class Session:
         self.is_media = is_media
         self.is_cdn = is_cdn
 
-        self.connection: Optional[Connection] = None
+        self.connection: Connection | None = None
 
         self._state = SessionState.STOPPED
         self._state_lock = asyncio.Lock()
@@ -127,19 +130,19 @@ class Session:
 
         self.ignore_count = 0
 
-        self.pending_acks: Set[int] = set()
+        self.pending_acks: set[int] = set()
 
-        self.results: Dict[int, Result] = {}
+        self.results: dict[int, Result] = {}
 
-        self.stored_msg_ids: List[int] = []
-        self.recent_msg_ids: List[int] = []
+        self.stored_msg_ids: list[int] = []
+        self.recent_msg_ids: list[int] = []
 
-        self.ping_task: Optional[asyncio.Task] = None
+        self.ping_task: asyncio.Task | None = None
         self.ping_task_event = asyncio.Event()
 
-        self.recv_task: Optional[asyncio.Task] = None
+        self.recv_task: asyncio.Task | None = None
 
-        self.pending_tasks: Set[asyncio.Task] = set()
+        self.pending_tasks: set[asyncio.Task] = set()
 
         self.is_started = asyncio.Event()
         self.restart_lock = asyncio.Lock()
@@ -205,7 +208,7 @@ class Session:
             media=self.is_media,
             protocol_factory=self.client.protocol_factory,
             crypto_executor_workers=self.CRYPTO_EXECUTOR_WORKERS,
-            loop=self.client.loop
+            loop=self.client.loop,
         )
 
         try:
@@ -219,7 +222,7 @@ class Session:
 
             # Telegram wants to know which proxy a client sits behind.
             proxy_address = client_proxy_address(self.client.proxy)
-            client_proxy: Optional[raw.types.InputClientProxy] = None
+            client_proxy: raw.types.InputClientProxy | None = None
 
             if proxy_address is not None:
                 client_proxy = raw.types.InputClientProxy(
@@ -245,16 +248,14 @@ class Session:
                             query=raw.functions.help.GetConfig(),
                             params=init_connection_params,
                             proxy=client_proxy,
-                        )
+                        ),
                     ),
-                    timeout=self.START_TIMEOUT
+                    timeout=self.START_TIMEOUT,
                 )
 
             self.ping_task = self.client.loop.create_task(self.ping_worker())
 
-            log.info(
-                "Session initialized: Pyrogram v%s (Layer %s)", pyrogram.__version__, layer
-            )
+            log.info("Session initialized: Pyrogram v%s (Layer %s)", pyrogram.__version__, layer)
             log.info("Device: %s - %s", self.client.device_model, self.client.app_version)
             log.info("System: %s (%s)", self.client.system_version, self.client.lang_code)
         except (AuthKeyDuplicated, Unauthorized) as e:
@@ -328,7 +329,7 @@ class Session:
     async def restart(self):
         async with self.restart_lock:
             if self.stored_msg_ids:
-               self.recent_msg_ids = self.stored_msg_ids[:30]
+                self.recent_msg_ids = self.stored_msg_ids[:30]
 
             await self._stop()
 
@@ -351,7 +352,7 @@ class Session:
                 BytesIO(packet),
                 self.session_id,
                 self.auth_key,
-                self.auth_key_id
+                self.auth_key_id,
             )
         except ValueError as e:
             log.debug(e)
@@ -359,11 +360,7 @@ class Session:
             self.client.loop.create_task(self.restart())
             return
 
-        messages = (
-            data.body.messages
-            if isinstance(data.body, MsgContainer)
-            else [data]
-        )
+        messages = data.body.messages if isinstance(data.body, MsgContainer) else [data]
 
         log.debug("Received: %s", data)
 
@@ -379,13 +376,13 @@ class Session:
 
             try:
                 if len(self.stored_msg_ids) > Session.STORED_MSG_IDS_MAX_SIZE:
-                    del self.stored_msg_ids[:Session.STORED_MSG_IDS_MAX_SIZE // 2]
+                    del self.stored_msg_ids[: Session.STORED_MSG_IDS_MAX_SIZE // 2]
 
                 if msg.msg_id in self.recent_msg_ids:
-                   self.recent_msg_ids.remove(msg.msg_id)
-                   raise SecurityCheckMismatch(
-                         "The msg_id is belong to most recent closed connection."
-                   )
+                    self.recent_msg_ids.remove(msg.msg_id)
+                    raise SecurityCheckMismatch(
+                        "The msg_id is belong to most recent closed connection."
+                    )
 
                 if self.stored_msg_ids:
                     if msg.msg_id < self.stored_msg_ids[0]:
@@ -398,7 +395,9 @@ class Session:
                             "The msg_id is equal to any of the stored values"
                         )
 
-                    time_diff = (msg.msg_id - (await self.msg_factory.allocate_message_identity())) / 2 ** 32
+                    time_diff = (
+                        msg.msg_id - (await self.msg_factory.allocate_message_identity())
+                    ) / 2**32
 
                     if time_diff > 30:
                         raise SecurityCheckMismatch(
@@ -474,9 +473,9 @@ class Session:
                 await self.send(
                     raw.functions.PingDelayDisconnect(
                         ping_id=await self.msg_factory.allocate_message_identity(),
-                        disconnect_delay=self.WAIT_TIMEOUT + 10
+                        disconnect_delay=self.WAIT_TIMEOUT + 10,
                     ),
-                    wait_response=False
+                    wait_response=False,
                 )
             except OSError as e:
                 log.info("Restarting session due to - %s - %s", e.__class__.__name__, e)
@@ -506,18 +505,13 @@ class Session:
 
                     try:
                         if error_code == 429:
-                            raise TransportFlood(
-                                "Transport flood. Please slow down your requests."
-                            )
+                            raise TransportFlood("Transport flood. Please slow down your requests.")
                         elif error_code == 444:
-                            raise InvalidDC(
-                                "Invalid data center. Please check your configuration."
-                            )
+                            raise InvalidDC("Invalid data center. Please check your configuration.")
                     except TransportError as e:
                         error_msg = str(e)
 
                     log.warning("Server sent transport error: %s (%s)", error_code, error_msg)
-
 
                 if self.is_started.is_set():
                     if packet:
@@ -534,9 +528,7 @@ class Session:
 
         log.info("NetworkTask stopped")
 
-    async def send(
-        self, data: TLObject, wait_response: bool = True, timeout: float = WAIT_TIMEOUT
-    ):
+    async def send(self, data: TLObject, wait_response: bool = True, timeout: float = WAIT_TIMEOUT):
         message = await self.msg_factory.create(data)
         msg_id = message.msg_id
 
@@ -552,7 +544,7 @@ class Session:
             self.salt,
             self.session_id,
             self.auth_key,
-            self.auth_key_id
+            self.auth_key_id,
         )
 
         try:
@@ -597,16 +589,14 @@ class Session:
         retries: int = MAX_RETRIES,
         timeout: float = WAIT_TIMEOUT,
         sleep_threshold: float = SLEEP_THRESHOLD,
-        retry_delay: float = RETRY_DELAY
+        retry_delay: float = RETRY_DELAY,
     ):
         try:
             await asyncio.wait_for(self.is_started.wait(), self.WAIT_TIMEOUT)
         except asyncio.TimeoutError:
             pass
 
-        if isinstance(
-            query, (raw.functions.InvokeWithoutUpdates, raw.functions.InvokeWithTakeout)
-        ):
+        if isinstance(query, (raw.functions.InvokeWithoutUpdates, raw.functions.InvokeWithTakeout)):
             inner_query = query.query
         else:
             inner_query = query
@@ -631,9 +621,7 @@ class Session:
 
                 await asyncio.sleep(amount)
             except (OSError, InternalServerError, ServiceUnavailable) as e:
-                log.warning(
-                    '[%s] Retrying "%s" due to: %s', attempt, query_name, str(e) or repr(e)
-                )
+                log.warning('[%s] Retrying "%s" due to: %s', attempt, query_name, str(e) or repr(e))
 
                 await asyncio.sleep(retry_delay)
 

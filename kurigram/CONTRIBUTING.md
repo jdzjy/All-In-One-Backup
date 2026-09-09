@@ -40,10 +40,14 @@ the generated types.
 Run these before opening a pull request:
 
 ```bash
-make lint          # ruff check
+make lint          # ruff check, plus ruff format --check
 make typecheck     # ty check (requires `make api` to have been run first)
 make test-unit     # the offline suite, no relay or session needed
 ```
+
+`make format` rewrites the tree and `make lint` fails on anything it would still change, so
+formatting is not something review has to raise. The line length is 100; `pyproject.toml` carries
+the reasoning next to it.
 
 `make test` runs the full suite, including the integration tests. Those open real sockets and
 take every endpoint from a git-ignored `.env.test` file: a live MTProto or web proxy relay and a
@@ -109,6 +113,12 @@ A few conventions that have come up repeatedly in code review but aren't enforce
 - **Always use `list[str]` and `int | None`, never `List[str]` and `Optional[int]`.** The
   `typing` generics are deprecated aliases of the builtins.
   https://docs.python.org/3/library/typing.html#deprecated-aliases
+- **Every module carries `from __future__ import annotations as _annotations`**, directly below
+  the docstring. The import is what lets an annotation name a type the module imports only under
+  `TYPE_CHECKING`, so nothing in the tree quotes an annotation and `UP037` can stay selected;
+  `tests/guards/test_future_annotations.py` fails on a package module that writes one without it.
+  Keep the alias: the name is never used, and the underscore says the import is there for its
+  side effect alone.
 - **A dependency is declared with a floor, never a ceiling.** `pyproject.toml` carries the
   reasoning beside the declarations. Where a major version genuinely breaks us, add the upper
   bound and name the breakage in a comment next to it.

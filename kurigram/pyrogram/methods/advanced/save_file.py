@@ -16,6 +16,8 @@
 #  You should have received a copy of the GNU Lesser General Public License
 #  along with Pyrogram.  If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import annotations as _annotations
+
 import asyncio
 import functools
 import inspect
@@ -25,7 +27,8 @@ import math
 import os
 from hashlib import md5
 from pathlib import PurePath
-from typing import List, Union, BinaryIO, Callable, Optional, overload
+from typing import BinaryIO, overload
+from collections.abc import Callable
 
 import pyrogram
 from pyrogram import StopTransmission
@@ -44,42 +47,42 @@ class SaveFile:
     #  wider than `Client`, and an overload the implementation does not accept is an error.
     @overload
     async def save_file(
-        self: "pyrogram.Client",
+        self: pyrogram.Client,
         path: None,
-        file_id: Optional[int] = None,
+        file_id: int | None = None,
         file_part: int = 0,
-        progress: Optional[Callable] = None,
-        progress_args: tuple = ()
+        progress: Callable | None = None,
+        progress_args: tuple = (),
     ) -> None: ...
 
     @overload
     async def save_file(
-        self: "pyrogram.Client",
-        path: Union[str, BinaryIO],
+        self: pyrogram.Client,
+        path: str | BinaryIO,
         file_id: int,
         file_part: int = 0,
-        progress: Optional[Callable] = None,
-        progress_args: tuple = ()
+        progress: Callable | None = None,
+        progress_args: tuple = (),
     ) -> None: ...
 
     @overload
     async def save_file(
-        self: "pyrogram.Client",
-        path: Union[str, BinaryIO],
+        self: pyrogram.Client,
+        path: str | BinaryIO,
         file_id: None = None,
         file_part: int = 0,
-        progress: Optional[Callable] = None,
-        progress_args: tuple = ()
-    ) -> Union["raw.types.InputFile", "raw.types.InputFileBig"]: ...
+        progress: Callable | None = None,
+        progress_args: tuple = (),
+    ) -> raw.types.InputFile | raw.types.InputFileBig: ...
 
     async def save_file(
-        self: "pyrogram.Client",
-        path: Optional[Union[str, BinaryIO]],
-        file_id: Optional[int] = None,
+        self: pyrogram.Client,
+        path: str | BinaryIO | None,
+        file_id: int | None = None,
         file_part: int = 0,
-        progress: Optional[Callable] = None,
-        progress_args: tuple = ()
-    ) -> Optional[Union["raw.types.InputFile", "raw.types.InputFileBig"]]:
+        progress: Callable | None = None,
+        progress_args: tuple = (),
+    ) -> raw.types.InputFile | raw.types.InputFileBig | None:
         """Upload a file onto Telegram servers, without actually sending the message to anyone.
         Useful whenever an InputFile type is required.
 
@@ -136,7 +139,7 @@ class SaveFile:
             if path is None:
                 return None
 
-            failures: List[Exception] = []
+            failures: list[Exception] = []
 
             async def worker(session):
                 while True:
@@ -161,7 +164,9 @@ class SaveFile:
             elif isinstance(path, io.IOBase):
                 fp = path
             else:
-                raise ValueError("Invalid file. Expected a file path as string or a binary (not text) file pointer")
+                raise ValueError(
+                    "Invalid file. Expected a file path as string or a binary (not text) file pointer"
+                )
 
             file_name = getattr(fp, "name", "file.jpg")
 
@@ -209,13 +214,11 @@ class SaveFile:
                             file_id=file_id,
                             file_part=file_part,
                             file_total_parts=file_total_parts,
-                            bytes=chunk
+                            bytes=chunk,
                         )
                     else:
                         rpc = raw.functions.upload.SaveFilePart(
-                            file_id=file_id,
-                            file_part=file_part,
-                            bytes=chunk
+                            file_id=file_id, file_part=file_part, bytes=chunk
                         )
 
                     await queue.put(rpc)
@@ -233,7 +236,7 @@ class SaveFile:
                             progress,
                             min(file_part * part_size, file_size),
                             file_size,
-                            *progress_args
+                            *progress_args,
                         )
 
                         if inspect.iscoroutinefunction(progress):
@@ -263,15 +266,8 @@ class SaveFile:
                 return None
 
             if is_big:
-                return raw.types.InputFileBig(
-                    id=file_id,
-                    parts=file_total_parts,
-                    name=file_name
-                )
+                return raw.types.InputFileBig(id=file_id, parts=file_total_parts, name=file_name)
 
             return raw.types.InputFile(
-                id=file_id,
-                parts=file_total_parts,
-                name=file_name,
-                md5_checksum=md5_sum
+                id=file_id, parts=file_total_parts, name=file_name, md5_checksum=md5_sum
             )

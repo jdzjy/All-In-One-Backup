@@ -16,9 +16,12 @@
 #  You should have received a copy of the GNU Lesser General Public License
 #  along with Pyrogram.  If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import annotations as _annotations
+
 import inspect
 from pathlib import Path
-from typing import Callable, Final, List, Set
+from typing import Final
+from collections.abc import Callable
 
 import pytest
 
@@ -28,8 +31,8 @@ from pyrogram.methods import decorators
 from pyrogram.methods.decorators.handler_type import HandlerType
 
 
-def _decorator_names() -> List[str]:
-    names: Set[str] = set()
+def _decorator_names() -> list[str]:
+    names: set[str] = set()
 
     for _, decorator_class in inspect.getmembers(decorators, inspect.isclass):
         for method_name, _ in inspect.getmembers(decorator_class, inspect.isfunction):
@@ -41,10 +44,10 @@ def _decorator_names() -> List[str]:
 
 # `on_error` takes an `exceptions` argument between the two, so it shifts differently
 #  and is covered on its own below.
-_FILTERED_SIGNATURE: Final[List[str]] = ["self", "filters", "group"]
+_FILTERED_SIGNATURE: Final[list[str]] = ["self", "filters", "group"]
 
 
-def _filtered_decorator_names() -> List[str]:
+def _filtered_decorator_names() -> list[str]:
     return [
         name
         for name in _decorator_names()
@@ -52,7 +55,7 @@ def _filtered_decorator_names() -> List[str]:
     ]
 
 
-def _module_names() -> List[str]:
+def _module_names() -> list[str]:
     package_directory = Path(decorators.__file__).parent
 
     return sorted(path.stem for path in package_directory.glob("on_*.py"))
@@ -78,7 +81,11 @@ def test_decorator_binds_the_callback_signature_to_one_type_variable(decorator_n
     #  tests above pass either way: they check what the decorator returns, not what it promises.
     decorator = getattr(pyrogram.Client, decorator_name)
 
-    assert inspect.signature(decorator).return_annotation == Callable[[HandlerType], HandlerType]
+    # `from __future__ import annotations` leaves the return annotation a string, and
+    #  `eval_str` is what turns it back into the object this compares against.
+    signature = inspect.signature(decorator, eval_str=True)
+
+    assert signature.return_annotation == Callable[[HandlerType], HandlerType]
 
 
 @pytest.fixture
@@ -97,7 +104,7 @@ def test_the_positional_form_stores_the_filter_and_the_group(
 ) -> None:
     getattr(pyrogram.Client, decorator_name)(filters.text, 1)(handler)
 
-    (built, group), = handler.handlers
+    ((built, group),) = handler.handlers
 
     assert group == 1
     assert built.filters is filters.text
@@ -110,7 +117,7 @@ def test_the_mixed_form_stores_the_filter_and_the_group(
 ) -> None:
     getattr(pyrogram.Client, decorator_name)(filters.text, group=1)(handler)
 
-    (built, group), = handler.handlers
+    ((built, group),) = handler.handlers
 
     assert group == 1
     assert built.filters is filters.text
@@ -123,20 +130,22 @@ def test_the_keyword_form_stores_the_filter_and_the_group(
 ) -> None:
     getattr(pyrogram.Client, decorator_name)(filters=filters.text, group=1)(handler)
 
-    (built, group), = handler.handlers
+    ((built, group),) = handler.handlers
 
     assert group == 1
     assert built.filters is filters.text
 
 
-@pytest.mark.parametrize("decorator_name", sorted(set(_decorator_names()) - set(_filtered_decorator_names())))
+@pytest.mark.parametrize(
+    "decorator_name", sorted(set(_decorator_names()) - set(_filtered_decorator_names()))
+)
 def test_a_decorator_called_with_no_arguments_stores_the_default_group(
     decorator_name: str,
     handler: HandlerType,
 ) -> None:
     getattr(pyrogram.Client, decorator_name)()(handler)
 
-    (_, group), = handler.handlers
+    ((_, group),) = handler.handlers
 
     assert group == 0
 
@@ -146,7 +155,7 @@ def test_a_decorator_called_with_no_arguments_stores_the_default_group(
 def test_on_error_reads_the_positional_form(handler: HandlerType) -> None:
     pyrogram.Client.on_error(ValueError, filters.text, 1)(handler)
 
-    (built, group), = handler.handlers
+    ((built, group),) = handler.handlers
 
     assert group == 1
     assert built.exceptions == (ValueError,)
@@ -156,7 +165,7 @@ def test_on_error_reads_the_positional_form(handler: HandlerType) -> None:
 def test_on_error_reads_the_keyword_form(handler: HandlerType) -> None:
     pyrogram.Client.on_error(exceptions=ValueError, filters=filters.text, group=1)(handler)
 
-    (built, group), = handler.handlers
+    ((built, group),) = handler.handlers
 
     assert group == 1
     assert built.exceptions == (ValueError,)
@@ -166,7 +175,7 @@ def test_on_error_reads_the_keyword_form(handler: HandlerType) -> None:
 def test_on_error_keeps_the_only_exception_it_was_given(handler: HandlerType) -> None:
     pyrogram.Client.on_error(ValueError)(handler)
 
-    (built, group), = handler.handlers
+    ((built, group),) = handler.handlers
 
     assert group == 0
     assert built.exceptions == (ValueError,)

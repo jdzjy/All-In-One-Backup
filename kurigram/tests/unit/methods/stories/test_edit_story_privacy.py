@@ -16,6 +16,8 @@
 #  You should have received a copy of the GNU Lesser General Public License
 #  along with Pyrogram.  If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import annotations as _annotations
+
 import pytest
 
 from pyrogram import enums, raw
@@ -45,9 +47,7 @@ async def test_selected_users_without_allowed_users_does_not_crash() -> None:
     client = FakeClient()
 
     with pytest.raises(_InvokeCalled) as exc_info:
-        await client.edit_story_privacy(
-            7, 1, privacy=enums.StoriesPrivacyRules.SELECTED_USERS
-        )
+        await client.edit_story_privacy(7, 1, privacy=enums.StoriesPrivacyRules.SELECTED_USERS)
 
     assert exc_info.value.query.privacy_rules == []
 

@@ -16,9 +16,11 @@
 #  You should have received a copy of the GNU Lesser General Public License
 #  along with Pyrogram.  If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import annotations as _annotations
+
 import logging
 from datetime import datetime
-from typing import AsyncGenerator, Union, List, Optional
+from collections.abc import AsyncGenerator
 
 import pyrogram
 from pyrogram import raw, types, utils
@@ -27,8 +29,8 @@ log = logging.getLogger(__name__)
 
 
 async def get_chunk(
-    client: "pyrogram.Client",
-    chat_id: Union[int, str],
+    client: pyrogram.Client,
+    chat_id: int | str,
     *,
     limit: int = 0,
     offset: int = 0,
@@ -37,7 +39,7 @@ async def get_chunk(
     min_id: int = 0,  # Inclusive
     max_id: int = 0,  # Inclusive
     reverse: bool = False,
-) -> List["types.Message"]:
+) -> list[types.Message]:
     # Telegram API requires `offset_id` as starting point, boundaries alone don't work
     if (min_id or max_id) and not offset_id:
         if max_id:
@@ -57,31 +59,31 @@ async def get_chunk(
             limit=limit,
             max_id=max_id,
             min_id=min_id,
-            hash=0
+            hash=0,
         ),
-        sleep_threshold=60
+        sleep_threshold=60,
     )
 
     messages = await utils.parse_messages(client, history, replies=0)
 
     if reverse:
         messages.reverse()
-        
+
     return messages
 
 
 class GetChatHistory:
     async def get_chat_history(
-        self: "pyrogram.Client",
-        chat_id: Union[int, str],
+        self: pyrogram.Client,
+        chat_id: int | str,
         limit: int = 0,
         offset: int = 0,
-        offset_id: Optional[int] = None,
+        offset_id: int | None = None,
         offset_date: datetime = utils.zero_datetime(),
         min_id: int = 0,
         max_id: int = 0,
         reverse: bool = False,
-    ) -> AsyncGenerator["types.Message", None]:
+    ) -> AsyncGenerator[types.Message, None]:
         """Get messages from a chat history.
 
         The messages are returned in reverse chronological order.
@@ -132,7 +134,7 @@ class GetChatHistory:
         """
         if offset_id is not None:
             log.warning(
-                "`offset_id` is deprecated and will be removed in future updates. " \
+                "`offset_id` is deprecated and will be removed in future updates. "
                 "Use `min_id` or `max_id` instead."
             )
 
@@ -159,9 +161,9 @@ class GetChatHistory:
                 from_date=offset_date,
                 max_id=max_id,
                 min_id=min_id,
-                reverse=reverse
+                reverse=reverse,
             )
-            
+
             if not messages:
                 return
 
@@ -170,6 +172,6 @@ class GetChatHistory:
                 yield message
 
                 current += 1
-                
+
                 if current >= total:
                     return

@@ -16,8 +16,11 @@
 #  You should have received a copy of the GNU Lesser General Public License
 #  along with Pyrogram.  If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import annotations as _annotations
+
 import os
-from typing import BinaryIO, Callable, List, Optional, Union
+from typing import BinaryIO
+from collections.abc import Callable
 
 import pyrogram
 from pyrogram import StopTransmission, enums, raw, types, utils
@@ -26,28 +29,28 @@ from pyrogram.errors import FilePartMissing
 
 class SendStory:
     async def send_story(
-        self: "pyrogram.Client",
-        chat_id: Union[int, str],
-        media: Union[str, BinaryIO],
-        caption: Optional[str] = None,
-        period: Optional[int] = None,
-        media_areas: Optional[List["types.MediaArea"]] = None,
+        self: pyrogram.Client,
+        chat_id: int | str,
+        media: str | BinaryIO,
+        caption: str | None = None,
+        period: int | None = None,
+        media_areas: list[types.MediaArea] | None = None,
         duration: int = 0,
         width: int = 0,
         height: int = 0,
-        thumb: Optional[Union[str, BinaryIO]] = None,
+        thumb: str | BinaryIO | None = None,
         supports_streaming: bool = True,
-        file_name: Optional[str] = None,
-        privacy: Optional["enums.StoriesPrivacyRules"] = None,
-        allowed_users: Optional[List[Union[int, str]]] = None,
-        disallowed_users: Optional[List[Union[int, str]]] = None,
-        pinned: Optional[bool] = None,
-        protect_content: Optional[bool] = None,
-        parse_mode: Optional["enums.ParseMode"] = None,
-        caption_entities: Optional[List["types.MessageEntity"]] = None,
-        progress: Optional[Callable] = None,
+        file_name: str | None = None,
+        privacy: enums.StoriesPrivacyRules | None = None,
+        allowed_users: list[int | str] | None = None,
+        disallowed_users: list[int | str] | None = None,
+        pinned: bool | None = None,
+        protect_content: bool | None = None,
+        parse_mode: enums.ParseMode | None = None,
+        caption_entities: list[types.MessageEntity] | None = None,
+        progress: Callable | None = None,
         progress_args: tuple = (),
-    ) -> Optional["types.Story"]:
+    ) -> types.Story | None:
         """Post new story.
 
         .. include:: /_includes/usable-by/users.rst
@@ -152,13 +155,17 @@ class SendStory:
         Raises:
             ValueError: In case of invalid arguments.
         """
-        message, entities = (await utils.parse_text_entities(self, caption, parse_mode, caption_entities)).values()
+        message, entities = (
+            await utils.parse_text_entities(self, caption, parse_mode, caption_entities)
+        ).values()
 
         try:
             if isinstance(media, str):
                 if os.path.isfile(media):
                     thumb = await self.save_file(thumb)
-                    file = await self.save_file(media, progress=progress, progress_args=progress_args)
+                    file = await self.save_file(
+                        media, progress=progress, progress_args=progress_args
+                    )
                     mime_type = self.guess_mime_type(file.name)
                     if mime_type == "video/mp4":
                         media = raw.types.InputMediaUploadedDocument(
@@ -171,8 +178,10 @@ class SendStory:
                                     w=width,
                                     h=height,
                                 ),
-                                raw.types.DocumentAttributeFilename(file_name=file_name or os.path.basename(media))
-                            ]
+                                raw.types.DocumentAttributeFilename(
+                                    file_name=file_name or os.path.basename(media)
+                                ),
+                            ],
                         )
                     else:
                         media = raw.types.InputMediaUploadedPhoto(
@@ -196,8 +205,8 @@ class SendStory:
                                 w=width,
                                 h=height,
                             ),
-                            raw.types.DocumentAttributeFilename(file_name=file_name or media.name)
-                        ]
+                            raw.types.DocumentAttributeFilename(file_name=file_name or media.name),
+                        ],
                     )
                 else:
                     media = raw.types.InputMediaUploadedPhoto(
@@ -222,7 +231,9 @@ class SendStory:
                     users = [await self.resolve_peer(user_id) for user_id in allowed_users]
                     privacy_rules.append(raw.types.InputPrivacyValueAllowUsers(users=users))
                 else:
-                    privacy_rules.append(raw.types.InputPrivacyValueAllowUsers(users=[raw.types.InputPeerEmpty()]))
+                    privacy_rules.append(
+                        raw.types.InputPrivacyValueAllowUsers(users=[raw.types.InputPeerEmpty()])
+                    )
             elif privacy == enums.StoriesPrivacyRules.SELECTED_USERS:
                 _allowed_users = []
                 _allowed_chats = []
@@ -232,15 +243,23 @@ class SendStory:
                         peer = await self.resolve_peer(user)
                         if isinstance(peer, raw.types.InputPeerUser):
                             _allowed_users.append(peer)
-                        elif isinstance(peer, (raw.types.InputPeerChat, raw.types.InputPeerChannel)):
+                        elif isinstance(
+                            peer, (raw.types.InputPeerChat, raw.types.InputPeerChannel)
+                        ):
                             _allowed_chats.append(peer)
                 else:
-                    privacy_rules.append(raw.types.InputPrivacyValueAllowUsers(users=[raw.types.InputPeerEmpty()]))
+                    privacy_rules.append(
+                        raw.types.InputPrivacyValueAllowUsers(users=[raw.types.InputPeerEmpty()])
+                    )
 
                 if _allowed_users:
-                    privacy_rules.append(raw.types.InputPrivacyValueAllowUsers(users=_allowed_users))
+                    privacy_rules.append(
+                        raw.types.InputPrivacyValueAllowUsers(users=_allowed_users)
+                    )
                 if _allowed_chats:
-                    privacy_rules.append(raw.types.InputPrivacyValueAllowChatParticipants(chats=_allowed_chats))
+                    privacy_rules.append(
+                        raw.types.InputPrivacyValueAllowChatParticipants(chats=_allowed_chats)
+                    )
             else:
                 privacy_rules.append(raw.types.InputPrivacyValueAllowAll())
 
@@ -254,7 +273,8 @@ class SendStory:
                             random_id=self.rnd_id(),
                             pinned=pinned,
                             noforwards=protect_content,
-                            media_areas=[await area.write(self) for area in (media_areas or [])] or None,
+                            media_areas=[await area.write(self) for area in (media_areas or [])]
+                            or None,
                             caption=message,
                             entities=entities,
                             period=period,
@@ -270,7 +290,7 @@ class SendStory:
                                 i.story,
                                 i.peer,
                                 {i.id: i for i in r.users},
-                                {i.id: i for i in r.chats}
+                                {i.id: i for i in r.chats},
                             )
         except StopTransmission:
             return None

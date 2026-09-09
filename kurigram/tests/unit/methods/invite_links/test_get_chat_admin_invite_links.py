@@ -16,6 +16,8 @@
 #  You should have received a copy of the GNU Lesser General Public License
 #  along with Pyrogram.  If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import annotations as _annotations
+
 import pytest
 
 from pyrogram import raw
@@ -64,20 +66,13 @@ async def test_only_exported_invites_are_yielded() -> None:
     #  ChatInviteLink instances.
     client = FakeClient(
         [
-            raw.types.ChatInviteExported(
-                link="https://t.me/+aaaa", admin_id=_ADMIN_ID, date=1000
-            ),
+            raw.types.ChatInviteExported(link="https://t.me/+aaaa", admin_id=_ADMIN_ID, date=1000),
             raw.types.ChatInvitePublicJoinRequests(),
-            raw.types.ChatInviteExported(
-                link="https://t.me/+bbbb", admin_id=_ADMIN_ID, date=2000
-            ),
+            raw.types.ChatInviteExported(link="https://t.me/+bbbb", admin_id=_ADMIN_ID, date=2000),
         ]
     )
 
-    links = [
-        link
-        async for link in client.get_chat_admin_invite_links(_CHAT_ID, _ADMIN_ID)
-    ]
+    links = [link async for link in client.get_chat_admin_invite_links(_CHAT_ID, _ADMIN_ID)]
 
     assert [link.invite_link for link in links] == [
         "https://t.me/+aaaa",
@@ -87,9 +82,6 @@ async def test_only_exported_invites_are_yielded() -> None:
 
 @pytest.mark.asyncio
 async def test_no_invites_yields_nothing() -> None:
-    links = [
-        link
-        async for link in FakeClient([]).get_chat_admin_invite_links(_CHAT_ID, _ADMIN_ID)
-    ]
+    links = [link async for link in FakeClient([]).get_chat_admin_invite_links(_CHAT_ID, _ADMIN_ID)]
 
     assert links == []

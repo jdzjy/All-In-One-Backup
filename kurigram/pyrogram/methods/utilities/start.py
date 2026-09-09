@@ -16,8 +16,9 @@
 #  You should have received a copy of the GNU Lesser General Public License
 #  along with Pyrogram.  If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import annotations as _annotations
+
 import logging
-from typing import List
 
 import pyrogram
 from pyrogram import raw
@@ -28,10 +29,11 @@ log = logging.getLogger(__name__)
 
 class Start:
     async def start(
-        self: "pyrogram.Client", *,
+        self: pyrogram.Client,
+        *,
         use_qr: bool = False,
-        except_ids: List[int] = [],
-    ) -> "pyrogram.Client":
+        except_ids: list[int] = [],
+    ) -> pyrogram.Client:
         """Start the client.
 
         This method connects the client to Telegram and, in case of new sessions, automatically manages the
@@ -82,9 +84,12 @@ class Start:
                 if use_qr:
                     try:
                         import qrcode  # ty: ignore[unresolved-import] - optional, not a project dependency
+
                         await self.authorize_qr(except_ids=except_ids)
                     except ImportError:
-                        log.warning("qrcode package not found, falling back to authorization prompt")
+                        log.warning(
+                            "qrcode package not found, falling back to authorization prompt"
+                        )
                         await self.authorize()
                 else:
                     await self.authorize()

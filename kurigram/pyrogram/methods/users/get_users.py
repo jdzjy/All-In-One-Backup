@@ -16,8 +16,11 @@
 #  You should have received a copy of the GNU Lesser General Public License
 #  along with Pyrogram.  If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import annotations as _annotations
+
 import asyncio
-from typing import Optional, Union, List, Iterable, overload
+from typing import overload
+from collections.abc import Iterable
 
 import pyrogram
 from pyrogram import raw
@@ -29,20 +32,17 @@ class GetUsers:
     #  The single-user one comes first, resolving it the way the body does.
     @overload
     async def get_users(  # type: ignore[overload-overlap]
-        self: "pyrogram.Client",
-        user_ids: Union[int, str]
-    ) -> Optional["types.User"]: ...
+        self: pyrogram.Client, user_ids: int | str
+    ) -> types.User | None: ...
 
     @overload
     async def get_users(
-        self: "pyrogram.Client",
-        user_ids: Iterable[Union[int, str]]
-    ) -> List["types.User"]: ...
+        self: pyrogram.Client, user_ids: Iterable[int | str]
+    ) -> list[types.User]: ...
 
     async def get_users(
-        self: "pyrogram.Client",
-        user_ids: Union[int, str, Iterable[Union[int, str]]]
-    ) -> Optional[Union["types.User", List["types.User"]]]:
+        self: pyrogram.Client, user_ids: int | str | Iterable[int | str]
+    ) -> types.User | list[types.User] | None:
         """Get information about a user.
         You can retrieve up to 200 users at once.
 
@@ -73,11 +73,7 @@ class GetUsers:
         user_ids = list(user_ids) if is_iterable else [user_ids]
         user_ids = await asyncio.gather(*[self.resolve_peer(i) for i in user_ids])
 
-        r = await self.invoke(
-            raw.functions.users.GetUsers(
-                id=user_ids
-            )
-        )
+        r = await self.invoke(raw.functions.users.GetUsers(id=user_ids))
 
         users = types.List()
 

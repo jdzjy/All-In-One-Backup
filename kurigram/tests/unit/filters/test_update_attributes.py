@@ -16,9 +16,10 @@
 #  You should have received a copy of the GNU Lesser General Public License
 #  along with Pyrogram.  If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import annotations as _annotations
+
 import inspect
 from datetime import datetime
-from typing import Optional
 
 import pytest
 
@@ -62,11 +63,15 @@ def in_private(update_type, **kwargs):
 
 
 def inline_query(from_user: User) -> InlineQuery:
-    return InlineQuery(id="1", from_user=from_user, query="", offset="", chat_type=enums.ChatType.PRIVATE)
+    return InlineQuery(
+        id="1", from_user=from_user, query="", offset="", chat_type=enums.ChatType.PRIVATE
+    )
 
 
 def pre_checkout_query(from_user: User) -> PreCheckoutQuery:
-    return PreCheckoutQuery(id="1", from_user=from_user, currency="XTR", total_amount=1, invoice_payload="x")
+    return PreCheckoutQuery(
+        id="1", from_user=from_user, currency="XTR", total_amount=1, invoice_payload="x"
+    )
 
 
 def poll() -> Poll:
@@ -84,7 +89,9 @@ WITHOUT_A_CHAT = [
     pytest.param(inline_query(SOMEONE), id="inline_query"),
     pytest.param(pre_checkout_query(SOMEONE), id="pre_checkout_query"),
     pytest.param(poll(), id="poll"),
-    pytest.param(CallbackQuery(id="1", from_user=SOMEONE), id="callback_query_on_an_inline_message"),
+    pytest.param(
+        CallbackQuery(id="1", from_user=SOMEONE), id="callback_query_on_an_inline_message"
+    ),
 ]
 
 FROM_A_BOT = [
@@ -193,7 +200,8 @@ async def test_me_added_to_the_container_after_the_fact_still_matches():
 
 
 UPDATE_TYPES = [
-    one for one in vars(types).values()
+    one
+    for one in vars(types).values()
     if inspect.isclass(one) and issubclass(one, Update) and one is not Update
 ]
 
@@ -260,7 +268,9 @@ def business_message() -> Message:
 @pytest.mark.asyncio
 async def test_business_reads_the_message_the_update_is_about():
     assert await filters.business(CLIENT, business_message())
-    assert await filters.business(CLIENT, CallbackQuery(id="1", from_user=SOMEONE, message=business_message()))
+    assert await filters.business(
+        CLIENT, CallbackQuery(id="1", from_user=SOMEONE, message=business_message())
+    )
     assert not await filters.business(CLIENT, Message(id=1, chat=PRIVATE))
 
 
@@ -269,7 +279,9 @@ async def test_linked_channel_reads_the_message_the_update_is_about():
     forwarded = Message(id=1, chat=CHANNEL, **FROM_THE_LINKED_CHANNEL)
 
     assert await filters.linked_channel(CLIENT, forwarded)
-    assert await filters.linked_channel(CLIENT, CallbackQuery(id="1", from_user=SOMEONE, message=forwarded))
+    assert await filters.linked_channel(
+        CLIENT, CallbackQuery(id="1", from_user=SOMEONE, message=forwarded)
+    )
     assert not await filters.linked_channel(CLIENT, Message(id=1, chat=CHANNEL))
 
 
@@ -278,7 +290,9 @@ async def test_topic_reads_the_message_the_update_is_about():
     in_a_topic = Message(id=1, chat=PRIVATE, topic=A_TOPIC)
 
     assert await filters.topic(13)(CLIENT, in_a_topic)
-    assert await filters.topic(13)(CLIENT, CallbackQuery(id="1", from_user=SOMEONE, message=in_a_topic))
+    assert await filters.topic(13)(
+        CLIENT, CallbackQuery(id="1", from_user=SOMEONE, message=in_a_topic)
+    )
     assert not await filters.topic(1)(CLIENT, in_a_topic)
     assert not await filters.topic(13)(CLIENT, Message(id=1, chat=PRIVATE))
 
@@ -317,8 +331,8 @@ def test_callback_query_chat_stays_out_of_the_serialized_form():
 
 def a_reaction(
     *,
-    user: Optional[User] = None,
-    actor_chat: Optional[Chat] = None,
+    user: User | None = None,
+    actor_chat: Chat | None = None,
 ) -> types.MessageReactionUpdated:
     return types.MessageReactionUpdated(
         chat=CHANNEL,
@@ -334,7 +348,9 @@ def a_reaction(
 def a_boost(from_user: User) -> types.ChatBoostUpdated:
     return types.ChatBoostUpdated(
         chat=CHANNEL,
-        boost=types.ChatBoost(id="1", date=DATE, expire_date=DATE, multiplier=1, from_user=from_user),
+        boost=types.ChatBoost(
+            id="1", date=DATE, expire_date=DATE, multiplier=1, from_user=from_user
+        ),
     )
 
 
@@ -383,7 +399,9 @@ async def test_a_callback_query_reads_the_sender_chat_of_its_message() -> None:
     """A button under a channel post: the post has a sender chat, the query has none of its own."""
     posted_as_the_channel = Message(id=1, chat=CHANNEL, sender_chat=CHANNEL)
 
-    assert await filters.sender_chat(CLIENT, CallbackQuery(id="1", from_user=SOMEONE, message=posted_as_the_channel))
+    assert await filters.sender_chat(
+        CLIENT, CallbackQuery(id="1", from_user=SOMEONE, message=posted_as_the_channel)
+    )
     assert not await filters.sender_chat(CLIENT, in_private(CallbackQuery, from_user=SOMEONE))
     assert not await filters.sender_chat(CLIENT, CallbackQuery(id="1", from_user=SOMEONE))
 

@@ -16,13 +16,15 @@
 #  You should have received a copy of the GNU Lesser General Public License
 #  along with Pyrogram.  If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import annotations as _annotations
+
 import hashlib
 import logging
 import os
 import socket
 import time
 from concurrent.futures import ThreadPoolExecutor
-from typing import ClassVar, Dict, Final, NamedTuple, Optional, Tuple
+from typing import ClassVar, Final, NamedTuple
 
 import asyncio
 from python_socks import ProxyType
@@ -63,7 +65,7 @@ log = logging.getLogger(__name__)
 #  HTTP fallback, so a nonce opening with one would be answered as a web request.
 #  https://github.com/tdlib/td/blob/d1085f9cebc5a62379991ae1652673954f229c1f/td/mtproto/TcpTransport.cpp#L99-L101
 #  https://github.com/TelegramMessenger/MTProxy/blob/f36d8af769ffaeac36978d38c2c0f6d1104c2137/net/net-tcp-rpc-ext-server.c#L1065
-_OBFUSCATED2_RESERVED_PREFIXES: Final[Tuple[bytes, ...]] = (
+_OBFUSCATED2_RESERVED_PREFIXES: Final[tuple[bytes, ...]] = (
     b"HEAD",
     b"POST",
     b"GET ",
@@ -80,17 +82,19 @@ INTERMEDIATE_PADDED_OBFUSCATE_TAG: Final[bytes] = b"\xdd\xdd\xdd\xdd"
 
 _OBFUSCATE_TAG_SIZE: Final[int] = 4
 
-CipherArgs = Tuple[bytes, bytearray, bytearray]  # (key, iv, state) for aes.ctr256_{en,de}crypt
+CipherArgs = tuple[bytes, bytearray, bytearray]  # (key, iv, state) for aes.ctr256_{en,de}crypt
 
 # The schemes `python_socks` dials for us, and its name for each.
-_PYTHON_SOCKS_TYPES: Final[Dict[ProxyScheme, ProxyType]] = {
+_PYTHON_SOCKS_TYPES: Final[dict[ProxyScheme, ProxyType]] = {
     ProxyScheme.SOCKS4: ProxyType.SOCKS4,
     ProxyScheme.SOCKS5: ProxyType.SOCKS5,
     ProxyScheme.HTTP: ProxyType.HTTP,
 }
 
 
-def generate_obfuscated2_nonce(reserved_prefixes: Tuple[bytes, ...] = _OBFUSCATED2_RESERVED_PREFIXES) -> bytearray:
+def generate_obfuscated2_nonce(
+    reserved_prefixes: tuple[bytes, ...] = _OBFUSCATED2_RESERVED_PREFIXES,
+) -> bytearray:
     # Avoids fixed prefixes a firewall could use to fingerprint the stream:
     #  a literal 0xef tag byte, common cleartext protocol prefixes, and an
     #  all-zero field. Shared by TCPAbridgedO's plain obfuscated2 handshake
@@ -119,7 +123,9 @@ class Obfuscated2Header(NamedTuple):
     decrypt: CipherArgs
 
 
-def build_obfuscated2_header(secret: bytes, *, dc_id: int, obfuscate_tag: bytes) -> Obfuscated2Header:
+def build_obfuscated2_header(
+    secret: bytes, *, dc_id: int, obfuscate_tag: bytes
+) -> Obfuscated2Header:
     # secret is the bare key - callers strip any 0xDD marker first.
     if len(secret) != OBFUSCATED2_SECRET_SIZE:
         msg = f"obfuscated2: secret must be exactly {OBFUSCATED2_SECRET_SIZE} bytes, got {len(secret)}"
@@ -155,15 +161,15 @@ class TCP:
     # Set by a packet-framing subclass (TCPAbridged, TCPIntermediatePadded)
     #  safe to use over a WEB proxy: the 4-byte tag stock MTProxy uses to
     #  recognize the framing that follows. None = "no obfuscated2 story".
-    OBFUSCATE_TAG: ClassVar[Optional[bytes]] = None
+    OBFUSCATE_TAG: ClassVar[bytes | None] = None
 
     def __init__(
         self,
         ipv6: bool = False,
-        proxy: Optional[Proxy] = None,
+        proxy: Proxy | None = None,
         crypto_executor_workers: int = 1,
-        loop: Optional[asyncio.AbstractEventLoop] = None,
-        dc_id: Optional[int] = None,
+        loop: asyncio.AbstractEventLoop | None = None,
+        dc_id: int | None = None,
     ) -> None:
         self.ipv6 = ipv6
         self.proxy = proxy
@@ -178,8 +184,8 @@ class TCP:
             max_workers=self.crypto_executor_workers, thread_name_prefix="CryptoWorker"
         )
 
-        self.reader: Optional[asyncio.StreamReader] = None
-        self.writer: Optional[asyncio.StreamWriter] = None
+        self.reader: asyncio.StreamReader | None = None
+        self.writer: asyncio.StreamWriter | None = None
 
         self.marker_event = asyncio.Event()
         self.lock = asyncio.Lock()
@@ -189,10 +195,10 @@ class TCP:
         else:
             self.loop = utils.get_event_loop()
 
-        self._web_carrier: Optional[WebProxyCarrier] = None
-        self._records: Optional[FakeTlsRecords] = None
-        self._encrypt: Optional[CipherArgs] = None
-        self._decrypt: Optional[CipherArgs] = None
+        self._web_carrier: WebProxyCarrier | None = None
+        self._records: FakeTlsRecords | None = None
+        self._encrypt: CipherArgs | None = None
+        self._decrypt: CipherArgs | None = None
 
     @property
     def is_web_proxy(self) -> bool:
@@ -223,7 +229,10 @@ class TCP:
         # A dd or ee secret asks for random padding, and the padded intermediate
         #  transport is the only one that sends any. `Connection` picks that class
         #  on its own, so reaching this means the transport was built by hand.
-        if uses_random_padding(self.proxy) and self.OBFUSCATE_TAG != INTERMEDIATE_PADDED_OBFUSCATE_TAG:
+        if (
+            uses_random_padding(self.proxy)
+            and self.OBFUSCATE_TAG != INTERMEDIATE_PADDED_OBFUSCATE_TAG
+        ):
             msg = (
                 f"this proxy's secret asks for random padding, which {type(self).__name__} "
                 f"does not send; use TCPIntermediatePadded"
@@ -255,7 +264,9 @@ class TCP:
             await carrier.close()
             raise OSError(e) from e
 
-        built = build_obfuscated2_header(bare_secret, dc_id=self.dc_id, obfuscate_tag=self.OBFUSCATE_TAG)
+        built = build_obfuscated2_header(
+            bare_secret, dc_id=self.dc_id, obfuscate_tag=self.OBFUSCATE_TAG
+        )
         self._encrypt = built.encrypt
         self._decrypt = built.decrypt
 
@@ -305,7 +316,7 @@ class TCP:
         except Exception as e:
             log.debug("Could not configure TCP Keep-Alive: %s %s", type(e).__name__, e)
 
-    async def _connect_via_proxy(self, destination: Tuple[str, int]) -> None:
+    async def _connect_via_proxy(self, destination: tuple[str, int]) -> None:
         dest_host, dest_port = destination
         proxy = await self._build_proxy()
 
@@ -332,7 +343,9 @@ class TCP:
 
         self.reader, self.writer = await asyncio.open_connection(sock=sock)
 
-    async def _connect_via_direct(self, destination: Tuple[str, int], *, family: Optional[int] = None) -> None:
+    async def _connect_via_direct(
+        self, destination: tuple[str, int], *, family: int | None = None
+    ) -> None:
         host, port = destination
 
         if family is None:
@@ -366,7 +379,9 @@ class TCP:
         #  was derived from, so let getaddrinfo pick the family it actually has.
         await self._connect_via_direct((mtproxy.hostname, mtproxy.port), family=socket.AF_UNSPEC)
 
-        built = build_obfuscated2_header(bare_secret, dc_id=self.dc_id, obfuscate_tag=self.OBFUSCATE_TAG)
+        built = build_obfuscated2_header(
+            bare_secret, dc_id=self.dc_id, obfuscate_tag=self.OBFUSCATE_TAG
+        )
 
         if mtproxy.sni_hostname is None:
             # Written straight to the socket: self.send() is the framing subclass's
@@ -394,7 +409,9 @@ class TCP:
 
         response = await self._read_greeting_response()
 
-        if not faketls.server_hello_is_authentic(response, secret=secret, client_random=hello.random):
+        if not faketls.server_hello_is_authentic(
+            response, secret=secret, client_random=hello.random
+        ):
             msg = f"fake-TLS: {domain} answered the greeting without knowing the proxy secret"
             raise OSError(msg)
 
@@ -423,7 +440,7 @@ class TCP:
         #  https://github.com/tdlib/td/blob/d1085f9cebc5a62379991ae1652673954f229c1f/td/mtproto/TlsInit.cpp#L636-L644
         return bytes(response)
 
-    async def _connect(self, destination: Tuple[str, int]) -> None:
+    async def _connect(self, destination: tuple[str, int]) -> None:
         if self.is_web_proxy:
             await self._connect_via_web_proxy()
             return
@@ -438,7 +455,7 @@ class TCP:
 
         await self._connect_via_direct(destination)
 
-    async def connect(self, address: Tuple[str, int]) -> None:
+    async def connect(self, address: tuple[str, int]) -> None:
         # Every step of the WEB handshake is already bounded by the carrier's own
         #  timeouts, and they add up well past `TCP.TIMEOUT`: at 10s the relay
         #  never reaches the WELCOME that `_WELCOME_TIMEOUT` waits 30s for, so
@@ -449,7 +466,9 @@ class TCP:
 
         try:
             await asyncio.wait_for(self._connect(address), timeout=TCP.TIMEOUT)
-        except asyncio.TimeoutError:  # Re-raise as TimeoutError. asyncio.TimeoutError is deprecated in 3.11
+        except (
+            asyncio.TimeoutError
+        ):  # Re-raise as TimeoutError. asyncio.TimeoutError is deprecated in 3.11
             raise TimeoutError("Connection timed out")
 
     async def close(self) -> None:
@@ -514,7 +533,7 @@ class TCP:
                 log.error("Send failed: %s %s", type(e).__name__, e)
                 raise OSError(e)
 
-    async def recv(self, length: int = 0) -> Optional[bytes]:
+    async def recv(self, length: int = 0) -> bytes | None:
         if self._web_carrier is not None:
             data = await self._web_carrier.recv(length)
         elif self._records is not None:
@@ -529,7 +548,7 @@ class TCP:
 
         return data
 
-    async def _recv_from_socket(self, length: int) -> Optional[bytes]:
+    async def _recv_from_socket(self, length: int) -> bytes | None:
         if not self.reader:
             log.debug("Recv called but reader is None")
             return None
