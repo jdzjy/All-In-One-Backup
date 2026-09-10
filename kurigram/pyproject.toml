@@ -199,19 +199,34 @@ quote-style = "double"
 # This selection is a floor, not a style guide. It is the set of rules the tree already
 #  passes, so the check can only ever fail on something newly written, and it is meant to
 #  grow one rule at a time. Anything wider is unusable for now: `ruff check --select ALL
-#  --statistics` reports over 22000 findings, the bulk of them line length, missing
+#  --statistics` reports nearly 19000 findings, the bulk of them line length, missing
 #  trailing commas and docstring section formatting.
 select = [
+    "B",      # flake8-bugbear: mutable/call-based argument defaults, bare `except: raise`,
+              #  unused loop variables, `zip()` without `strict=`.
+    "C4",     # flake8-comprehensions: a comprehension a plain builtin call already expresses.
     "E9",     # Syntax errors and files that cannot be read.
-    "F632",   # `is` used against a literal.
-    "F821",   # Undefined name.
-    "F822",   # Undefined name in `__all__`.
+    "EXE",    # flake8-executable: a shebang without the matching executable bit, or vice versa.
+    "F",      # Pyflakes: unused imports and locals, wildcard imports, f-strings with no field.
+    "ICN",    # flake8-import-conventions: an import that does not follow its usual alias.
+    "INP",    # flake8-no-pep420: a `.py` file whose own directory has no `__init__.py`.
+    "INT",    # flake8-gettext: a gettext call built from an f-string/concatenation.
+    "ISC",    # flake8-implicit-str-concat: a `+` between adjacent literals, or two on one line.
+    "LOG",    # flake8-logging: stdlib `logging` misuse, e.g. constructing a `Logger` directly.
+    "PGH",    # pygrep-hooks: a blanket `# noqa`/`# type: ignore` with no code, or `eval()`.
+    "PIE",    # flake8-pie: a `range(0, ...)` start, a stray `pass`, a duplicate class field.
+    "PLC",    # Pylint convention: dict `.items()` misuse, deferred imports, `str.split` maxsplit.
+    "PLE",    # Pylint Error: real bugs (bad `super()` call, `yield` outside a function, ...).
+    "PLW",    # Pylint warning: dead loop-else, shadowed loop vars, self-assignment, eq/hash.
+    "PYI",    # flake8-pyi: the stub conventions that also hold in a regular `.py` file.
+    "RSE",    # flake8-raise: a parenthesized exception with no arguments, e.g. `raise Exc()`.
     "RUF013", # Implicit `Optional`, e.g. `def method(chat_id: int = None)`.
-    "UP006",  # `List[str]` where `list[str]` is meant.
-    "UP007",  # `Union[int, str]` where `int | str` is meant.
-    "UP035",  # An import of a `typing` alias the builtins replaced.
-    "UP037",  # Quotes around an annotation that does not need deferring.
-    "UP045",  # `Optional[int]` where `int | None` is meant.
+    "SLOT",   # flake8-slots: an immutable-builtin subclass missing `__slots__`.
+    "T10",    # flake8-debugger: a leftover `breakpoint()`/`pdb.set_trace()`.
+    "UP",     # pyupgrade: outdated typing syntax, and `.format()` calls an f-string replaces.
+    "W",      # pycodestyle warnings: an invalid escape sequence, and whitespace the
+              #  formatter already normalizes.
+    "YTT",    # flake8-2020: a `sys.version_info` comparison that breaks on Python 10 and later.
 ]
 
 [tool.ty.src]

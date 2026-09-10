@@ -88,10 +88,10 @@ def parameters_with_defaults(node: ast.AST) -> Iterator[tuple[ast.arg, ast.expr]
     arguments = node.args
     positional: list[ast.arg] = arguments.posonlyargs + arguments.args
 
-    for parameter, default in zip(reversed(positional), reversed(arguments.defaults)):
+    for parameter, default in zip(reversed(positional), reversed(arguments.defaults), strict=False):
         yield parameter, default
 
-    for parameter, default in zip(arguments.kwonlyargs, arguments.kw_defaults):
+    for parameter, default in zip(arguments.kwonlyargs, arguments.kw_defaults, strict=True):
         if default is not None:
             yield parameter, default
 
@@ -119,7 +119,7 @@ def optional_parameters_that_do_not_default_to_none() -> list[tuple[str, int, st
 
 def test_a_parameter_that_admits_none_defaults_to_none() -> None:
     offenders = [
-        "{}:{}: {}".format(relative, line, name)
+        f"{relative}:{line}: {name}"
         for relative, line, name in optional_parameters_that_do_not_default_to_none()
         if (relative, name) not in _EXEMPTIONS
     ]

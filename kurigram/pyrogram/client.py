@@ -629,7 +629,7 @@ class Client(Methods):
                 print(e.MESSAGE)
 
                 while True:
-                    print("Password hint: {}".format(await self.get_password_hint()))
+                    print(f"Password hint: {await self.get_password_hint()}")
 
                     if not self.password:
                         self.password = await ainput(
@@ -692,10 +692,17 @@ class Client(Methods):
 
         return signed_up
 
-    async def authorize_qr(self, except_ids: list[int] = []) -> User:
-        from qrcode import QRCode  # ty: ignore[unresolved-import] - optional, not a project dependency
+    async def authorize_qr(self, except_ids: list[int] | None = None) -> User:
+        # `qrcode` is an optional extra, so importing it at module level would break
+        #  `import pyrogram` for everyone who did not install it.
+        try:
+            from qrcode import QRCode  # noqa: PLC0415 # ty: ignore[unresolved-import]
+        except ImportError as er:
+            raise ImportError(
+                "`qrcode` is not installed, run `pip install 'kurigram[qrcode]'`"
+            ) from er
 
-        qr_login = QRLogin(self, except_ids)
+        qr_login = QRLogin(self, except_ids or [])
         await qr_login.recreate()
 
         qr = QRCode(version=1)
@@ -732,7 +739,7 @@ class Client(Methods):
                 print(e.MESSAGE)
 
                 while True:
-                    print("Password hint: {}".format(await self.get_password_hint()))
+                    print(f"Password hint: {await self.get_password_hint()}")
 
                     if not self.password:
                         self.password = await ainput(
@@ -898,7 +905,6 @@ class Client(Methods):
                 ) or getattr(update, "channel_id", None)
 
                 pts = getattr(update, "pts", None)
-                pts_count = getattr(update, "pts_count", None)
                 qts = getattr(update, "qts", None)
 
                 if pts is not None or qts is not None:
@@ -1096,13 +1102,12 @@ class Client(Methods):
                                     self.add_handler(handler, group)
 
                                     log.info(
-                                        '[{}] [LOAD] {}("{}") in group {} from "{}"'.format(
-                                            self.name,
-                                            type(handler).__name__,
-                                            name,
-                                            group,
-                                            module_path,
-                                        )
+                                        '[%s] [LOAD] %s("%s") in group %s from "%s"',
+                                        self.name,
+                                        type(handler).__name__,
+                                        name,
+                                        group,
+                                        module_path,
                                     )
 
                                     count += 1
@@ -1135,10 +1140,12 @@ class Client(Methods):
                         continue
 
                     if handlers is None:
-                        handlers = vars(module).keys()
+                        handler_names = vars(module).keys()
                         warn_non_existent_functions = False
+                    else:
+                        handler_names = handlers
 
-                    for name in handlers:
+                    for name in handler_names:
                         target_attr = getattr(module, name, None)
                         target_handlers = _plugin_handlers(target_attr)
 
@@ -1148,13 +1155,12 @@ class Client(Methods):
                                     self.add_handler(handler, group)
 
                                     log.info(
-                                        '[{}] [LOAD] {}("{}") in group {} from "{}"'.format(
-                                            self.name,
-                                            type(handler).__name__,
-                                            name,
-                                            group,
-                                            module_path,
-                                        )
+                                        '[%s] [LOAD] %s("%s") in group %s from "%s"',
+                                        self.name,
+                                        type(handler).__name__,
+                                        name,
+                                        group,
+                                        module_path,
                                     )
 
                                     count += 1
@@ -1171,9 +1177,10 @@ class Client(Methods):
                                     )
                         elif warn_non_existent_functions:
                             log.warning(
-                                '[{}] [LOAD] Ignoring non-existent function "{}" from "{}"'.format(
-                                    self.name, name, module_path
-                                )
+                                '[%s] [LOAD] Ignoring non-existent function "%s" from "%s"',
+                                self.name,
+                                name,
+                                module_path,
                             )
 
             if exclude:
@@ -1196,10 +1203,12 @@ class Client(Methods):
                         continue
 
                     if handlers is None:
-                        handlers = vars(module).keys()
+                        handler_names = vars(module).keys()
                         warn_non_existent_functions = False
+                    else:
+                        handler_names = handlers
 
-                    for name in handlers:
+                    for name in handler_names:
                         target_attr = getattr(module, name, None)
                         target_handlers = _plugin_handlers(target_attr)
 
@@ -1209,13 +1218,12 @@ class Client(Methods):
                                     self.remove_handler(handler, group)
 
                                     log.info(
-                                        '[{}] [UNLOAD] {}("{}") from group {} in "{}"'.format(
-                                            self.name,
-                                            type(handler).__name__,
-                                            name,
-                                            group,
-                                            module_path,
-                                        )
+                                        '[%s] [UNLOAD] %s("%s") from group %s in "%s"',
+                                        self.name,
+                                        type(handler).__name__,
+                                        name,
+                                        group,
+                                        module_path,
                                     )
 
                                     count -= 1
@@ -1232,9 +1240,10 @@ class Client(Methods):
                                     )
                         elif warn_non_existent_functions:
                             log.warning(
-                                '[{}] [UNLOAD] Ignoring non-existent function "{}" from "{}"'.format(
-                                    self.name, name, module_path
-                                )
+                                '[%s] [UNLOAD] Ignoring non-existent function "%s" from "%s"',
+                                self.name,
+                                name,
+                                module_path,
                             )
 
             if count > 0:
@@ -1424,7 +1433,10 @@ class Client(Methods):
                             )
 
                             # https://core.telegram.org/cdn#verifying-files
-                            def _check_all_hashes():
+                            def _check_all_hashes(
+                                hashes: list[raw.base.FileHash],
+                                decrypted_chunk: bytes,
+                            ) -> None:
                                 for i, h in enumerate(hashes):
                                     cdn_chunk = decrypted_chunk[h.limit * i : h.limit * (i + 1)]
                                     CDNFileHashMismatch.check(
@@ -1432,7 +1444,12 @@ class Client(Methods):
                                         "h.hash == sha256(cdn_chunk).digest()",
                                     )
 
-                            await self.loop.run_in_executor(self.executor, _check_all_hashes)
+                            await self.loop.run_in_executor(
+                                self.executor,
+                                _check_all_hashes,
+                                hashes,
+                                decrypted_chunk,
+                            )
 
                             yield decrypted_chunk
 

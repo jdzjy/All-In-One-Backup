@@ -41,16 +41,20 @@ class EditUserStarSubscription:
                 Telegram payment identifier of the subscription.
 
             is_canceled (``bool``):
-                Pass True to cancel the subscription.
-                Pass False to allow the user to enable it.
+                Pass *True* to cancel extension of the user subscription, the subscription must be active up to the end of the current subscription period.
+                Pass *False* to allow the user to re-enable a subscription that was previously canceled by the bot.
 
         Returns:
             ``bool``: On success, True is returned.
         """
+        # `restore` is the opposite of `is_canceled`: the request cancels the subscription when
+        #  the flag is absent and re-enables it when it is set. TDLib sends `!is_canceled` for the
+        #  same call, and passing `is_canceled` straight through left the subscription renewing.
+        #  https://github.com/tdlib/td/blob/d1085f9cebc5a62379991ae1652673954f229c1f/td/telegram/StarManager.cpp#L1100
         return await self.invoke(
             raw.functions.payments.BotCancelStarsSubscription(
                 user_id=await self.resolve_peer(user_id),
                 charge_id=telegram_payment_charge_id,
-                restore=is_canceled,
+                restore=not is_canceled,
             )
         )

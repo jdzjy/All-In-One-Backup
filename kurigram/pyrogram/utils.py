@@ -52,9 +52,7 @@ async def ainput(
     prompt: str = "", *, hide: bool = False, loop: asyncio.AbstractEventLoop | None = None
 ):
     """Just like the built-in input, but async"""
-    if isinstance(loop, asyncio.AbstractEventLoop):
-        loop = loop
-    else:
+    if not isinstance(loop, asyncio.AbstractEventLoop):
         loop = get_event_loop()
 
     with ThreadPoolExecutor(1) as executor:
@@ -74,11 +72,11 @@ def get_input_media_from_file_id(
 ) -> raw.types.InputMediaPhoto | raw.types.InputMediaDocument:
     try:
         decoded = FileId.decode(file_id)
-    except Exception:
+    except Exception as e:
         raise ValueError(
             f'Failed to decode "{file_id}". The value does not represent an existing local file, '
             f"HTTP URL, or valid file id."
-        )
+        ) from e
 
     file_type = decoded.file_type
 
@@ -496,7 +494,7 @@ def sha256(data: bytes) -> bytes:
 
 
 def xor(a: bytes, b: bytes) -> bytes:
-    return bytes(i ^ j for i, j in zip(a, b))
+    return bytes(i ^ j for i, j in zip(a, b, strict=True))
 
 
 def compute_password_hash(
@@ -587,7 +585,7 @@ async def parse_text_entities(
         for entity in entities:
             entity._client = client
 
-        text, entities = text, [await entity.write() for entity in entities] or None
+        entities = [await entity.write() for entity in entities] or None
     else:
         text, entities = (await client.parser.parse(text, parse_mode)).values()
 
