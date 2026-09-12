@@ -557,7 +557,8 @@ let number = loop {
             deleted_business_messages=None,
             managed_bot=None,
             guest_message=None,
-            subscription=None)
+            subscription=None,
+            stopped_message_generation=None)
 
     def test_is_string_unicode(self):
         s1 = u'string'

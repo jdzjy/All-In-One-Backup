@@ -1,8 +1,85 @@
 # -*- coding: utf-8 -*-
+import json
 import sys
 
 sys.path.append('../')
 from telebot import types
+
+
+def test_api_103_ephemeral_message_parameters():
+    parameters = types.EphemeralMessageParameters(1, callback_query_id='query')
+
+    assert parameters.to_dict() == {'receiver_user_id': 1, 'callback_query_id': 'query'}
+
+
+def test_api_103_rich_message_button():
+    button = types.RichMessageButton('Open', callback_data='open')
+
+    assert button.to_dict() == {'text': 'Open', 'callback_data': 'open'}
+
+
+def test_api_103_disabled_inline_button():
+    button = types.InlineKeyboardButton('Unavailable', disabled=types.DisabledButton())
+
+    assert button.to_dict()['disabled'] == {}
+
+
+def test_api_103_rich_text_button_round_trip():
+    button = types.RichMessageButton(types.RichTextBold('Open'), callback_data='open')
+    rich_text = types.RichTextButton(button)
+
+    assert types.RichText.de_json(rich_text.to_dict()).to_dict() == rich_text.to_dict()
+
+
+def test_api_103_rich_blocks():
+    button = types.RichMessageButton('Open', callback_data='open')
+    document = types.InputRichBlockDocument(types.InputMediaDocument('document-id'))
+    buttons = types.RichBlock.de_json({
+        'type': 'buttons',
+        'buttons': [button.to_dict()],
+    })
+    quotation = types.RichBlock.de_json({
+        'type': 'expandable_blockquote',
+        'text': 'Quote',
+    })
+
+    assert isinstance(buttons, types.RichBlockButtons)
+    assert buttons.buttons[0].callback_data == 'open'
+    assert isinstance(quotation, types.RichBlockExpandableBlockQuotation)
+    assert quotation.text == 'Quote'
+    assert document.to_dict() == {
+        'type': 'document',
+        'document': {'type': 'document', 'media': 'document-id'},
+    }
+
+
+def test_api_103_new_optional_fields():
+    table = types.InputRichBlockTable([], is_compact=True)
+    reply_keyboard = types.ReplyKeyboardMarkup(force_reply=True)
+    inline_keyboard = types.InlineKeyboardMarkup(force_reply=True)
+
+    assert table.to_dict()['is_compact'] is True
+    assert json.loads(reply_keyboard.to_json())['force_reply'] is True
+    assert inline_keyboard.to_dict()['force_reply'] is True
+
+
+def test_api_103_new_service_objects():
+    update = types.Update.de_json({
+        'update_id': 1,
+        'stopped_message_generation': {
+            'chat': {'id': 1, 'type': 'private'},
+            'draft_id': 2,
+        },
+    })
+    message = types.Message.de_json({
+        'message_id': 1,
+        'date': 1,
+        'chat': {'id': 1, 'type': 'private'},
+        'community_chat_joined': {'community': {'id': 1, 'name': 'Community'}},
+    })
+
+    assert isinstance(update.stopped_message_generation, types.MessageGenerationStopped)
+    assert isinstance(message.community_chat_joined, types.CommunityChatJoined)
 
 
 def test_json_user():

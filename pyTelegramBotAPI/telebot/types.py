@@ -203,6 +203,9 @@ class Update(JsonDeserializable):
     :param subscription: Optional. User payment subscription has changed
     :type subscription: :class:`telebot.types.BotSubscriptionUpdated`
 
+    :param stopped_message_generation: Optional. A user asked the bot to stop the generation of a message
+    :type stopped_message_generation: :class:`telebot.types.MessageGenerationStopped`
+
     :return: Instance of the class
     :rtype: :class:`telebot.types.Update`
 
@@ -238,18 +241,21 @@ class Update(JsonDeserializable):
         managed_bot = ManagedBotUpdated.de_json(obj.get('managed_bot'))
         guest_message = Message.de_json(obj.get('guest_message'))
         subscription = BotSubscriptionUpdated.de_json(obj.get('subscription'))
+        stopped_message_generation = MessageGenerationStopped.de_json(obj.get('stopped_message_generation'))
 
         return cls(update_id, message, edited_message, channel_post, edited_channel_post, inline_query,
                    chosen_inline_result, callback_query, shipping_query, pre_checkout_query, poll, poll_answer,
                    my_chat_member, chat_member, chat_join_request, message_reaction, message_reaction_count,
                    removed_chat_boost, chat_boost, business_connection, business_message, edited_business_message,
-                   deleted_business_messages, purchased_paid_media, managed_bot, guest_message, subscription)
+                   deleted_business_messages, purchased_paid_media, managed_bot, guest_message, subscription,
+                   stopped_message_generation)
 
     def __init__(self, update_id, message, edited_message, channel_post, edited_channel_post, inline_query,
                  chosen_inline_result, callback_query, shipping_query, pre_checkout_query, poll, poll_answer,
                  my_chat_member, chat_member, chat_join_request, message_reaction, message_reaction_count,
                  removed_chat_boost, chat_boost, business_connection, business_message, edited_business_message,
-                 deleted_business_messages, purchased_paid_media, managed_bot, guest_message, subscription):
+                 deleted_business_messages, purchased_paid_media, managed_bot, guest_message, subscription,
+                 stopped_message_generation):
         self.update_id: int = update_id
         self.message: Optional[Message] = message
         self.edited_message: Optional[Message] = edited_message
@@ -277,6 +283,7 @@ class Update(JsonDeserializable):
         self.managed_bot: Optional[ManagedBotUpdated] = managed_bot
         self.guest_message: Optional[Message] = guest_message
         self.subscription: Optional[BotSubscriptionUpdated] = subscription
+        self.stopped_message_generation: Optional[MessageGenerationStopped] = stopped_message_generation
 
 class ChatMemberUpdated(JsonDeserializable):
     """
@@ -1332,6 +1339,9 @@ class Message(JsonDeserializable):
     :param community_chat_removed: Optional. Service message: chat removed from a Community
     :type community_chat_removed: :class:`telebot.types.CommunityChatRemoved`
 
+    :param community_chat_joined: Optional. Service message: chat was joined by a user from a Community
+    :type community_chat_joined: :class:`telebot.types.CommunityChatJoined`
+
     :param direct_message_price_changed: Optional. Service message: the price for paid messages in the corresponding direct messages chat of a channel has changed
     :type direct_message_price_changed: :class:`telebot.types.DirectMessagePriceChanged`
 
@@ -1738,6 +1748,9 @@ class Message(JsonDeserializable):
         if 'community_chat_removed' in obj:
             opts['community_chat_removed'] = CommunityChatRemoved.de_json(obj['community_chat_removed'])
             content_type = 'community_chat_removed'
+        if 'community_chat_joined' in obj:
+            opts['community_chat_joined'] = CommunityChatJoined.de_json(obj['community_chat_joined'])
+            content_type = 'community_chat_joined'
         return cls(message_id, from_user, date, chat, content_type, opts, json_string)
 
     @classmethod
@@ -1887,10 +1900,11 @@ class Message(JsonDeserializable):
         self.rich_message: Optional[RichMessage] = None
         self.receiver_user: Optional[User] = None
         self.ephemeral_message_id: Optional[str] = None
+        self.community_chat_added: Optional[CommunityChatAdded] = None
+        self.community_chat_removed: Optional[CommunityChatRemoved] = None
+        self.community_chat_joined: Optional[CommunityChatJoined] = None
         self.game: Optional[Game] = None
         self.passport_data: Optional[PassportData] = None
-        self.community_chat_added: Optional[Chat] = None
-        self.community_chat_removed: Optional[Chat] = None
 
         for key in options:
             setattr(self, key, options[key])
@@ -2788,6 +2802,9 @@ class ReplyKeyboardMarkup(JsonSerializable):
     :param is_persistent: Optional. Requests clients to always show the keyboard when the regular keyboard is hidden. Defaults to False, in which case the custom keyboard can be hidden and opened with a keyboard icon.
     :type is_persistent: :obj:`bool`
 
+    :param force_reply: Optional. Pass True if the reply interface must be shown to the user, as if they had manually selected the bot's message and tapped 'Reply'
+    :type force_reply: :obj:`bool`
+
     :param row_width: Non-API. The width of the row in the keyboard when adding keys using "add" method. Defaults to 3. Maximum value is 12.
     :type row_width: :obj:`int`
 
@@ -2797,7 +2814,8 @@ class ReplyKeyboardMarkup(JsonSerializable):
 
     def __init__(self, resize_keyboard: Optional[bool]=None, one_time_keyboard: Optional[bool]=None,
             selective: Optional[bool]=None, row_width: int=3, input_field_placeholder: Optional[str]=None,
-            is_persistent: Optional[bool]=None, keyboard: Optional[List[List[KeyboardButton]]]=None):
+            is_persistent: Optional[bool]=None, force_reply: Optional[bool]=None,
+            keyboard: Optional[List[List[KeyboardButton]]]=None):
         if row_width > self.max_row_keys:
             # Todo: Will be replaced with Exception in future releases
             if not DISABLE_KEYLEN_ERROR:
@@ -2811,6 +2829,7 @@ class ReplyKeyboardMarkup(JsonSerializable):
         self.input_field_placeholder: Optional[str] = input_field_placeholder
         self.keyboard: List[List[KeyboardButton]] = keyboard or []
         self.is_persistent: Optional[bool] = is_persistent
+        self.force_reply: Optional[bool] = force_reply
 
 
     def add(self, *args, row_width=None) -> 'ReplyKeyboardMarkup':
@@ -2879,6 +2898,8 @@ class ReplyKeyboardMarkup(JsonSerializable):
             json_dict['input_field_placeholder'] = self.input_field_placeholder
         if self.is_persistent is not None:
             json_dict['is_persistent'] = self.is_persistent
+        if self.force_reply is not None:
+            json_dict['force_reply'] = self.force_reply
         return json.dumps(json_dict)
 
 
@@ -3180,6 +3201,9 @@ class InlineKeyboardMarkup(Dictionaryable, JsonSerializable, JsonDeserializable)
     :param inline_keyboard: Array of button rows, each represented by an Array of InlineKeyboardButton objects
     :type inline_keyboard: :obj:`list` of :obj:`list` of :class:`telebot.types.InlineKeyboardButton`
 
+    :param force_reply: Optional. Pass True if the reply interface must be shown to the user, as if they had manually selected the bot's message and tapped 'Reply'. The value of the field can't be changed when the inline keyboard is edited.
+    :type force_reply: :obj:`bool`
+
     :param keyboard: Deprecated. Use inline_keyboard instead.
     :type keyboard: :obj:`list` of :obj:`list` of :class:`telebot.types.InlineKeyboardButton`
 
@@ -3200,7 +3224,7 @@ class InlineKeyboardMarkup(Dictionaryable, JsonSerializable, JsonDeserializable)
 
     def __init__(
         self, inline_keyboard: List[List[InlineKeyboardButton]] = None, row_width: int = 3,
-        keyboard: List[List[InlineKeyboardButton]] = None, **kwargs):
+        keyboard: List[List[InlineKeyboardButton]] = None, force_reply: Optional[bool] = None, **kwargs):
         if row_width > self.max_row_keys:
             # Todo: Will be replaced with Exception in future releases
             logger.error('Telegram does not support inline keyboard row width over %d.' % self.max_row_keys)
@@ -3208,6 +3232,7 @@ class InlineKeyboardMarkup(Dictionaryable, JsonSerializable, JsonDeserializable)
 
         self.row_width: int = row_width
         self.inline_keyboard: List[List[InlineKeyboardButton]] = inline_keyboard or []
+        self.force_reply: Optional[bool] = force_reply
         if keyboard is not None:
             logger.warning('The "keyboard" parameter is deprecated. Use "inline_keyboard" instead.')
             if not self.inline_keyboard:
@@ -3272,6 +3297,8 @@ class InlineKeyboardMarkup(Dictionaryable, JsonSerializable, JsonDeserializable)
     def to_dict(self):
         json_dict = dict()
         json_dict['inline_keyboard'] = [[button.to_dict() for button in row] for row in self.inline_keyboard]
+        if self.force_reply is not None:
+            json_dict['force_reply'] = self.force_reply
         return json_dict
 
     @property
@@ -3325,6 +3352,9 @@ class InlineKeyboardButton(Dictionaryable, JsonSerializable, JsonDeserializable)
     :param copy_text: Optional. Description of the button that copies the specified text to the clipboard.
     :type copy_text: :class:`telebot.types.CopyTextButton`
 
+    :param disabled: Optional. If set, then the button is disabled and does nothing
+    :type disabled: :class:`telebot.types.DisabledButton`
+
     :return: Instance of the class
     :rtype: :class:`telebot.types.InlineKeyboardButton`
     """
@@ -3340,6 +3370,8 @@ class InlineKeyboardButton(Dictionaryable, JsonSerializable, JsonDeserializable)
             obj['switch_inline_query_chosen_chat'] = SwitchInlineQueryChosenChat.de_json(obj.get('switch_inline_query_chosen_chat'))
         if 'copy_text' in obj:
             obj['copy_text'] = CopyTextButton.de_json(obj.get('copy_text'))
+        if 'disabled' in obj:
+            obj['disabled'] = DisabledButton.de_json(obj.get('disabled'))
 
         return cls(**obj)
 
@@ -3349,7 +3381,8 @@ class InlineKeyboardButton(Dictionaryable, JsonSerializable, JsonDeserializable)
                  switch_inline_query_chosen_chat: Optional[SwitchInlineQueryChosenChat] = None,
                  callback_game: Optional[CallbackGame] = None, pay: Optional[bool] = None,
                  login_url: Optional[LoginUrl] = None, copy_text: Optional[CopyTextButton] = None,
-                 icon_custom_emoji_id: Optional[str] = None, style: Optional[str] = None, **kwargs):
+                 icon_custom_emoji_id: Optional[str] = None, style: Optional[str] = None,
+                 disabled: Optional[DisabledButton] = None, **kwargs):
         self.text: str = text
         self.url: Optional[str] = url
         self.callback_data: Optional[str] = callback_data
@@ -3363,6 +3396,7 @@ class InlineKeyboardButton(Dictionaryable, JsonSerializable, JsonDeserializable)
         self.copy_text: Optional[CopyTextButton] = copy_text
         self.icon_custom_emoji_id: Optional[str] = icon_custom_emoji_id
         self.style: Optional[str] = style
+        self.disabled: Optional[DisabledButton] = disabled
 
     def to_json(self):
         return json.dumps(self.to_dict())
@@ -3389,6 +3423,8 @@ class InlineKeyboardButton(Dictionaryable, JsonSerializable, JsonDeserializable)
             json_dict['switch_inline_query_chosen_chat'] = self.switch_inline_query_chosen_chat.to_dict()
         if self.copy_text:
             json_dict['copy_text'] = self.copy_text.to_dict()
+        if self.disabled:
+            json_dict['disabled'] = self.disabled.to_dict()
         if self.icon_custom_emoji_id:
             json_dict['icon_custom_emoji_id'] = self.icon_custom_emoji_id
         if self.style:
@@ -3662,6 +3698,9 @@ class ChatMemberAdministrator(ChatMember):
     :param can_delete_stories: True, if the administrator can delete stories posted by other users
     :type can_delete_stories: :obj:`bool`
 
+    :param can_send_welcome_messages: True, if the administrator can manage chat welcome messages or directly send them in the case of bots
+    :type can_send_welcome_messages: :obj:`bool`
+
     :param can_post_messages: Optional. True, if the administrator can post messages in the channel, approve suggested posts, or access channel statistics; for channels only
     :type can_post_messages: :obj:`bool`
 
@@ -3694,7 +3733,8 @@ class ChatMemberAdministrator(ChatMember):
         can_edit_stories: bool, can_delete_stories: bool,
         can_post_messages: Optional[bool] = None, can_edit_messages: Optional[bool] = None,
         can_pin_messages: Optional[bool] = None, can_manage_topics: Optional[bool] = None,
-        custom_title: Optional[str] = None, can_manage_direct_messages: Optional[bool] = None,
+        custom_title: Optional[str] = None, can_send_welcome_messages: Optional[bool] = None,
+        can_manage_direct_messages: Optional[bool] = None,
         can_manage_tags: Optional[bool] = None, **kwargs):
         super().__init__(user, status, **kwargs)
         self.can_be_edited: bool = can_be_edited
@@ -3714,6 +3754,7 @@ class ChatMemberAdministrator(ChatMember):
         self.can_pin_messages: Optional[bool] = can_pin_messages
         self.can_manage_topics: Optional[bool] = can_manage_topics
         self.custom_title: Optional[str] = custom_title
+        self.can_send_welcome_messages: Optional[bool] = can_send_welcome_messages
         self.can_manage_direct_messages: Optional[bool] = can_manage_direct_messages
         self.can_manage_tags: Optional[bool] = can_manage_tags
 
@@ -8327,6 +8368,9 @@ class ChatAdministratorRights(JsonDeserializable, JsonSerializable, Dictionaryab
     :param can_delete_stories: True, if the administrator can delete stories posted by other users
     :type can_delete_stories: :obj:`bool`
 
+    :param can_send_welcome_messages: True, if the administrator can manage chat welcome messages or directly send them in the case of bots
+    :type can_send_welcome_messages: :obj:`bool`
+
     :param can_manage_direct_messages: Optional. True, if the administrator can manage direct messages of the channel and decline suggested posts; for channels only
     :type can_manage_direct_messages: :obj:`bool`
 
@@ -8349,7 +8393,7 @@ class ChatAdministratorRights(JsonDeserializable, JsonSerializable, Dictionaryab
         can_post_messages: Optional[bool]=None, can_edit_messages: Optional[bool]=None,
         can_pin_messages: Optional[bool]=None, can_manage_topics: Optional[bool]=None,
         can_post_stories: bool = False, can_edit_stories: bool = False,
-        can_delete_stories: bool = False, can_manage_direct_messages: Optional[bool] = None,
+        can_delete_stories: bool = False, can_send_welcome_messages: Optional[bool] = None, can_manage_direct_messages: Optional[bool] = None,
         can_manage_tags: Optional[bool]=None, **kwargs) -> None:
         self.is_anonymous: bool = is_anonymous
         self.can_manage_chat: bool = can_manage_chat
@@ -8366,6 +8410,7 @@ class ChatAdministratorRights(JsonDeserializable, JsonSerializable, Dictionaryab
         self.can_post_stories: bool = can_post_stories
         self.can_edit_stories: bool = can_edit_stories
         self.can_delete_stories: bool = can_delete_stories
+        self.can_send_welcome_messages: Optional[bool] = can_send_welcome_messages
         self.can_manage_direct_messages: Optional[bool] = can_manage_direct_messages
         self.can_manage_tags: Optional[bool] = can_manage_tags
 
@@ -8394,6 +8439,8 @@ class ChatAdministratorRights(JsonDeserializable, JsonSerializable, Dictionaryab
             json_dict['can_edit_stories'] = self.can_edit_stories
         if self.can_delete_stories is not None:
             json_dict['can_delete_stories'] = self.can_delete_stories
+        if self.can_send_welcome_messages is not None:
+            json_dict['can_send_welcome_messages'] = self.can_send_welcome_messages
         if self.can_manage_direct_messages is not None:
             json_dict['can_manage_direct_messages'] = self.can_manage_direct_messages
         if self.can_manage_tags is not None:
@@ -13187,6 +13234,15 @@ class UniqueGiftInfo(JsonDeserializable):
     :param last_resale_amount: Optional. For gifts bought from other users, the price paid for the gift in either Telegram Stars or nanograms
     :type last_resale_amount: :obj:`int`
 
+    :param text: Optional. Text of the message that was added to the gift
+    :type text: :obj:`str`
+
+    :param entities: Optional. Special entities that appear in the text
+    :type entities: :obj:`list` of :class:`telebot.types.MessageEntity`
+
+    :param is_private: Optional. True, if the sender and gift text are shown only to the gift receiver; otherwise, everyone will be able to see them
+    :type is_private: :obj:`bool`
+
     :param owned_gift_id: Optional. Unique identifier of the received gift for the bot; only present for gifts received on behalf of business accounts
     :type owned_gift_id: :obj:`str`
 
@@ -13202,7 +13258,8 @@ class UniqueGiftInfo(JsonDeserializable):
     def __init__(self, gift: UniqueGift, origin: str, owned_gift_id: Optional[str] = None,
                     transfer_star_count: Optional[int] = None, next_transfer_date: Optional[int] = None,
                     last_resale_currency: Optional[str] = None,
-                    last_resale_amount: Optional[int] = None, **kwargs):
+                    last_resale_amount: Optional[int] = None, text: Optional[str] = None,
+                    entities: Optional[List[MessageEntity]] = None, is_private: Optional[bool] = None, **kwargs):
         self.gift: UniqueGift = gift
         self.origin: str = origin
         self.last_resale_currency: Optional[str] = last_resale_currency
@@ -13210,6 +13267,9 @@ class UniqueGiftInfo(JsonDeserializable):
         self.owned_gift_id: Optional[str] = owned_gift_id
         self.transfer_star_count: Optional[int] = transfer_star_count
         self.next_transfer_date: Optional[int] = next_transfer_date
+        self.text: Optional[str] = text
+        self.entities: Optional[List[MessageEntity]] = entities
+        self.is_private: Optional[bool] = is_private
 
     @property 
     def last_resale_star_count(self) -> Optional[int]:
@@ -13225,6 +13285,8 @@ class UniqueGiftInfo(JsonDeserializable):
         if json_string is None: return None
         obj = cls.check_json(json_string)
         obj['gift'] = UniqueGift.de_json(obj['gift'])
+        if 'entities' in obj:
+            obj['entities'] = [MessageEntity.de_json(entity) for entity in obj['entities']]
         return cls(**obj)
 
 
@@ -14692,6 +14754,8 @@ class RichText(JsonDeserializable, Dictionaryable, ABC):
             return RichTextReference.de_json(obj)
         elif type == 'reference_link':
             return RichTextReferenceLink.de_json(obj)
+        elif type == 'button':
+            return RichTextButton.de_json(obj)
         return None
 
     def to_dict(self):
@@ -15753,6 +15817,9 @@ class RichBlock(JsonDeserializable, ABC):
     - :class:`RichBlockVideo`
     - :class:`RichBlockVoiceNote`
     - :class:`RichBlockThinking`
+    - :class:`RichBlockButtons`
+    - :class:`RichBlockExpandableBlockQuotation`
+    - :class:`RichBlockDocument`
 
     Telegram documentation: https://core.telegram.org/bots/api#richblock
 
@@ -15809,6 +15876,12 @@ class RichBlock(JsonDeserializable, ABC):
             return RichBlockVoiceNote.de_json(obj)
         elif type == 'thinking':
             return RichBlockThinking.de_json(obj)
+        elif type == 'buttons':
+            return RichBlockButtons.de_json(obj)
+        elif type == 'expandable_blockquote':
+            return RichBlockExpandableBlockQuotation.de_json(obj)
+        elif type == 'document':
+            return RichBlockDocument.de_json(obj)
         return None
     
     
@@ -16175,17 +16248,21 @@ class RichBlockTable(RichBlock):
     :param is_striped: Optional. True, if the table is striped
     :type is_striped: :obj:`bool`
 
+    :param is_compact: Optional. True, if table cells have smaller indents
+    :type is_compact: :obj:`bool`
+
     :param caption: Optional. Caption of the table
     :type caption: :class:`RichText`
 
     :return: Instance of the class
     :rtype: :class:`RichBlockTable`
     """
-    def __init__(self, cells: List[List[RichBlockTableCell]], is_bordered: Optional[bool] = None, is_striped: Optional[bool] = None, caption: Optional[RichText] = None, **kwargs):
+    def __init__(self, cells: List[List[RichBlockTableCell]], is_bordered: Optional[bool] = None, is_striped: Optional[bool] = None, is_compact: Optional[bool] = None, caption: Optional[RichText] = None, **kwargs):
         super().__init__(type='table', **kwargs)
         self.cells: List[List[RichBlockTableCell]] = cells
         self.is_bordered: Optional[bool] = is_bordered
         self.is_striped: Optional[bool] = is_striped
+        self.is_compact: Optional[bool] = is_compact
         self.caption: Optional[RichText] = caption
 
     @classmethod
@@ -16733,6 +16810,9 @@ class InputRichBlock(Dictionaryable, JsonSerializable):
     - InputRichBlockVideo
     - InputRichBlockVoiceNote
     - InputRichBlockThinking
+    - InputRichBlockButtons
+    - InputRichBlockExpandableBlockQuotation
+    - InputRichBlockDocument
 
     Telegram documentation: https://core.telegram.org/bots/api#inputrichblock
 
@@ -17096,6 +17176,9 @@ class InputRichBlockTable(InputRichBlock):
     :param is_striped: Optional. Pass True if the table is striped
     :type is_striped: :obj:`bool`
 
+    :param is_compact: Optional. Pass True if table cells must have smaller indents
+    :type is_compact: :obj:`bool`
+
     :param caption: Optional. Caption of the table
     :type caption: :class:`RichText`
 
@@ -17107,6 +17190,7 @@ class InputRichBlockTable(InputRichBlock):
         cells: List[List[RichBlockTableCell]],
         is_bordered: Optional[bool] = None,
         is_striped: Optional[bool] = None,
+        is_compact: Optional[bool] = None,
         caption: Optional[RichText] = None,
         **kwargs
     ):
@@ -17114,6 +17198,7 @@ class InputRichBlockTable(InputRichBlock):
         self.cells: List[List[RichBlockTableCell]] = cells
         self.is_bordered: Optional[bool] = is_bordered
         self.is_striped: Optional[bool] = is_striped
+        self.is_compact: Optional[bool] = is_compact
         self.caption: Optional[RichText] = caption
 
     def to_dict(self) -> dict:
@@ -17123,6 +17208,8 @@ class InputRichBlockTable(InputRichBlock):
             data['is_bordered'] = self.is_bordered
         if self.is_striped is not None:
             data['is_striped'] = self.is_striped
+        if self.is_compact is not None:
+            data['is_compact'] = self.is_compact
         if self.caption is not None:
             data['caption'] = RichText.richtext_to_dict(self.caption)
         return data
@@ -17404,6 +17491,421 @@ class InputRichBlockThinking(InputRichBlock):
         return data
     
 
+class DisabledButton(Dictionaryable, JsonSerializable, JsonDeserializable):
+    """
+    This object represents a disabled button which does nothing. Currently holds no information.
+
+    Telegram documentation: https://core.telegram.org/bots/api#disabledbutton
+
+    :return: Instance of the class
+    :rtype: :class:`telebot.types.DisabledButton`
+    """
+    @classmethod
+    def de_json(cls, json_string):
+        if json_string is None: return None
+        return cls()
+
+    def to_dict(self):
+        return {}
+
+    def to_json(self):
+        return json.dumps(self.to_dict())
+
+
+class EphemeralMessageParameters(Dictionaryable, JsonSerializable):
+    """
+    Describes the parameters of an ephemeral message.
+
+    Telegram documentation: https://core.telegram.org/bots/api#ephemeralmessageparameters
+
+    :param receiver_user_id: Identifier of the user who will receive the message. It is not guaranteed that the user will receive the message, especially if they are offline. See here for more details.
+    :type receiver_user_id: :obj:`int`
+
+    :param callback_query_id: Optional. Identifier of the callback query which triggered the message, if any
+    :type callback_query_id: :obj:`str`
+
+    :param replace_callback_query_message: Optional. Pass True if the ephemeral message must be shown in place of the original message. Must be False for callback queries from ephemeral messages, which must be edited using regular editEphemeralMessage… methods.
+    :type replace_callback_query_message: :obj:`bool`
+
+    :return: Instance of the class
+    :rtype: :class:`telebot.types.EphemeralMessageParameters`
+    """
+    def __init__(self, receiver_user_id: int, callback_query_id: Optional[str] = None,
+                 replace_callback_query_message: Optional[bool] = None):
+        self.receiver_user_id: int = receiver_user_id
+        self.callback_query_id: Optional[str] = callback_query_id
+        self.replace_callback_query_message: Optional[bool] = replace_callback_query_message
+
+    def to_dict(self):
+        data = {'receiver_user_id': self.receiver_user_id}
+        if self.callback_query_id is not None:
+            data['callback_query_id'] = self.callback_query_id
+        if self.replace_callback_query_message is not None:
+            data['replace_callback_query_message'] = self.replace_callback_query_message
+        return data
+
+    def to_json(self):
+        return json.dumps(self.to_dict())
+
+
+class MessageGenerationStopped(JsonDeserializable):
+    """
+    This object describes an update about a user stopping message generation.
+
+    Telegram documentation: https://core.telegram.org/bots/api#messagegenerationstopped
+
+    :param chat: Chat in which the message is generated
+    :type chat: :class:`telebot.types.Chat`
+
+    :param draft_id: Unique identifier of the message draft which was stopped
+    :type draft_id: :obj:`int`
+
+    :param message_thread_id: Optional. Unique identifier of the message thread in which the message is generated
+    :type message_thread_id: :obj:`int`
+
+    :return: Instance of the class
+    :rtype: :class:`telebot.types.MessageGenerationStopped`
+    """
+    def __init__(self, chat: Chat, draft_id: int, message_thread_id: Optional[int] = None):
+        self.chat: Chat = chat
+        self.draft_id: int = draft_id
+        self.message_thread_id: Optional[int] = message_thread_id
+
+    @classmethod
+    def de_json(cls, json_string):
+        if json_string is None: return None
+        obj = cls.check_json(json_string)
+        obj['chat'] = Chat.de_json(obj['chat'])
+        return cls(**obj)
+
+
+class RichMessageButton(Dictionaryable, JsonSerializable, JsonDeserializable):
+    """
+    This object represents a button in a RichMessage. Exactly one of the fields other than text and style must be used to specify the type of the button.
+
+    Telegram documentation: https://core.telegram.org/bots/api#richmessagebutton
+
+    :param text: Text of the button. May contain only plain text, RichTextCustomEmoji and RichTextDateTime entities.
+    :type text: :class:`telebot.types.RichText`
+
+    :param style: Optional. Style of the button. Must be one of “danger”, “success”, “primary”, or “link” (the button is shown as a regular link without borders). Apps may use theme-specific colors for the button background and text based on the style. The style “link” is allowed only for callback buttons.
+    :type style: :obj:`str`
+
+    :param url: Optional. HTTP or tg:// URL to be opened when the button is pressed. Links tg://user?id=<user_id> can be used to mention a user by their identifier without using a username, if this is allowed by their privacy settings.
+    :type url: :obj:`str`
+
+    :param callback_data: Optional. Data to be sent in a callback query to the bot when the button is pressed, 1-64 bytes
+    :type callback_data: :obj:`str`
+
+    :param web_app: Optional. Description of the Web App that will be launched when the user presses the button. The Web App will be able to send an arbitrary message on behalf of the user using the method answerWebAppQuery. Available only in private chats between a user and the bot. Not supported for messages sent on behalf of a business account.
+    :type web_app: :class:`telebot.types.WebAppInfo`
+
+    :param login_url: Optional. An HTTPS URL used to automatically authorize the user. Can be used as a replacement for the Telegram Login Widget. Not supported for ephemeral messages.
+    :type login_url: :class:`telebot.types.LoginUrl`
+
+    :param switch_inline_query: Optional. If set, pressing the button will prompt the user to select one of their chats, open that chat and insert the bot's username and the specified inline query in the input field. May be empty, in which case just the bot's username will be inserted. Not supported for messages sent in channel direct messages chats and on behalf of a business account.
+    :type switch_inline_query: :obj:`str`
+
+    :param switch_inline_query_current_chat: Optional. If set, pressing the button will insert the bot's username and the specified inline query in the current chat's input field. May be empty, in which case only the bot's username will be inserted. Not supported in channels and for messages sent in channel direct messages chats and on behalf of a business account.
+    :type switch_inline_query_current_chat: :obj:`str`
+
+    :param switch_inline_query_chosen_chat: Optional. If set, pressing the button will prompt the user to select one of their chats of the specified type, open that chat and insert the bot's username and the specified inline query in the input field. Not supported for messages sent in channel direct messages chats and on behalf of a business account.
+    :type switch_inline_query_chosen_chat: :class:`telebot.types.SwitchInlineQueryChosenChat`
+
+    :param copy_text: Optional. A button that copies the specified text to the clipboard
+    :type copy_text: :class:`telebot.types.CopyTextButton`
+
+    :param disabled: Optional. If set, then the button is disabled and does nothing
+    :type disabled: :class:`telebot.types.DisabledButton`
+
+    :return: Instance of the class
+    :rtype: :class:`telebot.types.RichMessageButton`
+    """
+    def __init__(self, text: RichText, style: Optional[str] = None, url: Optional[str] = None,
+                 callback_data: Optional[str] = None, web_app: Optional[WebAppInfo] = None,
+                 login_url: Optional[LoginUrl] = None, switch_inline_query: Optional[str] = None,
+                 switch_inline_query_current_chat: Optional[str] = None,
+                 switch_inline_query_chosen_chat: Optional[SwitchInlineQueryChosenChat] = None,
+                 copy_text: Optional[CopyTextButton] = None, disabled: Optional[DisabledButton] = None,
+                 **kwargs):
+        self.text: RichText = text
+        self.style: Optional[str] = style
+        self.url: Optional[str] = url
+        self.callback_data: Optional[str] = callback_data
+        self.web_app: Optional[WebAppInfo] = web_app
+        self.login_url: Optional[LoginUrl] = login_url
+        self.switch_inline_query: Optional[str] = switch_inline_query
+        self.switch_inline_query_current_chat: Optional[str] = switch_inline_query_current_chat
+        self.switch_inline_query_chosen_chat: Optional[SwitchInlineQueryChosenChat] = switch_inline_query_chosen_chat
+        self.copy_text: Optional[CopyTextButton] = copy_text
+        self.disabled: Optional[DisabledButton] = disabled
+
+    def to_dict(self):
+        data = {'text': RichText.richtext_to_dict(self.text)}
+        if self.style is not None:
+            data['style'] = self.style
+        if self.url is not None:
+            data['url'] = self.url
+        if self.callback_data is not None:
+            data['callback_data'] = self.callback_data
+        if self.web_app is not None:
+            data['web_app'] = self.web_app.to_dict()
+        if self.login_url is not None:
+            data['login_url'] = self.login_url.to_dict()
+        if self.switch_inline_query is not None:
+            data['switch_inline_query'] = self.switch_inline_query
+        if self.switch_inline_query_current_chat is not None:
+            data['switch_inline_query_current_chat'] = self.switch_inline_query_current_chat
+        if self.switch_inline_query_chosen_chat is not None:
+            data['switch_inline_query_chosen_chat'] = self.switch_inline_query_chosen_chat.to_dict()
+        if self.copy_text is not None:
+            data['copy_text'] = self.copy_text.to_dict()
+        if self.disabled is not None:
+            data['disabled'] = self.disabled.to_dict()
+        return data
+
+    def to_json(self):
+        return json.dumps(self.to_dict())
+
+    @classmethod
+    def de_json(cls, json_string):
+        if json_string is None: return None
+        obj = cls.check_json(json_string)
+        obj['text'] = RichText.de_json(obj['text'])
+        if 'web_app' in obj:
+            obj['web_app'] = WebAppInfo.de_json(obj['web_app'])
+        if 'login_url' in obj:
+            obj['login_url'] = LoginUrl.de_json(obj['login_url'])
+        if 'switch_inline_query_chosen_chat' in obj:
+            obj['switch_inline_query_chosen_chat'] = SwitchInlineQueryChosenChat.de_json(obj['switch_inline_query_chosen_chat'])
+        if 'copy_text' in obj:
+            obj['copy_text'] = CopyTextButton.de_json(obj['copy_text'])
+        if 'disabled' in obj:
+            obj['disabled'] = DisabledButton.de_json(obj['disabled'])
+        return cls(**obj)
+
+
+class RichTextButton(RichText):
+    """
+    A button.
+
+    Telegram documentation: https://core.telegram.org/bots/api#richtextbutton
+
+    :param type: Type of the rich text, always “button”
+    :type type: :obj:`str`
+
+    :param button: The button
+    :type button: :class:`telebot.types.RichMessageButton`
+
+    :return: Instance of the class
+    :rtype: :class:`telebot.types.RichTextButton`
+    """
+    def __init__(self, button: RichMessageButton, **kwargs):
+        super().__init__(type='button', **kwargs)
+        self.button: RichMessageButton = button
+
+    def to_dict(self):
+        data = super().to_dict()
+        data['button'] = self.button.to_dict()
+        return data
+
+    @classmethod
+    def de_json(cls, json_string):
+        if json_string is None: return None
+        obj = cls.check_json(json_string)
+        obj['button'] = RichMessageButton.de_json(obj['button'])
+        return cls(**obj)
+
+
+class RichBlockButtons(RichBlock):
+    """
+    A block containing a list of buttons that are shown in one row, corresponding to the custom HTML tag <tg-button-row>.
+
+    Telegram documentation: https://core.telegram.org/bots/api#richblockbuttons
+
+    :param type: Type of the block, always “buttons”
+    :type type: :obj:`str`
+
+    :param buttons: The buttons
+    :type buttons: :obj:`list` of :class:`telebot.types.RichMessageButton`
+
+    :param align: Optional. Horizontal alignment of the buttons. Currently, must be one of “left”, “center”, or “right”.
+    :type align: :obj:`str`
+
+    :return: Instance of the class
+    :rtype: :class:`telebot.types.RichBlockButtons`
+    """
+    def __init__(self, buttons: List[RichMessageButton], align: Optional[str] = None, **kwargs):
+        super().__init__(type='buttons', **kwargs)
+        self.buttons: List[RichMessageButton] = buttons
+        self.align: Optional[str] = align
+
+    @classmethod
+    def de_json(cls, json_string):
+        if json_string is None: return None
+        obj = cls.check_json(json_string)
+        obj['buttons'] = [RichMessageButton.de_json(button) for button in obj['buttons']]
+        return cls(**obj)
+
+
+class InputRichBlockButtons(InputRichBlock):
+    """
+    A block containing a list of buttons that are shown in one row, corresponding to the custom HTML tag <tg-button-row>.
+
+    Telegram documentation: https://core.telegram.org/bots/api#inputrichblockbuttons
+
+    :param type: Type of the block, always “buttons”
+    :type type: :obj:`str`
+
+    :param buttons: List of 1-8 buttons to send
+    :type buttons: :obj:`list` of :class:`telebot.types.RichMessageButton`
+
+    :param align: Optional. Horizontal alignment of the buttons. Currently, must be one of “left”, “center”, or “right”.
+    :type align: :obj:`str`
+
+    :return: Instance of the class
+    :rtype: :class:`telebot.types.InputRichBlockButtons`
+    """
+    def __init__(self, buttons: List[RichMessageButton], align: Optional[str] = None, **kwargs):
+        super().__init__(type='buttons', **kwargs)
+        self.buttons: List[RichMessageButton] = buttons
+        self.align: Optional[str] = align
+
+    def to_dict(self):
+        data = super().to_dict()
+        data['buttons'] = [button.to_dict() for button in self.buttons]
+        if self.align is not None:
+            data['align'] = self.align
+        return data
+
+
+class RichBlockExpandableBlockQuotation(RichBlock):
+    """
+    A block quotation, corresponding to the HTML tag <blockquote> with custom attribute "expandable".
+
+    Telegram documentation: https://core.telegram.org/bots/api#richblockexpandableblockquotation
+
+    :param type: Type of the block, always “expandable_blockquote”
+    :type type: :obj:`str`
+
+    :param text: Content of the block
+    :type text: :class:`telebot.types.RichText`
+
+    :param credit: Optional. Credit of the block
+    :type credit: :class:`telebot.types.RichText`
+
+    :return: Instance of the class
+    :rtype: :class:`telebot.types.RichBlockExpandableBlockQuotation`
+    """
+    def __init__(self, text: RichText, credit: Optional[RichText] = None, **kwargs):
+        super().__init__(type='expandable_blockquote', **kwargs)
+        self.text: RichText = text
+        self.credit: Optional[RichText] = credit
+
+    @classmethod
+    def de_json(cls, json_string):
+        if json_string is None:
+            return None
+        obj = cls.check_json(json_string)
+        obj['text'] = RichText.de_json(obj['text'])
+        obj['credit'] = RichText.de_json(obj['credit']) if obj.get('credit') else None
+        return cls(**obj)
+
+
+class InputRichBlockExpandableBlockQuotation(InputRichBlock):
+    """
+    A block quotation, corresponding to the HTML tag <blockquote> with custom attribute "expandable".
+
+    Telegram documentation: https://core.telegram.org/bots/api#inputrichblockexpandableblockquotation
+
+    :param type: Type of the block, always “expandable_blockquote”
+    :type type: :obj:`str`
+
+    :param text: Content of the block
+    :type text: :class:`telebot.types.RichText`
+
+    :param credit: Optional. Credit of the block
+    :type credit: :class:`telebot.types.RichText`
+
+    :return: Instance of the class
+    :rtype: :class:`telebot.types.InputRichBlockExpandableBlockQuotation`
+    """
+    def __init__(self, text: RichText, credit: Optional[RichText] = None, **kwargs):
+        super().__init__(type='expandable_blockquote', **kwargs)
+        self.text: RichText = text
+        self.credit: Optional[RichText] = credit
+
+    def to_dict(self):
+        data = super().to_dict()
+        data['text'] = RichText.richtext_to_dict(self.text)
+        if self.credit is not None:
+            data['credit'] = RichText.richtext_to_dict(self.credit)
+        return data
+
+
+class RichBlockDocument(RichBlock):
+    """
+    A block with a general file, corresponding to the custom HTML tag <tg-document>.
+
+    Telegram documentation: https://core.telegram.org/bots/api#richblockdocument
+
+    :param type: Type of the block, always “document”
+    :type type: :obj:`str`
+
+    :param document: The document
+    :type document: :class:`telebot.types.Document`
+
+    :param caption: Optional. Caption of the block
+    :type caption: :class:`telebot.types.RichBlockCaption`
+
+    :return: Instance of the class
+    :rtype: :class:`telebot.types.RichBlockDocument`
+    """
+    def __init__(self, document: Document, caption: Optional[RichBlockCaption] = None, **kwargs):
+        super().__init__(type='document', **kwargs)
+        self.document: Document = document
+        self.caption: Optional[RichBlockCaption] = caption
+
+    @classmethod
+    def de_json(cls, json_string):
+        if json_string is None: return None
+        obj = cls.check_json(json_string)
+        obj['document'] = Document.de_json(obj['document'])
+        obj['caption'] = RichBlockCaption.de_json(obj['caption']) if obj.get('caption') else None
+        return cls(**obj)
+
+
+class InputRichBlockDocument(InputRichBlock):
+    """
+    A block with a general file, corresponding to the custom HTML tag <tg-document>.
+
+    Telegram documentation: https://core.telegram.org/bots/api#inputrichblockdocument
+
+    :param type: Type of the block, always “document”
+    :type type: :obj:`str`
+
+    :param document: The document. Caption is ignored.
+    :type document: :class:`telebot.types.InputMediaDocument`
+
+    :param caption: Optional. Caption of the block
+    :type caption: :class:`telebot.types.RichBlockCaption`
+
+    :return: Instance of the class
+    :rtype: :class:`telebot.types.InputRichBlockDocument`
+    """
+    def __init__(self, document: InputMediaDocument, caption: Optional[RichBlockCaption] = None, **kwargs):
+        super().__init__(type='document', **kwargs)
+        self.document: InputMediaDocument = document
+        self.caption: Optional[RichBlockCaption] = caption
+
+    def to_dict(self):
+        data = super().to_dict()
+        data['document'] = self.document.to_dict()
+        if self.caption is not None:
+            data['caption'] = self.caption.to_dict()
+        return data
+
+
 # noinspection shadowing-builtins
 class Community(JsonDeserializable):
     """
@@ -17472,6 +17974,29 @@ class CommunityChatRemoved(JsonDeserializable):
         obj = cls.check_json(json_string)
         return cls(**obj)
     
+
+class CommunityChatJoined(JsonDeserializable):
+    """
+    Describes a service message about a chat being joined by a user from a community.
+
+    Telegram documentation: https://core.telegram.org/bots/api#communitychatjoined
+
+    :param community: The community from which the chat was joined
+    :type community: :class:`telebot.types.Community`
+
+    :return: Instance of the class
+    :rtype: :class:`telebot.types.CommunityChatJoined`
+    """
+    def __init__(self, community: Community, **kwargs):
+        self.community: Community = community
+
+    @classmethod
+    def de_json(cls, json_string):
+        if json_string is None: return None
+        obj = cls.check_json(json_string)
+        obj['community'] = Community.de_json(obj.get('community'))
+        return cls(**obj)
+
 
 class BotSubscriptionUpdated(JsonDeserializable):
     """
