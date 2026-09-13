@@ -24,11 +24,14 @@ globalThis.__records = {
   operationRecordNameForTask,
   buildOrganizeRecordGroups,
   buildRenameRecordGroups,
+  renameHistoryLabel,
+  filterRenameHistoryForDir,
   mergeRecordsIntoStore,
   classifyRecordRows,
   planRecordRestore,
   resolveRecordAnchors,
-  sortedRecordNames
+  sortedRecordNames,
+  formatLocalDateTime
 };
 `;
 const sandbox = { console, Date, Math, JSON, Number, String, Array, Object, Set, Map, RegExp, Intl, Symbol, Error, DOMException, structuredClone };
@@ -38,11 +41,14 @@ const {
   operationRecordNameForTask,
   buildOrganizeRecordGroups,
   buildRenameRecordGroups,
+  renameHistoryLabel,
+  filterRenameHistoryForDir,
   mergeRecordsIntoStore,
   classifyRecordRows,
   planRecordRestore,
   resolveRecordAnchors,
-  sortedRecordNames
+  sortedRecordNames,
+  formatLocalDateTime
 } = sandbox.__records;
 
 let passed = 0;
@@ -109,9 +115,28 @@ test("mergeRecordsIntoStore：同名合并按文件 id 覆盖旧行，行按文�
   // 文件 2 的新行覆盖旧行
   assert.equal(record.rows.find((row) => row.id === "2").newName, "A2.mkv");
   assert.equal(record.modeLabel, "原地整理");
-  // 不同名 → 新记录
+  // 不同名 → 新记录（列表顺序单独测，两次 merge 的 updatedAt 可能同毫秒）
   mergeRecordsIntoStore(store, [{ name: "剧 B", kind: "organize", rows: [{ id: "9", name: "x.mkv", newName: "X.mkv", parentId: "p" }] }], {});
-  assert.deepEqual(sortedRecordNames(store), ["剧 A", "剧 B"]);
+  assert.deepEqual(Object.keys(store.records).sort(), ["剧 A", "剧 B"]);
+});
+
+test("sortedRecordNames：按更新时间倒序，最近整理的排最前，时间相同退回名称自然排序", () => {
+  const store = { version: 1, records: {
+    "b 剧": { name: "b 剧", kind: "organize", updatedAt: "2026-01-01T00:00:00.000Z", rows: [] },
+    "a 剧": { name: "a 剧", kind: "organize", updatedAt: "2026-01-01T00:00:00.000Z", rows: [] },
+    "新剧": { name: "新剧", kind: "organize", updatedAt: "2026-02-01T00:00:00.000Z", rows: [] },
+    "旧剧": { name: "旧剧", kind: "organize", updatedAt: "", rows: [] }
+  } };
+  assert.deepEqual(sortedRecordNames(store), ["新剧", "a 剧", "b 剧", "旧剧"]);
+});
+
+test("formatLocalDateTime：ISO 按本地时区渲染 YYYY-MM-DD HH:mm，非法值返回空串", () => {
+  const date = new Date("2026-09-13T04:05:00.000Z");
+  const pad = (value) => String(value).padStart(2, "0");
+  const expected = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  assert.equal(formatLocalDateTime("2026-09-13T04:05:00.000Z"), expected);
+  assert.equal(formatLocalDateTime("not-a-date"), "");
+  assert.equal(formatLocalDateTime(""), "");
 });
 
 test("mergeRecordsIntoStore：记录数超上限淘汰最旧，单记录行数超限截断并标注", () => {
@@ -234,6 +259,38 @@ test("buildRenameRecordGroups：按所在目录名分组，取不到目录名退
   assert.deepEqual(plain(groups.map((group) => group.name)), ["文档目录", "目录 p2"]);
   assert.equal(groups[0].rows.length, 2);
   assert.equal(groups[0].kind, "rename");
+});
+
+test("renameHistoryLabel：单目录用目录名，多目录用 N 个目录，查不到退回批量重命名", () => {
+  assert.equal(renameHistoryLabel([{ parentId: "p1" }, { parentId: "p1" }], { p1: "媒体库" }), "媒体库");
+  assert.equal(renameHistoryLabel([{ parentId: "p1" }, { parentFileId: "p2" }], { p1: "媒体库", p2: "剧集" }), "2 个目录");
+  assert.equal(renameHistoryLabel([{ parentId: "p1" }], {}), "批量重命名");
+  assert.equal(renameHistoryLabel([], {}), "批量重命名");
+});
+
+test("重命名记录名：根目录（id 0）显示「根目录」，不再叫「目录 0」", () => {
+  const groups = buildRenameRecordGroups([
+    { id: "9", parentId: "0", name: "虎猛警师 (1996) {tmdb-20762}", newName: "虎猛警师 (996) {tmdb-20762}", type: 0, size: 1 }
+  ], {});
+  assert.deepEqual(plain(groups.map((group) => group.name)), ["根目录"]);
+  assert.equal(groups[0].rows[0].parentId, "0");
+  assert.equal(renameHistoryLabel([{ parentId: "0" }], {}), "根目录");
+  assert.equal(renameHistoryLabel([{ parentId: "0" }, { parentId: "p1" }], { p1: "媒体库" }), "2 个目录");
+});
+
+test("filterRenameHistoryForDir：只留当前目录的记录，跨目录条目整条剔除，空 targets 剔除", () => {
+  const history = [
+    { id: "h1", targets: [{ parentId: "d1" }, { parentId: "d1" }] },
+    { id: "h2", targets: [{ parentId: "d2" }] },
+    { id: "h3", targets: [{ parentId: "d1" }, { parentId: "d2" }] },
+    { id: "h4", targets: [] },
+    { id: "h5" }
+  ];
+  const filtered = filterRenameHistoryForDir(history, "d1");
+  assert.deepEqual(filtered.map((entry) => entry.id), ["h1"]);
+  assert.deepEqual(filterRenameHistoryForDir(history, "d2").map((entry) => entry.id), ["h2"]);
+  assert.deepEqual(filterRenameHistoryForDir([], "d1"), []);
+  assert.deepEqual(filterRenameHistoryForDir(history, "").map((entry) => entry.id), []);
 });
 
 await chain;

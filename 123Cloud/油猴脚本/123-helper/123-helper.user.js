@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         123 助手
 // @namespace    local.123-helper
-// @version      1.3.6
+// @version      1.3.8
 // @description  增强 123 云盘网页端的文件、分享与秒传管理。文件页：全盘搜索、批量重命名（正则替换、模板编号、大小写与全角半角转换等规则链）、TMDB 媒体整理（中文标题命名，季集校准支持季重映射与会员版/加更/先导片等特别篇按期数精确匹配，识别词与发布组映射，兼容 MoviePilot 二级分类的媒体库自动归类，整理与重命名操作记录按文件夹归档、错整一键还原）、按扩展名/关键词/大小清理文件并统计容量、递归清理空目录。秒传工具箱：导出与转存 123FLCPV2 链接及标准 JSON，支持 V1/V2/.123share 转存、二级秒传短链接（云盘种子文件）、从云盘秒传文件直接转存、分享链接免转存生成 JSON、批量解析、拆分与互转、扩展名过滤、分享口令规范化。批量分享一键复制与 CSV 导出，可推送为 123Cloud 客户端投稿草稿；公开分享页屏蔽广告并支持免登录生成秒传 JSON。液态玻璃主题与文件页纯净模式。
 // @license      MIT
 // @icon         https://statics.123957.com/static-by-custom/favicon.ico
@@ -3120,6 +3120,12 @@
       for (const id of [...state.unselectedIds]) if (!visibleRows.has(id)) state.unselectedIds.delete(id);
     }
   }
+  function shouldClearStaleSelection(state, visibleRows, hostCount) {
+    // 计数文本消失（hostCount === null）且可见行无任何勾选 = 官方已清空选中
+    // （删除/取消勾选后行已不在 DOM，不能要求残留 id 仍然可见），此时应清空本地选中集。
+    if (state.selectAll || hostCount !== null) return false;
+    return ![...visibleRows.values()].some(Boolean);
+  }
   var PageBridge = class {
     constructor(api, config = {}) {
       this.api = api;
@@ -3360,13 +3366,9 @@
       if (!this.selectAll && hostCount === 0) {
         this.selectedIds.clear();
         this.unselectedIds.clear();
-      } else if (!this.selectAll && hostCount === null && visibleRows.size > 0) {
-        const hasVisibleSelection = [...visibleRows.values()].some(Boolean);
-        const staleSelectionIsVisible = [...this.selectedIds].every((id) => visibleRows.has(id));
-        if (!hasVisibleSelection && staleSelectionIsVisible) {
-          this.selectedIds.clear();
-          this.unselectedIds.clear();
-        }
+      } else if (visibleRows.size > 0 && shouldClearStaleSelection(this, visibleRows, hostCount)) {
+        this.selectedIds.clear();
+        this.unselectedIds.clear();
       }
       return this.snapshot();
     }
@@ -5948,33 +5950,86 @@
       return !extensions.has(extension);
     });
   }
+  const SEASON_MARKER_RE = /(?:^|[\s._()\[\]-])s(\d{1,2})(?=[\s._()\[\]-]|$)/i;
+  function seasonLabelFromSegments(segments) {
+    for (const segment of segments) {
+      const text = String(segment || "");
+      const match = text.match(SEASON_MARKER_RE) || text.match(/season[\s._-]*(\d{1,2})/i);
+      if (match) return `S${String(Number(match[1])).padStart(2, "0")}`;
+    }
+    return "";
+  }
   function splitFastlink(value, method = "folder", amount = 1) {
     const parsed = typeof value === "string" ? parseFastlink(value) : parseFastlinkJson(value);
     const files = normalizedFastlinkFiles(parsed);
     if (!files.length) throw new Error("\u79D2\u4F20\u5185\u5BB9\u6CA1\u6709\u6587\u4EF6\u8BB0\u5F55");
     const size = Math.max(1, Number(amount) || 1);
+    const commonPrefix = String(parsed.commonPath || "").replace(/\/+$/, "");
     const groups = [];
+    const labels = [];
     if (method === "count") {
       for (let index = 0; index < files.length; index += size) groups.push(files.slice(index, index + size));
+      labels.push(...groups.map(() => ""));
+    } else if (method === "work") {
+      // 按季集/剧名拆分（对齐 desktop aggregate_works 规则）：
+      // 带 {tmdb-N}/[tmdb-N] 的那一级目录为作品根；无标记时取一级目录当作品；
+      // 路径里的 S01/Season 1 等季标记决定季，季并入所属作品，每部作品（剧名+季）一份。
+      const byWork = /* @__PURE__ */ new Map();
+      for (const file of files) {
+        const relative = commonPrefix ? file.path.slice(commonPrefix.length + 1) : file.path;
+        const parts = relative.split("/");
+        const dirs = parts.slice(0, -1);
+        let rootIndex = -1;
+        for (let i = dirs.length - 1; i >= 0; i -= 1) {
+          if (dirs[i].includes("{tmdb-") || dirs[i].includes("[tmdb-")) {
+            rootIndex = i;
+            break;
+          }
+        }
+        let workTitle;
+        let seasonSegments;
+        if (rootIndex >= 0) {
+          workTitle = dirs[rootIndex].replace(/[{[(]\s*tmdb-\d+-?/i, "").replace(/[}\])]\s*$/, "").trim() || dirs[rootIndex];
+          seasonSegments = dirs.slice(rootIndex);
+        } else {
+          workTitle = dirs[0] || "\u6839\u76EE\u5F55";
+          seasonSegments = dirs;
+        }
+        const season = seasonLabelFromSegments(seasonSegments);
+        if (season) workTitle = workTitle.replace(SEASON_MARKER_RE, "").replace(/season[\s._-]*\d{1,2}/i, "").replace(/[.\s_-]+$/, "").trim() || workTitle;
+        const key = `${workTitle}|${season}`;
+        if (!byWork.has(key)) {
+          byWork.set(key, []);
+          labels.push(season ? `${workTitle}_${season}` : workTitle);
+        }
+        byWork.get(key).push(file);
+      }
+      groups.push(...byWork.values());
     } else {
       const byFolder = /* @__PURE__ */ new Map();
       for (const file of files) {
-        const relative = String(parsed.commonPath || "").replace(/\/+$/, "") ? file.path.slice(String(parsed.commonPath).replace(/\/+$/, "").length + 1) : file.path;
+        const relative = commonPrefix ? file.path.slice(commonPrefix.length + 1) : file.path;
         const parts = relative.split("/");
         const key = parts.slice(0, size).join("/") || "\u6839\u76EE\u5F55";
-        if (!byFolder.has(key)) byFolder.set(key, []);
+        if (!byFolder.has(key)) {
+          byFolder.set(key, []);
+          labels.push(key);
+        }
         byFolder.get(key).push(file);
       }
       groups.push(...byFolder.values());
     }
-    return groups.map((group, index) => ({
-      index: index + 1,
-      fileCount: group.length,
-      files: group,
-      text: buildFastlinkJson(group),
-      link: buildFastlinkText(group),
-      filename: `123FastLink_part_${index + 1}.json`
-    }));
+    return groups.map((group, index) => {
+      const label = String(labels[index] || "").replace(/[/\\]/g, "-").trim();
+      return {
+        index: index + 1,
+        fileCount: group.length,
+        files: group,
+        text: buildFastlinkJson(group),
+        link: buildFastlinkText(group),
+        filename: label ? `123FastLink_${label}_part_${index + 1}.json` : `123FastLink_part_${index + 1}.json`
+      };
+    });
   }
   function convert123ShareToJson(value, options = {}) {
     const bytes = base64ToBytes(String(value || "").replace(/^data:.*?;base64,/, ""));
@@ -14761,7 +14816,8 @@ ${end.comment}` : end.comment;
     return { season, episode: 0, endEpisode: 0, seasonEpisode: "" };
   }
   // 整理预览的季集高亮：seasonTokenRange 找出识别命中的原文片段（掐掉正则捎带的边界符），
-  // markSeasonEpisodeHtml/markSeasonEpisodeValueHtml 把片段包成 <mark class="se-token">，其余文本照常转义。
+  // markSeasonEpisodeHtml 统一负责包 <mark class="se-token">：token 传 {start,end} 原文区间
+  // （原文件名按识别片段），或字符串（新文件名/目标路径按最终 SxxEyy 值大小写不敏感查找），其余文本照常转义。
   function seasonTokenRange(text2, fallbackSeason = 1) {
     const source = String(text2 || "");
     const parsed = parseSeasonEpisode(source, fallbackSeason);
@@ -14772,16 +14828,16 @@ ${end.comment}` : end.comment;
     while (end > start && /[ ._\-\]】）)~～]/.test(source[end - 1])) end -= 1;
     return end - start >= 2 ? { start, end } : null;
   }
-  function markSeasonEpisodeHtml(text2, range) {
+  function markSeasonEpisodeHtml(text2, token) {
     const source = String(text2 ?? "");
+    let range = token;
+    if (typeof token === "string") {
+      const trimmed = token.trim();
+      const index = trimmed ? source.toLowerCase().indexOf(trimmed.toLowerCase()) : -1;
+      range = index < 0 ? null : { start: index, end: index + trimmed.length };
+    }
     if (!range || !(range.start >= 0) || !(range.end > range.start) || range.end > source.length) return escapeHtml(source);
     return `${escapeHtml(source.slice(0, range.start))}<mark class="se-token">${escapeHtml(source.slice(range.start, range.end))}</mark>${escapeHtml(source.slice(range.end))}`;
-  }
-  function markSeasonEpisodeValueHtml(text2, value) {
-    const token = String(value || "").trim();
-    if (!token) return escapeHtml(String(text2 ?? ""));
-    const index = String(text2 ?? "").toLowerCase().indexOf(token.toLowerCase());
-    return markSeasonEpisodeHtml(text2, index < 0 ? null : { start: index, end: index + token.length });
   }
   function parseEpisodeHint(value, fallbackSeason = 1) {
     const parsed = parseSeasonEpisode(value, fallbackSeason);
@@ -17486,8 +17542,19 @@ ${end.comment}` : end.comment;
   function clearOperationRecords() {
     checkpointStorageRemove(OPERATION_RECORDS_KEY);
   }
+  // 列表按更新时间倒序（最近整理的排最前），时间相同退回名称自然排序
   function sortedRecordNames(store) {
-    return Object.keys(store?.records || {}).sort((left, right) => naturalCompare(left, right));
+    return Object.keys(store?.records || {}).sort((left, right) => {
+      const byTime = String(store.records[right]?.updatedAt || "").localeCompare(String(store.records[left]?.updatedAt || ""));
+      return byTime || naturalCompare(left, right);
+    });
+  }
+  // ISO 时间戳按浏览器本地时区渲染成 YYYY-MM-DD HH:mm；存储里仍是 UTC ISO，只影响显示
+  function formatLocalDateTime(value) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    const pad = (part) => String(part).padStart(2, "0");
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
   }
   // 记录名 = 刮削媒体文件夹名（如「剧名 (2024)」）；原地整理拿不到时退回
   // 目标路径里除 Season 目录外最深一层，再退回来源文件夹名。
@@ -17530,12 +17597,19 @@ ${end.comment}` : end.comment;
     }
     return [...groups.entries()].map(([name, recordRows]) => ({ name, kind: "organize", rows: recordRows }));
   }
+  // 父目录显示名：根目录（id 0）不是可查询的目录条目（fileInfos 查不到），直接叫「根目录」，
+  // 不然分组兜底会渲染成「目录 0」。其余查 dirNames，查不到返回空串（分组退回「目录 id」、历史名退回「批量重命名」）。
+  function renameParentDirName(parentId, dirNames = {}) {
+    const id = String(parentId || "0");
+    if (id === "0") return "根目录";
+    return String(dirNames[id] || "").trim();
+  }
   // 批量重命名成功项 → 按所在目录名分组的记录行；dirNames: 父目录 id → 目录名
   function buildRenameRecordGroups(succeeded, dirNames = {}) {
     const groups = /* @__PURE__ */ new Map();
     for (const item of succeeded || []) {
       const parentId = String(item.parentId || item.parentFileId || "0");
-      const name = String(dirNames[parentId] || "").trim() || `目录 ${parentId}`;
+      const name = renameParentDirName(parentId, dirNames) || `目录 ${parentId}`;
       if (!groups.has(name)) groups.set(name, []);
       groups.get(name).push({
         id: String(item.id),
@@ -17554,6 +17628,27 @@ ${end.comment}` : end.comment;
       });
     }
     return [...groups.entries()].map(([name, recordRows]) => ({ name, kind: "rename", rows: recordRows }));
+  }
+  // 重命名历史条目名：单目录直接用目录名（根目录就叫「根目录」），多目录用「N 个目录」，
+  // 都查不到退回「批量重命名」。只叫「批量重命名」的话历史下拉里每条长得一样，只能靠日期猜是哪次操作。
+  function renameHistoryLabel(succeeded, dirNames = {}) {
+    const names = [];
+    for (const item of succeeded || []) {
+      const name = renameParentDirName(item.parentId || item.parentFileId || "0", dirNames);
+      if (name && !names.includes(name)) names.push(name);
+    }
+    if (names.length === 1) return names[0];
+    return names.length > 1 ? `${names.length} 个目录` : "批量重命名";
+  }
+  // 重命名历史按当前目录过滤：历史是全局存的，恢复列表只该看到当前文件夹里发生过的
+  // 重命名，别的文件夹的操作混进来会让人误以为改过这里。条目要求带 targets 且全部
+  // 落在当前目录（老记录的 targets 里也存了 parentId，一样能过滤）。
+  function filterRenameHistoryForDir(history, dirId) {
+    const wanted = String(dirId || "0");
+    return (history || []).filter((entry) => {
+      const targets = Array.isArray(entry?.targets) ? entry.targets : [];
+      return targets.length > 0 && targets.every((item) => String(item?.parentId || "0") === wanted);
+    });
   }
   // 同名合并：记录名相同并入既有记录，行按文件 id 覆盖（新状态取代旧还原信息）
   function mergeRecordsIntoStore(store, groups, meta = {}) {
@@ -18185,13 +18280,17 @@ ${end.comment}` : end.comment;
     });
   }
   function submissionFailure(payload, expected) {
-    const backendError = String(payload?.error || "").trim();
-    if (backendError) return backendError;
+    // 草稿数达标即视为成功：sentCount 不再一票否决——Bot 未配置/推送失败时
+    // 草稿仍会全部入库（客户端「投稿草稿」可见、可手动发布），此前在这里误报。
     const drafts = Number(payload?.draftCount);
-    if (!Number.isFinite(drafts) || drafts !== expected) return `\u6295\u7A3F\u670D\u52A1\u8FD4\u56DE\u8349\u7A3F\u6570 ${Number.isFinite(drafts) ? drafts : "\u672A\u77E5"}\uFF0C\u9884\u671F ${expected}`;
-    const sent = Number(payload?.sentCount);
-    if (!Number.isFinite(sent) || sent !== expected) return `\u6295\u7A3F\u670D\u52A1\u4EC5\u63A8\u9001 ${Number.isFinite(sent) ? sent : "\u672A\u77E5"}/${expected} \u4EFD\u8349\u7A3F\u5230 Bot`;
-    if (payload?.ok !== true) return "\u6295\u7A3F\u670D\u52A1\u672A\u786E\u8BA4\u6295\u7A3F\u6210\u529F";
+    if (payload?.ok !== true) {
+      const backendError = String(payload?.error || "").trim();
+      return backendError || "\u6295\u7A3F\u670D\u52A1\u672A\u786E\u8BA4\u6295\u7A3F\u6210\u529F";
+    }
+    if (!Number.isFinite(drafts) || drafts !== expected) {
+      const backendError = String(payload?.error || "").trim();
+      return backendError || `\u6295\u7A3F\u670D\u52A1\u8FD4\u56DE\u8349\u7A3F\u6570 ${Number.isFinite(drafts) ? drafts : "\u672A\u77E5"}\uFF0C\u9884\u671F ${expected}`;
+    }
     return "";
   }
   // ===== 影库搜索（123Cloud 客户端影库接口）=====
@@ -18401,14 +18500,24 @@ ${end.comment}` : end.comment;
       let processed = 0;
       for (const batch of chunk(entries, 10)) {
         if (options.signal?.aborted) throw abortError3();
-        const text2 = batch.map((item) => `\u{1F3AC}\uFF1A${item.name || ""}
-\u{1F517}\uFF1A${item.url || ""}`).join("\n\n");
         try {
           const payload = await this.request(endpoint, {
             method: "POST",
-            body: { text: text2 },
+            // 结构化直投：链接数组直接给客户端后端扫成草稿（跳过归属判断，快一倍）；
+            // 老后端不认识 links 字段时会返回 400，此时回退拼接文本形式。
+            body: { links: batch.map((item) => ({ name: item.name || "", url: item.url || "" })) },
             signal: options.signal,
             timeoutMs: options.timeoutMs || DEFAULT_TIMEOUT_MS
+          }).catch(async (error) => {
+            const message = String(error?.message || "");
+            if (!/HTTP 4\d\d|没有可以处理的链接/.test(message)) throw error;
+            const text2 = batch.map((item) => `\u{1F3AC}\uFF1A${item.name || ""}\n\u{1F517}\uFF1A${item.url || ""}`).join("\n\n");
+            return this.request(endpoint, {
+              method: "POST",
+              body: { text: text2 },
+              signal: options.signal,
+              timeoutMs: options.timeoutMs || DEFAULT_TIMEOUT_MS
+            });
           });
           const failure = submissionFailure(payload, batch.length);
           for (const item of batch) results.push({ item, status: failure ? "failed" : "success", message: failure, response: payload });
@@ -18552,12 +18661,13 @@ ${end.comment}` : end.comment;
     const settings = state.filterDraft || ui.config.fastlinkTools || {};
     const filters = Array.isArray(settings.filters) ? settings.filters : [];
     const exportRows = state.items.map((item) => `<tr><td>${escapeHtml(item.name)}</td><td>${Number(item.type) === 1 ? "\u6587\u4EF6\u5939\uFF08\u9012\u5F52\uFF09" : "\u6587\u4EF6"}</td></tr>`).join("");
-    const generatedLinks = state.artifacts.length ? `<div class="fastlink-results">${state.artifacts.map((artifact, index) => `<section class="fastlink-result-card"><div><strong>${escapeHtml(artifact.item.name)}</strong><span>${artifact.fileCount} \u4E2A\u6587\u4EF6</span></div><textarea readonly aria-label="${escapeHtml(artifact.item.name)} \u79D2\u4F20\u94FE\u63A5">${escapeHtml(artifact.link || "")}</textarea><button class="button" data-action="fastlink-copy-link" data-index="${index}">${icon("copy", 15)}\u590D\u5236\u94FE\u63A5</button></section>`).join("")}</div>` : "";
+    const artifactCards = state.artifacts.slice(0, 30);
+    const generatedLinks = state.artifacts.length ? `<div class="fastlink-results">${artifactCards.map((artifact, index) => `<section class="fastlink-result-card"><div><strong>${escapeHtml(artifact.item?.name || artifact.filename || `第 ${index + 1} 份`)}</strong><span>${artifact.fileCount} 个文件</span></div><textarea readonly aria-label="${escapeHtml(artifact.item?.name || artifact.filename || `第 ${index + 1} 份`)} 秒传链接">${escapeHtml(artifact.link || "")}</textarea><button class="button" data-action="fastlink-copy-link" data-index="${index}">${icon("copy", 15)}复制链接</button></section>`).join("")}</div>${state.artifacts.length > artifactCards.length ? `<span class="footer-note">链接仅回显前 ${artifactCards.length} 份（共 ${state.artifacts.length} 份），其余文件已下载到本地，不逐条塞进页面。</span>` : ""}` : "";
     const exportPane = state.items.length ? `${notice("\u6BCF\u4E2A\u9876\u5C42\u9879\u76EE\u4F1A\u5206\u522B\u751F\u6210\u9879\u76EE\u683C\u5F0F\u7684 JSON \u4E0E 123FLCPV2 \u94FE\u63A5\uFF0C\u5BFC\u51FA\u4E0D\u4F1A\u4FEE\u6539\u6E90\u6587\u4EF6\u3002", "", "download")}<div class="table-wrap"><table><thead><tr><th>\u9876\u5C42\u9879\u76EE</th><th>\u8303\u56F4</th></tr></thead><tbody>${exportRows}</tbody></table></div><div class="button-row"><button class="button" data-action="fastlink-secondary-generate">${icon("link", 15)}\u751F\u6210\u4E8C\u7EA7\u94FE\u63A5\uFF08\u77ED\u94FE\uFF09</button><button class="button" data-action="fastlink-secondary-save-link">${icon("download", 15)}\u628A\u5DF2\u751F\u6210\u94FE\u63A5\u4FDD\u5B58\u5230\u4E91\u76D8</button></div>${state.artifacts.length ? `${notice(`\u5DF2\u5BFC\u51FA ${state.artifacts.length} \u4E2A\u79D2\u4F20\u6587\u4EF6\uFF0C\u5171\u5305\u542B ${state.fileCount} \u4E2A\u4E91\u76D8\u6587\u4EF6\u3002`, "success", "check")}${generatedLinks}` : ""}` : notice("\u5BFC\u51FA\u9700\u8981\u5148\u5728\u6587\u4EF6\u5217\u8868\u9009\u62E9\u4E00\u4E2A\u6216\u591A\u4E2A\u6587\u4EF6\u3001\u6587\u4EF6\u5939\u3002", "warning", "alert");
     const importPane = `${notice("\u652F\u6301 123FastLink JSON\u3001V1/V2 \u79D2\u4F20\u6587\u672C\u3001.123share \u4E0E\u4E8C\u7EA7\u79D2\u4F20\u77ED\u94FE\uFF08\u81EA\u52A8\u8BC6\u522B\uFF09\uFF1B\u6587\u4EF6\u4F1A\u5BFC\u5165\u5230\u5F53\u524D\u76EE\u5F55\u5E76\u4FDD\u7559\u539F\u76EE\u5F55\u7ED3\u6784\u3002", "", "import")}<div class="button-row"><button class="button" data-action="fastlink-secondary-from-file">${icon("folderOpen", 15)}\u4ECE\u52FE\u9009\u7684\u79D2\u4F20\u6587\u4EF6\u8F6C\u5B58</button><button class="button" data-action="fastlink-file-open">${icon("folderOpen", 15)}\u9009\u62E9\u672C\u5730\u79D2\u4F20\u6587\u4EF6</button></div><span class="footer-note">${state.importFile ? `\u5DF2\u9009\u62E9\uFF1A${escapeHtml(state.importFileName || "")}\uFF08${formatBytes(state.importFileSize)}\uFF09\u00B7 \u70B9\u300C\u5F00\u59CB\u8F6C\u5B58\u300D\u65F6\u6D41\u5F0F\u8BFB\u53D6\uFF0C\u4E0D\u6574\u8BFB\u8FDB\u5185\u5B58` : escapeHtml(state.importFileName || "\u672A\u9009\u62E9\u672C\u5730\u6587\u4EF6")}</span>${state.importFile ? `<button class="button compact" data-action="fastlink-import-file-clear">\u6E05\u9664\u6587\u4EF6</button>` : ""}<input id="fastlink-file" type="file" accept=".json,.txt,.123fastlink,.123share,application/json,text/plain" hidden>${state.input && state.input.length > 2000000 ? `<span class="footer-note">\u7C98\u8D34\u5185\u5BB9\u8F83\u5927\uFF08${formatBytes(stringByteSize(state.input))}\uFF09\uFF0C\u5DF2\u4FDD\u7559\u4F46\u4E0D\u56DE\u663E\uFF0C\u53EF\u76F4\u63A5\u5F00\u59CB\u8F6C\u5B58</span>` : ""}<div class="editor-surface"><textarea id="fastlink-input" placeholder="\u7C98\u8D34\u79D2\u4F20 JSON\u3001\u94FE\u63A5\u3001.123share \u6216\u4E8C\u7EA7\u79D2\u4F20\u77ED\u94FE">${state.input && state.input.length > 2000000 ? "" : escapeHtml(state.input || "")}</textarea></div>`;
     const publicPane = `${notice("\u8F93\u5165 123 \u4E91\u76D8\u5206\u4EAB\u94FE\u63A5\uFF0C\u9012\u5F52\u8BFB\u53D6\u5176\u4E2D\u7684\u6587\u4EF6\u5E76\u4E0B\u8F7D\u53EF\u76F4\u63A5\u8F6C\u5B58\u7684\u6807\u51C6 JSON\uFF1B\u540C\u65F6\u4FDD\u7559 123FLCPV2 \u94FE\u63A5\u4F9B\u590D\u5236\u3002", "", "share")}<label class="field"><span>\u5206\u4EAB\u94FE\u63A5 / Key</span><input id="fastlink-public-input" value="${escapeHtml(state.publicInput || "")}" placeholder="\u652F\u6301 www.123865.com/s/... \u4E0E share.123pan.cn/123pan/..."></label><label class="field"><span>\u63D0\u53D6\u7801\uFF08\u53EF\u9009\uFF0C\u94FE\u63A5\u5DF2\u5305\u542B\u65F6\u65E0\u9700\u586B\u5199\uFF09</span><input id="fastlink-public-password" value="${escapeHtml(state.publicPassword || "")}"></label>`;
     const batchPane = `${notice("\u6BCF\u884C\u4E00\u4E2A\u5206\u4EAB\u94FE\u63A5\u3001Key \u6216\u5E26\u63D0\u53D6\u7801\u7684\u6587\u672C\uFF1B\u6BCF\u4E2A\u5206\u4EAB\u4F1A\u72EC\u7ACB\u4E0B\u8F7D\u4E00\u4E2A\u6807\u51C6 JSON\u3002", "", "share")}<div class="editor-surface"><textarea id="fastlink-public-batch" placeholder="https://www.123865.com/s/xxxx?pwd=ABCD&#10;xxxx \u63D0\u53D6\u7801:ABCD">${escapeHtml(state.publicBatch || "")}</textarea></div>`;
-    const splitPane = `${notice("\u652F\u6301\u9879\u76EE JSON\u3001123FLCPV2 \u94FE\u63A5\u548C\u65E7\u7248 V1/V2 \u6587\u672C\u3002\u6309\u76EE\u5F55\u5C42\u7EA7\u4F1A\u4E3A\u6BCF\u4E2A\u76EE\u5F55\u7EC4\u751F\u6210\u4E00\u4E2A\u6587\u4EF6\uFF0C\u6309\u6570\u91CF\u4F1A\u6309\u6761\u76EE\u5207\u5206\u3002", "", "download")}<div class="button-row"><button class="button" data-action="fastlink-split-file-open">${icon("folderOpen", 15)}\u9009\u62E9 JSON</button><span>${escapeHtml(state.splitFileName || "\u4E5F\u53EF\u4EE5\u76F4\u63A5\u7C98\u8D34")}</span><input id="fastlink-split-file" type="file" accept=".json,.txt,.123fastlink" hidden></div><div class="editor-surface"><textarea id="fastlink-split-input" placeholder="\u7C98\u8D34 JSON \u6216\u79D2\u4F20\u94FE\u63A5">${escapeHtml(state.splitInput || "")}</textarea></div><div class="inline-fields"><label class="field"><span>\u62C6\u5206\u65B9\u5F0F</span><select id="fastlink-split-method"><option value="folder" ${state.splitMethod === "folder" ? "selected" : ""}>\u6309\u76EE\u5F55\u5C42\u7EA7</option><option value="count" ${state.splitMethod === "count" ? "selected" : ""}>\u6309\u6587\u4EF6\u6570\u91CF</option></select></label><label class="field"><span>${state.splitMethod === "count" ? "\u6BCF\u4EFD\u6587\u4EF6\u6570" : "\u76EE\u5F55\u5C42\u6570"}</span><input id="fastlink-split-amount" type="number" min="1" value="${Math.max(1, Number(state.splitAmount) || 1)}"></label></div>`;
+    const splitPane = `${notice("\u652F\u6301\u9879\u76EE JSON\u3001123FLCPV2 \u94FE\u63A5\u548C\u65E7\u7248 V1/V2 \u6587\u672C\u3002\u6309\u76EE\u5F55\u5C42\u7EA7\u4F1A\u4E3A\u6BCF\u4E2A\u76EE\u5F55\u7EC4\u751F\u6210\u4E00\u4E2A\u6587\u4EF6\uFF0C\u6309\u6570\u91CF\u4F1A\u6309\u6761\u76EE\u5207\u5206\uFF0C\u6309\u5B63\u96C6/\u5267\u540D\u4F1A\u4E3A\u6BCF\u90E8\u4F5C\u54C1\uFF08\u5267\u540D+\u5B63\uFF09\u751F\u6210\u4E00\u4E2A\u6587\u4EF6\u3002", "", "download")}<div class="button-row"><button class="button" data-action="fastlink-split-file-open">${icon("folderOpen", 15)}\u9009\u62E9 JSON</button><span>${escapeHtml(state.splitFileName || "\u4E5F\u53EF\u4EE5\u76F4\u63A5\u7C98\u8D34")}</span><input id="fastlink-split-file" type="file" accept=".json,.txt,.123fastlink" hidden></div><div class="editor-surface"><textarea id="fastlink-split-input" placeholder="\u7C98\u8D34 JSON \u6216\u79D2\u4F20\u94FE\u63A5">${state.splitInput && state.splitInput.length > 2000000 ? "" : escapeHtml(state.splitInput || "")}</textarea></div>${state.splitInput && state.splitInput.length > 2000000 ? `<span class="footer-note">\u7C98\u8D34\u5185\u5BB9\u8F83\u5927\uFF08${formatBytes(stringByteSize(state.splitInput))}\uFF09\uFF0C\u5DF2\u4FDD\u7559\u4F46\u4E0D\u56DE\u663E\uFF0C\u53EF\u76F4\u63A5\u5F00\u59CB\u62C6\u5206</span>` : ""}<div class="inline-fields"><label class="field"><span>\u62C6\u5206\u65B9\u5F0F</span><select id="fastlink-split-method"><option value="folder" ${state.splitMethod === "folder" ? "selected" : ""}>\u6309\u76EE\u5F55\u5C42\u7EA7</option><option value="count" ${state.splitMethod === "count" ? "selected" : ""}>\u6309\u6587\u4EF6\u6570\u91CF</option><option value="work" ${state.splitMethod === "work" ? "selected" : ""}>\u6309\u5B63\u96C6/\u5267\u540D</option></select></label>${state.splitMethod === "work" ? "" : `<label class="field"><span>${state.splitMethod === "count" ? "\u6BCF\u4EFD\u6587\u4EF6\u6570" : "\u76EE\u5F55\u5C42\u6570"}</span><input id="fastlink-split-amount" type="number" min="1" value="${Math.max(1, Number(state.splitAmount) || 1)}"></label>`}</div>`;
     const convertPane = `${notice("\u5728 .123share \u4E0E\u9879\u76EE\u6807\u51C6 JSON \u4E4B\u95F4\u4E92\u8F6C\u3002\u8F6C\u6362\u53EA\u5728\u672C\u5730\u5B8C\u6210\uFF0C\u4E0D\u4F1A\u4E0A\u4F20\u6587\u4EF6\u3002", "", "settings")}<div class="button-row"><button class="button" data-action="fastlink-convert-file-open">${icon("folderOpen", 15)}\u9009\u62E9\u6587\u4EF6</button><span>${escapeHtml(state.convertFileName || "\u652F\u6301 .123share / .json")}</span><input id="fastlink-convert-file" type="file" accept=".123share,.json" hidden></div><div class="editor-surface"><textarea id="fastlink-convert-input" placeholder="\u4E5F\u53EF\u4EE5\u7C98\u8D34\u6587\u4EF6\u5185\u5BB9">${escapeHtml(state.convertInput || "")}</textarea></div>${state.converted ? notice(`\u5DF2\u8F6C\u6362\u4E3A ${state.converted === "json" ? "JSON" : ".123share"} \u5E76\u5F00\u59CB\u4E0B\u8F7D\u3002`, "success", "check") : ""}`;
     const filterPane =`${notice("\u542F\u7528\u540E\uFF0C\u751F\u6210\u6216\u8F6C\u5B58\u65F6\u4F1A\u8DF3\u8FC7\u5BF9\u5E94\u6269\u5C55\u540D\u3002\u8BBE\u7F6E\u4FDD\u5B58\u5728\u9879\u76EE\u914D\u7F6E\u4E2D\u3002", "", "settings")}<div class="check-grid"><label class="check-line"><input type="checkbox" data-fastlink-filter="share" ${settings.filterOnShareEnabled ? "checked" : ""}>\u751F\u6210\u65F6\u542F\u7528\u8FC7\u6EE4</label><label class="check-line"><input type="checkbox" data-fastlink-filter="transfer" ${settings.filterOnTransferEnabled ? "checked" : ""}>\u8F6C\u5B58\u65F6\u542F\u7528\u8FC7\u6EE4</label></div><div class="filter-actions"><button class="button compact" data-action="fastlink-filter-all">\u5168\u9009</button><button class="button compact" data-action="fastlink-filter-none">\u5168\u4E0D\u9009</button><button class="button compact" data-action="fastlink-filter-reset">\u6062\u590D\u9ED8\u8BA4</button></div><div class="fastlink-filter-list">${filters.map((item, index) => `<label class="check-line"><input type="checkbox" data-fastlink-filter="extension" data-index="${index}" ${item.enabled ? "checked" : ""}><span>.${escapeHtml(item.ext)}</span><small>${escapeHtml(item.name || "\u81EA\u5B9A\u4E49\u7C7B\u578B")}</small></label>`).join("")}</div>`;
     const settingsPane = `${notice("\u6587\u4EF6\u547D\u540D\u3001\u8C03\u8BD5\u548C\u9879\u76EE\u683C\u5F0F\u8BF4\u660E\u3002\u9879\u76EE\u8F93\u51FA\u56FA\u5B9A\u4F7F\u7528 Base62 ETag \u7684\u6807\u51C6 V2 \u683C\u5F0F\uFF0C\u907F\u514D\u4E0D\u540C\u811A\u672C\u4E4B\u95F4\u683C\u5F0F\u6F02\u79FB\u3002", "", "settings")}<div class="check-grid"><label class="check-line"><input type="checkbox" data-fastlink-setting="debugMode" ${settings.debugMode ? "checked" : ""}>\u8C03\u8BD5\u6A21\u5F0F</label><label class="check-line"><input type="checkbox" data-fastlink-setting="useFolderNameForJson" ${settings.useFolderNameForJson !== false ? "checked" : ""}>\u4F7F\u7528\u6587\u4EF6\u5939\u540D\u4F5C\u4E3A JSON \u6587\u4EF6\u540D</label><label class="check-line"><input type="checkbox" data-fastlink-setting="appendDateToJson" ${settings.appendDateToJson ? "checked" : ""}>\u6587\u4EF6\u540D\u8FFD\u52A0\u65E5\u671F</label><label class="check-line"><input type="checkbox" data-fastlink-setting="secondaryUseJson" ${settings.secondaryUseJson !== false ? "checked" : ""}>\u4E8C\u7EA7\u79D2\u4F20\u79CD\u5B50\u4F7F\u7528 JSON \u683C\u5F0F</label><label class="check-line"><input type="checkbox" checked disabled>\u4F7F\u7528 Base62 \u683C\u5F0F ETag\uFF08\u9879\u76EE\u56FA\u5B9A\uFF09</label></div><label class="field"><span>\u79CD\u5B50\u6587\u4EF6\u4FDD\u5B58\u6587\u4EF6\u5939\uFF08\u4E8C\u7EA7\u79D2\u4F20\uFF0C\u7559\u7A7A\u7528\u5F53\u524D\u76EE\u5F55\uFF09</span><div class="inline-fields"><input readonly value="${escapeHtml(settings.seedFolderId ? settings.seedFolderName ? `${settings.seedFolderName}\uFF08${settings.seedFolderId}\uFF09` : `ID ${settings.seedFolderId}` : "")}" placeholder="\u7559\u7A7A\u4F7F\u7528\u5F53\u524D\u76EE\u5F55"><button class="button" data-action="fastlink-pick-seed">${icon("folderOpen", 15)}\u9009\u62E9\u76EE\u5F55</button><button class="button compact" data-action="fastlink-folder-clear" data-key="seedFolderId" ${settings.seedFolderId ? "" : "disabled"}>\u6E05\u9664</button></div></label><div class="fastlink-format-note">JSON \u4E0E\u94FE\u63A5\u5747\u4F7F\u7528\u9879\u76EE\u6807\u51C6\u683C\u5F0F\uFF0C\u4E0D\u4F1A\u751F\u6210\u4E0D\u517C\u5BB9\u7684\u975E Base62 \u7248\u672C\u3002</div>${settings.debugMode ? `<div class="fastlink-debug-card"><div><strong>API \u6D4B\u8BD5</strong><span>\u8BFB\u53D6\u5F53\u524D\u76EE\u5F55\u9996\u6761\u8BB0\u5F55\uFF0C\u7ED3\u679C\u4F1A\u663E\u793A\u4E3A\u63D0\u793A\u3002</span></div><button class="button compact" data-action="fastlink-api-test">\u6D4B\u8BD5\u5F53\u524D\u76EE\u5F55 API</button></div>` : ""}`;
@@ -18817,7 +18927,7 @@ ${end.comment}` : end.comment;
     const rows = visible.map((file) => {
       const sourceName = String(file.relativePath || file.name);
       const seasonToken = file.fields.mediaType === "tv" ? seasonTokenRange(sourceName) : null;
-      return `<div class="organize-file ${file.discard || file.conflictDiscard ? "discard" : ""}" data-file-row="${file.id}"><div class="source-file"><span>\u539F\u6587\u4EF6\u540D</span><strong>${markSeasonEpisodeHtml(sourceName, seasonToken)}</strong>${file.fields.mediaType === "tv" ? `<small>${escapeHtml(file.fields.seasonEpisode || "\u672A\u8BC6\u522B\u5B63\u96C6")}</small>` : ""}${episodeOptions(ui, file)}</div><label class="field name-field"><span>\u65B0\u6587\u4EF6\u540D</span><span class="name-stack"><span class="name-mirror" aria-hidden="true">${markSeasonEpisodeValueHtml(file.newName, file.fields.seasonEpisode)}</span><textarea rows="3" data-organize-name="${file.id}" ${file.discard ? "disabled" : ""}>${escapeHtml(file.newName)}</textarea></span></label><div class="target-file"><span>\u76EE\u6807\u8DEF\u5F84</span><strong>${markSeasonEpisodeValueHtml(file.targetPath, file.fields.seasonEpisode)}</strong><small class="${file.discard || file.conflictAction ? "danger" : file.matched ? "success" : ""}">${file.discard ? "\u65C1\u6302\u79FB\u5165\u56DE\u6536\u7AD9" : escapeHtml(file.conflictAction || (file.matched ? `\u5DF2\u6821\u51C6 ${file.fields.seasonEpisode}` : file.newName !== file.name ? "\u91CD\u547D\u540D\u5E76\u79FB\u52A8" : "\u79FB\u52A8"))}</small></div><button class="icon-button danger" data-action="organize-remove-file" data-group="${escapeHtml(group.id)}" data-file="${file.id}" title="\u4ECE\u672C\u6B21\u6574\u7406\u79FB\u9664">${icon("close", 15)}</button></div>`;
+      return `<div class="organize-file ${file.discard || file.conflictDiscard ? "discard" : ""}" data-file-row="${file.id}"><div class="source-file"><span>\u539F\u6587\u4EF6\u540D</span><strong>${markSeasonEpisodeHtml(sourceName, seasonToken)}</strong>${file.fields.mediaType === "tv" ? `<small>${escapeHtml(file.fields.seasonEpisode || "\u672A\u8BC6\u522B\u5B63\u96C6")}</small>` : ""}${episodeOptions(ui, file)}</div><label class="field name-field"><span>\u65B0\u6587\u4EF6\u540D</span><span class="name-stack"><span class="name-mirror" aria-hidden="true">${markSeasonEpisodeHtml(file.newName, file.fields.seasonEpisode)}</span><textarea rows="3" data-organize-name="${file.id}" ${file.discard ? "disabled" : ""}>${escapeHtml(file.newName)}</textarea></span></label><div class="target-file"><span>\u76EE\u6807\u8DEF\u5F84</span><strong>${markSeasonEpisodeHtml(file.targetPath, file.fields.seasonEpisode)}</strong><small class="${file.discard || file.conflictAction ? "danger" : file.matched ? "success" : ""}">${file.discard ? "\u65C1\u6302\u79FB\u5165\u56DE\u6536\u7AD9" : escapeHtml(file.conflictAction || (file.matched ? `\u5DF2\u6821\u51C6 ${file.fields.seasonEpisode}` : file.newName !== file.name ? "\u91CD\u547D\u540D\u5E76\u79FB\u52A8" : "\u79FB\u52A8"))}</small></div><button class="icon-button danger" data-action="organize-remove-file" data-group="${escapeHtml(group.id)}" data-file="${file.id}" title="\u4ECE\u672C\u6B21\u6574\u7406\u79FB\u9664">${icon("close", 15)}</button></div>`;
     }).join("");
     return `<section class="detail-section file-section"><div class="section-title"><div>${icon("list", 17)}<h4>\u6587\u4EF6\u4E0E\u76EE\u6807\u8DEF\u5F84</h4></div><span>${group.files.length} \u9879</span></div><div class="organize-files">${rows}</div>${organizePager("organize-file-page", page, group.files.length, ORGANIZE_FILE_PAGE_SIZE)}</section>`;
   }
@@ -18898,7 +19008,8 @@ ${end.comment}` : end.comment;
       const checkedMap = records.checked?.[name] || {};
       const selectedCount = (record.rows || []).filter((row) => checkedMap[String(row.id)] !== false).length;
       const discardedCount = (record.rows || []).filter((row) => row.discarded).length;
-      const head = `<div class="record-head" data-action="records-toggle" data-name="${escapeHtml(name)}"><span class="record-caret">${icon(expanded ? "chevronDown" : "chevronRight", 15)}</span><div class="record-title"><strong>${escapeHtml(name)}</strong><small>${escapeHtml([record.kind === "rename" ? "\u6279\u91CF\u91CD\u547D\u540D" : record.modeLabel || "\u5A92\u4F53\u6574\u7406", record.scopeLabel || "", record.updatedAt ? `\u66F4\u65B0 ${String(record.updatedAt).slice(0, 16).replace("T", " ")}` : ""].filter(Boolean).join(" \xB7 "))}</small></div><span class="chip">${record.rows.length} \u9879</span>${discardedCount ? `<span class="chip warning">\u56DE\u6536\u7AD9 ${discardedCount}</span>` : ""}${record.truncated ? `<span class="chip warning">\u5DF2\u622A\u65AD</span>` : ""}</div>`;
+      const updatedText = formatLocalDateTime(record.updatedAt);
+      const head = `<div class="record-head" data-action="records-toggle" data-name="${escapeHtml(name)}"><span class="record-caret">${icon(expanded ? "chevronDown" : "chevronRight", 15)}</span><div class="record-title"><strong>${escapeHtml(name)}</strong><small>${escapeHtml([record.kind === "rename" ? "\u6279\u91CF\u91CD\u547D\u540D" : record.modeLabel || "\u5A92\u4F53\u6574\u7406", record.scopeLabel || "", updatedText ? `\u66F4\u65B0 ${updatedText}` : ""].filter(Boolean).join(" \xB7 "))}</small></div><span class="chip">${record.rows.length} \u9879</span>${discardedCount ? `<span class="chip warning">\u56DE\u6536\u7AD9 ${discardedCount}</span>` : ""}${record.truncated ? `<span class="chip warning">\u5DF2\u622A\u65AD</span>` : ""}</div>`;
       if (!expanded) return `<section class="record-card">${head}</section>`;
       const rows = (record.rows || []).map((row) => `<tr><td class="record-check-cell"><input type="checkbox" data-record-check="1" data-name="${escapeHtml(name)}" data-row="${escapeHtml(row.id)}" ${checkedMap[String(row.id)] !== false ? "checked" : ""}></td><td>${escapeHtml(row.name)}</td><td class="${row.newName && row.newName !== row.name ? "success" : "muted"}">${escapeHtml(row.newName || "\u2014")}</td><td>${escapeHtml(row.targetPath || "\u2014")}</td><td>${escapeHtml(recordInfoText(row) || "\u2014")}</td><td>${recordRowStatusBadge(row)}</td></tr>`).join("");
       const actions = `<div class="record-actions"><button class="button compact" data-action="records-check-all" data-name="${escapeHtml(name)}" data-on="true">\u5168\u9009</button><button class="button compact" data-action="records-check-all" data-name="${escapeHtml(name)}" data-on="false">\u6E05\u9009</button><span class="spacer"></span><span class="footer-note">\u5DF2\u9009 ${selectedCount} / ${record.rows.length}</span><button class="button primary compact" data-action="records-restore" data-name="${escapeHtml(name)}">${icon("archiveRestore", 14)}\u8FD8\u539F\u6240\u9009</button><button class="icon-button danger" data-action="records-delete" data-name="${escapeHtml(name)}" title="\u5220\u9664\u8FD9\u6761\u8BB0\u5F55">${icon("trash", 15)}</button></div>`;
@@ -18984,11 +19095,31 @@ ${end.comment}` : end.comment;
     if (changedCount) changedCount.textContent = String(changed.length);
     if (execute) execute.disabled = !changed.length || state.errors.length > 0;
   }
+  // 重命名历史明细页：改动点逐行列出（改名前 → 改名后），页面本身就是恢复预览，
+  // 恢复按钮也在本页 —— 恢复 = 按文件 id 把「改名后」改回「改名前」。
+  function renderRenameRestore(ui, entry) {
+    const targets = Array.isArray(entry.targets) ? entry.targets : [];
+    const rows = targets.map((item) => `<tr><td>${escapeHtml(item.name || "")}</td><td>${escapeHtml(item.newName || "")}</td></tr>`).join("");
+    const body = `<section class="rename-preview"><div class="pane-toolbar"><strong class="pane-title">${escapeHtml(entry.name || "重命名记录")}</strong><span class="pane-count">${targets.length}</span><span class="footer-note">恢复会把「改名后」逐个改回「改名前」，全部成功才销掉这条记录</span></div><div class="table-wrap flush"><table><thead><tr><th>改名前</th><th>改名后</th></tr></thead><tbody>${rows}</tbody></table></div></section>`;
+    const footer = `<span class="footer-note">${escapeHtml(formatLocalDateTime(entry.createdAt))} 的改动</span><div class="footer-actions"><button class="button" data-action="rename-restore-back">${icon("arrowLeft", 15)}返回</button><button class="button primary" data-action="rename-undo">${icon("restart", 15)}确认恢复 ${targets.length} 项</button><button class="button" data-action="close">取消</button></div>`;
+    return dialogFrame(ui, {
+      title: "恢复重命名",
+      subtitle: `${targets.length} 个改动点`,
+      iconName: "restart",
+      metrics: [metric("改动", String(targets.length), "rename")],
+      body,
+      footer,
+      className: "workbench-window",
+      contentClass: "workbench-content"
+    });
+  }
   function renderRename(ui) {
     const state = ui.rename;
     const changed = state.preview.filter((item) => item.changed);
     const presets = ui.config.rename.presets || [];
-    const history = ui.config.rename.history || [];
+    const restoreEntry = state.restoreId ? (ui.config.rename.history || []).find((entry) => entry.id === state.restoreId) : null;
+    if (restoreEntry) return renderRenameRestore(ui, restoreEntry);
+    const history = filterRenameHistoryForDir(ui.config.rename.history, ui.commandContext?.currentDir || state.targets[0]?.parentId || state.targets[0]?.parentFileId || "0");
     const error = renameErrors(state);
     const rules = state.rules.map((rule, index) => `<section class="rule-row">
     <div class="rule-head"><span class="rule-index">${index + 1}</span><strong>${escapeHtml(RULE_TYPES.find((item) => item.value === rule.type)?.label || rule.type)}</strong><div class="row-actions"><button class="icon-button" data-action="rename-rule-up" data-id="${rule.id}" title="\u4E0A\u79FB">${icon("arrowUp", 15)}</button><button class="icon-button" data-action="rename-rule-down" data-id="${rule.id}" title="\u4E0B\u79FB">${icon("arrowDown", 15)}</button><button class="icon-button danger" data-action="rename-remove-rule" data-id="${rule.id}" title="\u5220\u9664">${icon("trash", 15)}</button></div></div>
@@ -18999,7 +19130,7 @@ ${end.comment}` : end.comment;
     <aside class="rename-rules"><div class="pane-toolbar"><strong class="pane-title">\u89C4\u5219\u94FE</strong><span class="pane-count">${state.rules.length}</span><span class="spacer"></span><select id="rename-rule-type" aria-label="\u89C4\u5219\u7C7B\u578B">${RULE_TYPES.map((item) => `<option value="${item.value}">${escapeHtml(item.label)}</option>`).join("")}</select><button class="button primary" data-action="rename-add-rule">${icon("plus", 15)}\u6DFB\u52A0</button></div><div class="rule-list">${rules}</div></aside>
     <section class="rename-preview"><div class="pane-toolbar"><strong class="pane-title">\u6587\u4EF6\u9884\u89C8</strong><span class="pane-count">${state.targets.length}</span><label class="check-line"><input id="rename-keep-extension" type="checkbox" ${state.keepExtension ? "checked" : ""}>\u4FDD\u7559\u6269\u5C55\u540D</label><span class="spacer"></span><select id="rename-preset" aria-label="\u5E38\u7528\u7EC4\u5408"><option value="">\u5E38\u7528\u7EC4\u5408</option>${presets.map((preset) => `<option value="${preset.id}">${escapeHtml(preset.name)}</option>`).join("")}</select><button class="button" data-action="rename-load-preset">\u8F7D\u5165</button><button class="icon-button danger" data-action="rename-delete-preset" title="\u5220\u9664\u6240\u9009\u5E38\u7528\u7EC4\u5408" ${presets.length ? "" : "disabled"}>${icon("trash", 15)}</button><button class="button" data-action="rename-save-preset">${icon("save", 15)}\u4FDD\u5B58</button></div><div data-rename-errors>${error}</div><div class="table-wrap flush"><table><thead><tr><th>\u539F\u540D\u79F0</th><th>\u65B0\u540D\u79F0</th><th>\u7C7B\u578B</th></tr></thead><tbody data-rename-preview-rows>${rows}</tbody></table></div></section>
   </div>`;
-    const footer = `<span class="footer-note">\u4EC5\u5904\u7406\u5F53\u524D\u9009\u4E2D\u7684 ${state.targets.length} \u4E2A\u9879\u76EE\uFF0C\u6587\u4EF6\u5939\u4E0D\u4F1A\u5C55\u5F00</span><div class="footer-actions"><select id="rename-history" title="\u9009\u62E9\u8981\u6062\u590D\u7684\u91CD\u547D\u540D\u8BB0\u5F55" ${history.length ? "" : "disabled"}>${history.map((entry2, index) => `<option value="${escapeHtml(entry2.id)}">${escapeHtml(entry2.name || `\u91CD\u547D\u540D ${index + 1}`)} \xB7 ${escapeHtml(String(entry2.createdAt || "").slice(0, 10))}</option>`).join("")}</select><button class="button" data-action="rename-undo" ${history.length ? "" : "disabled"}>${icon("restart", 15)}\u6062\u590D</button><button class="icon-button danger" data-action="rename-clear-history" title="\u6E05\u7A7A\u91CD\u547D\u540D\u5386\u53F2" ${history.length ? "" : "disabled"}>${icon("trash", 15)}</button><button class="button" data-action="close">\u53D6\u6D88</button><button class="button primary" data-action="rename-execute" ${changed.length && !state.errors.length ? "" : "disabled"}>${icon("check", 15)}\u6267\u884C\u91CD\u547D\u540D</button></div>`;
+    const footer = `<span class="footer-note">\u4EC5\u5904\u7406\u5F53\u524D\u9009\u4E2D\u7684 ${state.targets.length} \u4E2A\u9879\u76EE\uFF0C\u6587\u4EF6\u5939\u4E0D\u4F1A\u5C55\u5F00</span><div class="footer-actions"><div class="history-menu"><button class="button history-toggle" data-action="rename-history-toggle" title="\u9009\u62E9\u8981\u6062\u590D\u7684\u91CD\u547D\u540D\u8BB0\u5F55" ${history.length ? "" : "disabled"}>${icon("restart", 15)}<span class="history-toggle-label">${history.length ? `\u91CD\u547D\u540D\u8BB0\u5F55 ${history.length} \u6761` : "\u65E0\u91CD\u547D\u540D\u8BB0\u5F55"}</span>${icon("chevronDown", 14)}</button>${state.historyOpen && history.length ? `<div class="history-popup">${history.map((entry2, index) => `<button class="history-item" data-action="rename-history-open" data-id="${escapeHtml(entry2.id)}"><span class="history-item-name">${escapeHtml(entry2.name || `\u91CD\u547D\u540D ${index + 1}`)}</span><span class="history-item-meta">${(entry2.targets || []).length} \u9879 \xB7 ${escapeHtml(formatLocalDateTime(entry2.createdAt).slice(0, 16))}</span></button>`).join("")}</div>` : ""}</div><button class="icon-button danger" data-action="rename-clear-history" title="\u6E05\u7A7A\u91CD\u547D\u540D\u5386\u53F2" ${history.length ? "" : "disabled"}>${icon("trash", 15)}</button><button class="button" data-action="close">\u53D6\u6D88</button><button class="button primary" data-action="rename-execute" ${changed.length && !state.errors.length ? "" : "disabled"}>${icon("check", 15)}\u6267\u884C\u91CD\u547D\u540D</button></div>`;
     return dialogFrame(ui, {
       title: "\u6279\u91CF\u91CD\u547D\u540D",
       subtitle: `${state.targets.length} \u4E2A\u9009\u4E2D\u9879\u76EE`,
@@ -19357,7 +19488,7 @@ ${end.comment}` : end.comment;
   .spacer { flex:1; }
   /* —— 表单 —— */
   .field { min-width:0; display:grid; gap:5px; }
-  .field > span,.target-file > span { color:var(--muted); font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.02em; }
+  .field > span:not(.name-mirror),.target-file > span { color:var(--muted); font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.02em; }
   input[type="text"],input[type="search"],input[type="password"],input[type="number"],input:not([type]),select,textarea { width:100%; min-height:38px; padding:9px 12px; color:var(--text); background:var(--glass-strong); border:1px solid var(--glass-border); border-radius:var(--radius-sm); outline:none; box-shadow:var(--shadow-sm); transition:border-color var(--dur-fast) ease,box-shadow var(--dur-fast) ease,background var(--dur-fast) ease; }
   textarea { min-height:92px; resize:vertical; line-height:1.55; }
   input:focus,select:focus,textarea:focus { border-color:var(--accent); box-shadow:var(--ring),var(--shadow-sm); background:var(--glass); }
@@ -19455,6 +19586,13 @@ ${end.comment}` : end.comment;
   .pane-title { flex:0 0 auto; color:var(--text); font-size:13px; font-weight:600; letter-spacing:0; }
   .pane-toolbar .check-line { flex:0 0 auto; white-space:nowrap; }
   #rename-preset { width:min(220px,34vw); flex:0 1 220px; }
+  .history-menu { position:relative; }
+  .history-toggle .history-toggle-label { max-width:38vw; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .history-popup { position:absolute; bottom:calc(100% + 8px); right:0; z-index:40; display:flex; flex-direction:column; gap:2px; min-width:280px; max-width:72vw; max-height:46vh; overflow:auto; padding:6px; background:var(--glass-strong); backdrop-filter:blur(18px); -webkit-backdrop-filter:blur(18px); border:1px solid var(--glass-border); border-radius:var(--radius-sm); box-shadow:0 12px 32px rgba(16,34,64,.22); }
+  .history-item { display:flex; flex-direction:column; gap:2px; padding:8px 10px; border:0; border-radius:9px; background:transparent; color:var(--text); font:inherit; text-align:left; cursor:pointer; }
+  .history-item:hover { background:color-mix(in srgb, var(--text) 10%, transparent); }
+  .history-item-name { font-size:12px; font-weight:600; overflow-wrap:anywhere; }
+  .history-item-meta { font-size:11px; color:var(--muted); }
   .editor-surface { position:relative; margin:16px; padding:16px; background:var(--glass); backdrop-filter:blur(var(--blur-sm)); -webkit-backdrop-filter:blur(var(--blur-sm)); border:1px solid var(--glass-border); border-radius:var(--radius-sm); box-shadow:var(--shadow-sm); }
   .editor-surface textarea { min-height:300px; font-family:var(--font-mono); font-size:12px; }
   .result-summary { display:flex; gap:10px; padding:16px 16px 0; }
@@ -19550,10 +19688,14 @@ ${end.comment}` : end.comment;
   .source-file small,.target-file small { color:var(--muted); font-size:10px; }
   .episode-select { min-height:30px; font-size:10px; }
   .name-field { min-width:0; }
-  .name-field textarea { min-width:0; max-width:100%; min-height:68px; max-height:140px; field-sizing:content; font-size:11px; overflow-wrap:break-word; word-break:normal; }
-  /* 新文件名季集高亮：镜像层叠在 textarea 上方，文字全透明只把季集片段描成红字，盒模型/字体必须与 textarea 逐项一致 */
+  /* 新文件名季集高亮：镜像层显示带红字高亮的文件名，textarea 文字透明只留光标。
+     WebKit 的 textarea 与 span 换行算法无法保证逐像素一致，两套文字同时可见必然出重影，
+     所以任一时刻只显示一套：非聚焦看镜像（供人工核对），聚焦编辑时隐藏镜像、textarea 文字现形 */
   .name-stack { position:relative; display:block; min-width:0; }
-  .name-mirror { position:absolute; inset:0; padding:9px 12px; border:1px solid transparent; border-radius:var(--radius-sm); font-size:11px; line-height:1.55; white-space:pre-wrap; overflow-wrap:break-word; word-break:normal; color:transparent; overflow:hidden; pointer-events:none; }
+  .name-mirror { position:absolute; inset:0; padding:9px 12px; border:1px solid transparent; border-radius:var(--radius-sm); font-size:11px; line-height:1.55; white-space:pre-wrap; overflow-wrap:break-word; word-break:break-all; color:var(--text); overflow:hidden; pointer-events:none; text-transform:none; letter-spacing:normal; font-weight:inherit; }
+  .name-stack.editing .name-mirror { visibility:hidden; }
+  .name-field textarea { min-width:0; max-width:100%; min-height:68px; max-height:140px; field-sizing:content; font-size:11px; overflow-wrap:break-word; word-break:break-all; color:transparent; caret-color:var(--text); }
+  .name-stack.editing textarea { color:var(--text); }
   mark.se-token { color:var(--danger); background:none; padding:0; }
   /* —— 操作记录 —— */
   .chip.warning { color:var(--warning); background:var(--warning-soft); }
@@ -20135,6 +20277,14 @@ ${end.comment}` : end.comment;
       this.root.addEventListener("input", (event) => this.handleInput(event));
       // scroll 不冒泡，用捕获阶段接住新文件名 textarea 的滚动，同步高亮镜像层
       this.root.addEventListener("scroll", (event) => this.syncOrganizeNameMirrorScroll(event.target), true);
+      // 新文件名双渲染切换：聚焦编辑时隐藏镜像、textarea 文字现形，失焦后回到高亮镜像，
+      // 避免两套排版同时可见叠出重影
+      this.root.addEventListener("focusin", (event) => {
+        if (event.target?.matches?.("[data-organize-name]")) event.target.closest(".name-stack")?.classList.add("editing");
+      });
+      this.root.addEventListener("focusout", (event) => {
+        if (event.target?.matches?.("[data-organize-name]")) event.target.closest(".name-stack")?.classList.remove("editing");
+      });
       this.root.addEventListener("compositionend", (event) => this.handleCompositionEnd(event));
       this.root.addEventListener("keydown", (event) => this.handleKeydown(event));
       this.root.addEventListener("dragstart", (event) => this.handleDragStart(event));
@@ -20869,7 +21019,7 @@ ${end.comment}` : end.comment;
     }
     async openRename(items) {
       const targets = items.map((item) => ({ ...item }));
-      this.rename = { items, targets, keepExtension: true, rules: [defaultRule("replace")], preview: [], errors: [], existing: {}, folderName: null };
+      this.rename = { items, targets, keepExtension: true, rules: [defaultRule("replace")], preview: [], errors: [], existing: {}, folderName: null, restoreId: null, historyOpen: false };
       await this.updateRenamePreview(false);
       this.state.view = "rename";
       this.render();
@@ -20946,23 +21096,24 @@ ${end.comment}` : end.comment;
         const batch = await this.renameTargetsSafely(targets, signal, "\u6279\u91CF\u91CD\u547D\u540D", { verify: true });
         const succeeded = batch.details.filter((item) => item.status === "success");
         if (succeeded.length) {
+          // 先查父目录名：重命名历史与操作记录的命名共用；单条查询失败只丢命名、不影响结果
+          const parentIds = [...new Set(succeeded.map((item) => String(item.parentId || item.parentFileId || "0")).filter((id) => id && id !== "0"))];
+          const dirNames = {};
+          await mapLimit(parentIds, 4, async (parentId) => {
+            try {
+              const [entry] = await this.api.fileInfos([parentId], signal);
+              if (entry) dirNames[parentId] = entry.name;
+            } catch {}
+          });
           this.config = this.configStore.update((config) => {
-            config.rename.history.unshift({ id: uniqueId("history"), name: "\u6279\u91CF\u91CD\u547D\u540D", createdAt: (/* @__PURE__ */ new Date()).toISOString(), targets: succeeded.map((item) => ({ id: item.id, parentId: item.parentId || item.parentFileId, name: item.name, newName: item.newName })) });
+            config.rename.history.unshift({ id: uniqueId("history"), name: renameHistoryLabel(succeeded, dirNames), createdAt: (/* @__PURE__ */ new Date()).toISOString(), targets: succeeded.map((item) => ({ id: item.id, parentId: item.parentId || item.parentFileId, name: item.name, newName: item.newName })) });
             config.rename.history = config.rename.history.slice(0, 50);
           });
           // 同步并入操作记录（按所在目录名聚合，同名合并）；失败只提示不影响重命名结果
           try {
-            const parentIds = [...new Set(succeeded.map((item) => String(item.parentId || item.parentFileId || "0")).filter((id) => id && id !== "0"))];
-            const dirNames = {};
-            await mapLimit(parentIds, 4, async (parentId) => {
-              try {
-                const [entry] = await this.api.fileInfos([parentId], signal);
-                if (entry) dirNames[parentId] = entry.name;
-              } catch {}
-            });
             const store = loadOperationRecords();
             mergeRecordsIntoStore(store, buildRenameRecordGroups(succeeded, dirNames), { modeLabel: "\u6279\u91CF\u91CD\u547D\u540D", scopeLabel: "" });
-            saveOperationRecords(store);
+            if (!saveOperationRecords(store)) this.toast("\u64CD\u4F5C\u8BB0\u5F55\u4FDD\u5B58\u5931\u8D25\uFF1A\u811A\u672C\u5B58\u50A8\u5199\u5165\u672A\u6210\u529F", "warning");
           } catch (error) {
             this.toast(`\u64CD\u4F5C\u8BB0\u5F55\u4FDD\u5B58\u5931\u8D25\uFF1A${error.message}`, "warning");
           }
@@ -21046,8 +21197,7 @@ ${end.comment}` : end.comment;
       return options.verify ? this.verifyRenameBatch(batch, targets, signal) : batch;
     }
     async undoRename() {
-      const selectedId = this.root.querySelector("#rename-history")?.value;
-      const history = this.config.rename.history?.find((item) => item.id === selectedId) || this.config.rename.history?.[0];
+      const history = this.config.rename.history?.find((item) => item.id === this.rename?.restoreId);
       if (!history) return;
       const result2 = await this.runTask(async (signal) => {
         const targets = history.targets.map((item) => ({ id: item.id, parentId: item.parentId, name: item.newName, newName: item.name }));
@@ -21057,6 +21207,7 @@ ${end.comment}` : end.comment;
       if (result2.fail === 0) this.config = this.configStore.update((config) => {
         config.rename.history = config.rename.history.filter((item) => item.id !== history.id);
       });
+      if (this.rename) this.rename.restoreId = null;
       this.bridge.refresh();
       this.setResult("\u6062\u590D\u6587\u4EF6\u540D\u7ED3\u679C", result2);
     }
@@ -21099,13 +21250,21 @@ ${end.comment}` : end.comment;
           });
         } catch (error) {
           if (error?.name === "AbortError") throw error;
-          submissions = successful.map((item) => ({ item, status: "failed", message: error.message || "\u6295\u7A3F\u8BF7\u6C42\u5931\u8D25" }));
+          const raw = error.message || "\u6295\u7A3F\u8BF7\u6C42\u5931\u8D25";
+          // 超时/断连时服务端可能已经生成草稿，文案不写死"失败"，引导去客户端确认
+          const message = /\u8D85\u65F6|\u65E0\u6CD5\u8FDE\u63A5/.test(raw)
+            ? `${raw}\uFF08\u7ED3\u679C\u672A\u77E5\uFF0C\u8BF7\u5230\u5BA2\u6237\u7AEF\u300C\u6295\u7A3F\u8349\u7A3F\u300D\u786E\u8BA4\uFF0C\u52FF\u76F2\u76EE\u91CD\u590D\u63D0\u4EA4\uFF09`
+            : raw;
+          submissions = successful.map((item) => ({ item, status: "failed", message }));
         }
         successful.forEach((item, index) => {
           const submission = submissions[index];
           if (submission?.status === "success") {
             item.submissionStatus = "success";
-            item.message = "\u6295\u7A3F\u8349\u7A3F\u5DF2\u63A8\u9001";
+            const backendNote = String(submission?.response?.error || "").trim();
+            item.message = backendNote
+              ? `\u8349\u7A3F\u5DF2\u751F\u6210\uFF08Bot \u63A8\u9001\u5F02\u5E38\uFF0C\u53EF\u5230\u5BA2\u6237\u7AEF\u300C\u6295\u7A3F\u8349\u7A3F\u300D\u624B\u52A8\u53D1\u5E03\uFF09\uFF1A${backendNote}`
+              : "\u6295\u7A3F\u8349\u7A3F\u5DF2\u63A8\u9001";
             return;
           }
           item.status = "failed";
@@ -21148,8 +21307,8 @@ ${end.comment}` : end.comment;
         publicBatch: "",
         splitInput: "",
         splitFileName: "",
-        splitMethod: "folder",
-        splitAmount: 1,
+        splitMethod: ["folder", "count", "work"].includes(this.config.fastlinkTools?.splitMethod) ? this.config.fastlinkTools.splitMethod : "folder",
+        splitAmount: Math.max(1, Number(this.config.fastlinkTools?.splitAmount) || 1),
         convertInput: "",
         convertFileName: "",
         converted: null,
@@ -21612,8 +21771,18 @@ ${end.comment}` : end.comment;
     async splitFastlinkFile() {
       if (!this.fastlink.splitInput) throw new Error("\u8BF7\u5148\u9009\u62E9\u6216\u7C98\u8D34 JSON/\u79D2\u4F20\u94FE\u63A5");
       const artifacts = splitFastlink(this.fastlink.splitInput, this.fastlink.splitMethod, this.fastlink.splitAmount);
-      for (const artifact of artifacts) downloadText(filenameSafe(artifact.filename), artifact.text);
+      // 大 JSON 会拆出几千份：逐份连续触发下载会把主线程压死（实测 4 千份直接黑屏），
+      // 分批节奏化 + 进度提示，给浏览器消化 blob 下载的时间
+      const batch = 15;
+      for (let index = 0; index < artifacts.length; index += 1) {
+        if (index % batch === 0 && artifacts.length > batch) {
+          this.setProgress(index, artifacts.length, `\u4E0B\u8F7D\u62C6\u5206\u6587\u4EF6 ${Math.min(index + 1, artifacts.length)}/${artifacts.length}`);
+          await sleep(300);
+        }
+        downloadText(filenameSafe(artifacts[index].filename), artifacts[index].text);
+      }
       this.fastlink.artifacts = artifacts;
+      this.fastlink.fileCount = artifacts.reduce((sum, item) => sum + item.fileCount, 0);
       this.toast(`\u5DF2\u62C6\u5206\u4E3A ${artifacts.length} \u4E2A JSON \u6587\u4EF6`, "success");
       this.render();
     }
@@ -21641,6 +21810,12 @@ ${end.comment}` : end.comment;
       this.fastlink.filterDraft = structuredClone(this.config.fastlinkTools);
       this.toast("\u79D2\u4F20\u8BBE\u7F6E\u5DF2\u4FDD\u5B58", "success");
       this.render();
+    }
+    saveSplitFastlinkSettings() {
+      // 拆分参数（方式/数量）跟随 UI 即时保存，下次打开秒传工具箱自动回填
+      this.config = this.configStore.update((config) => {
+        config.fastlinkTools = { ...structuredClone(config.fastlinkTools || {}), splitMethod: this.fastlink.splitMethod, splitAmount: this.fastlink.splitAmount };
+      });
     }
     organizeBuildOptions(mode = null) {
       const location2 = mode === "inPlace" ? "inPlace" : mode ? "library" : this.organize.location;
@@ -21822,7 +21997,7 @@ ${end.comment}` : end.comment;
     updateOrganizeNameMirror(textarea, value, seasonEpisode) {
       const mirror = textarea?.closest?.(".name-stack")?.querySelector(".name-mirror");
       if (!mirror) return;
-      const html = markSeasonEpisodeValueHtml(String(value ?? textarea.value ?? ""), seasonEpisode);
+      const html = markSeasonEpisodeHtml(String(value ?? textarea.value ?? ""), seasonEpisode);
       if (mirror.innerHTML !== html) mirror.innerHTML = html;
       mirror.scrollTop = textarea.scrollTop || 0;
       mirror.scrollLeft = textarea.scrollLeft || 0;
@@ -21845,7 +22020,7 @@ ${end.comment}` : end.comment;
           this.updateOrganizeNameMirror(name, file.newName, file.fields?.seasonEpisode);
         }
         const path = row.querySelector(".target-file strong");
-        if (path) path.innerHTML = markSeasonEpisodeValueHtml(file.targetPath || "", file.fields?.seasonEpisode);
+        if (path) path.innerHTML = markSeasonEpisodeHtml(file.targetPath || "", file.fields?.seasonEpisode);
         const episodeLabel = row.querySelector(".source-file small");
         if (episodeLabel && file.fields?.mediaType === "tv") episodeLabel.textContent = file.fields.seasonEpisode || "\u672A\u8BC6\u522B\u5B63\u96C6";
         const episodeSelect = row.querySelector("[data-episode-file]");
@@ -22094,7 +22269,7 @@ ${end.comment}` : end.comment;
         if (nextRecord) {
           nextRecord.rows = nextRecord.rows.filter((row) => !settledIds.has(String(row.id)));
           if (!nextRecord.rows.length) delete store.records[name];
-          saveOperationRecords(store);
+          if (!saveOperationRecords(store)) this.toast("\u64CD\u4F5C\u8BB0\u5F55\u4FDD\u5B58\u5931\u8D25\uFF1A\u811A\u672C\u5B58\u50A8\u5199\u5165\u672A\u6210\u529F", "warning");
         }
         records.store = store;
         return { ...batchResult(details, []), settled: settledIds.size };
@@ -22121,7 +22296,7 @@ ${end.comment}` : end.comment;
             const groups = buildOrganizeRecordGroups(snapshot, outcome.rows, anchors);
             const store = loadOperationRecords();
             mergeRecordsIntoStore(store, groups, { modeLabel: snapshot.mode.location === "inPlace" ? "\u539F\u5730\u6574\u7406" : "\u6574\u7406\u5165\u5A92\u4F53\u5E93", scopeLabel: scopeName });
-            saveOperationRecords(store);
+            if (!saveOperationRecords(store)) this.toast("\u64CD\u4F5C\u8BB0\u5F55\u4FDD\u5B58\u5931\u8D25\uFF1A\u811A\u672C\u5B58\u50A8\u5199\u5165\u672A\u6210\u529F", "warning");
           } catch (error) {
             this.toast(`\u64CD\u4F5C\u8BB0\u5F55\u4FDD\u5B58\u5931\u8D25\uFF1A${error.message}`, "warning");
           }
@@ -22171,7 +22346,7 @@ ${end.comment}` : end.comment;
       const row = target.closest("[data-file-row]");
       const path = row?.querySelector(".target-file strong");
       const status = row?.querySelector(".target-file small");
-      if (path) path.innerHTML = markSeasonEpisodeValueHtml(task.targetPath || "", task.fields?.seasonEpisode);
+      if (path) path.innerHTML = markSeasonEpisodeHtml(task.targetPath || "", task.fields?.seasonEpisode);
       this.updateOrganizeNameMirror(target, value, task.fields?.seasonEpisode);
       if (status) {
         status.textContent = task.matched ? `\u5DF2\u6821\u51C6 ${task.fields.seasonEpisode}` : value !== task.name ? "\u91CD\u547D\u540D\u5E76\u79FB\u52A8" : "\u79FB\u52A8";
@@ -22364,6 +22539,20 @@ ${end.comment}` : end.comment;
           this.render();
         },
         "rename-execute": () => this.executeRename(),
+        "rename-restore-back": () => {
+          if (this.rename) this.rename.restoreId = null;
+          this.render();
+        },
+        "rename-history-toggle": () => {
+          if (this.rename) this.rename.historyOpen = !this.rename.historyOpen;
+          this.render();
+        },
+        "rename-history-open": (control) => {
+          if (!this.rename) return;
+          this.rename.restoreId = control.dataset.id || null;
+          this.rename.historyOpen = false;
+          this.render();
+        },
         "rename-undo": () => this.undoRename(),
         "records-toggle": (control) => {
           const name = control.dataset.name;
@@ -22392,7 +22581,7 @@ ${end.comment}` : end.comment;
             onAccept: () => {
               const store = this.records?.store || loadOperationRecords();
               if (store.records) delete store.records[name];
-              saveOperationRecords(store);
+              if (!saveOperationRecords(store)) this.toast("\u64CD\u4F5C\u8BB0\u5F55\u4FDD\u5B58\u5931\u8D25\uFF1A\u811A\u672C\u5B58\u50A8\u5199\u5165\u672A\u6210\u529F", "warning");
               if (this.records) {
                 this.records.store = store;
                 if (this.records.expanded === name) this.records.expanded = "";
@@ -23101,6 +23290,14 @@ ${end.comment}` : end.comment;
     async handleClick(event) {
       const control = event.target.closest("[data-action]");
       const action = control?.dataset.action;
+      // 点弹层外任意位置收起历史下拉；点其他动作也顺手收起，避免弹层挂在页面上
+      if (this.rename?.historyOpen && action !== "rename-history-toggle") {
+        this.rename.historyOpen = false;
+        if (!action) {
+          this.render();
+          return;
+        }
+      }
       if (!action) return;
       const handler = this.actionHandlers[action];
       if (!handler) return;
@@ -23204,11 +23401,13 @@ ${end.comment}` : end.comment;
         }
         if (target.id === "fastlink-split-method") {
           this.fastlink.splitMethod = target.value;
+          this.saveSplitFastlinkSettings();
           this.render();
           return;
         }
         if (target.id === "fastlink-split-amount") {
           this.fastlink.splitAmount = Math.max(1, Number(target.value) || 1);
+          this.saveSplitFastlinkSettings();
           return;
         }
         if (target.id === "category-yaml-file") {
