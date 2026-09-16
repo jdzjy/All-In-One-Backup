@@ -45,7 +45,7 @@ from pyrogram.errors import (
     Unauthorized,
 )
 from pyrogram.raw.all import layer
-from pyrogram.raw.core import FutureSalts, Int, MsgContainer, TLObject
+from pyrogram.raw.core import FutureSalt, FutureSalts, Int, MsgContainer, TLObject
 
 from .internals import MsgFactory
 
@@ -76,11 +76,14 @@ class InvalidDC(TransportError):
 
 
 class Result:
-    __slots__ = ("value", "event")
+    __slots__ = ("value", "event", "exception")
 
     def __init__(self):
         self.value: Any = None
         self.event: asyncio.Event = asyncio.Event()
+
+        # Set instead of `value` when no answer can arrive; `send()` re-raises it.
+        self.exception: Exception | None = None
 
 
 class Session:
@@ -95,6 +98,15 @@ class Session:
     STORED_MSG_IDS_MAX_SIZE = 1000 * 2
     CRYPTO_EXECUTOR_WORKERS = 1
     MAX_CONSECUTIVE_IGNORED = 30
+
+    # TDLib asks for a new pool when the pool is empty or the current salt has under a
+    #  minute left, and never more often than once a minute. Both thresholds and the
+    #  count are TDLib's:
+    #  https://github.com/tdlib/td/blob/d1085f9cebc5a62379991ae1652673954f229c1f/td/mtproto/AuthData.h#L233-L245
+    #  https://github.com/tdlib/td/blob/d1085f9cebc5a62379991ae1652673954f229c1f/td/mtproto/SessionConnection.cpp#L949-L954
+    FUTURE_SALTS_COUNT = 64
+    FUTURE_SALTS_THRESHOLD = 60
+    FUTURE_SALTS_INTERVAL = 60
 
     def __init__(
         self,
@@ -127,6 +139,13 @@ class Session:
         self.msg_factory = MsgFactory(self.client)
 
         self.salt = 0
+        self.salt_valid_until: float = 0.0
+
+        # A salt changes every 30 minutes and the old one is accepted for a further 1800
+        #  seconds, so a session holding a single one is wrong within the hour:
+        #  https://core.telegram.org/mtproto/description (Terminology, "Server Salt").
+        self.future_salts: list[FutureSalt] = []
+        self._future_salts_requested_at: float = 0.0
 
         self.ignore_count = 0
 
@@ -182,9 +201,9 @@ class Session:
             round_tasks = set(self.pending_tasks)
             _, running = await asyncio.wait(round_tasks, timeout=self.STOP_TIMEOUT)
 
-            # `invoke` first waits `WAIT_TIMEOUT` for `is_started`, which stopping has
-            #  just cleared, and then another one for an answer that is not coming, so
-            #  a task caught mid-request would hold the shutdown for half a minute.
+            # Both waits inside `invoke` run for `WAIT_TIMEOUT`: for `is_started`, which
+            #  stopping has just cleared, and for an answer that is not coming. So a task
+            #  caught mid-request would hold the shutdown that long.
             for task in running:
                 task.cancel()
 
@@ -300,6 +319,19 @@ class Session:
         self.is_started.clear()
 
         self.stored_msg_ids.clear()
+
+        # The unsent acks name msg ids of the connection this stop closes, which the
+        #  server cannot match after a reconnect.
+        self.pending_acks.clear()
+
+        # A pending waiter's msg id also dies with the connection and nothing re-sends
+        #  the request, so no answer can arrive: failing each waiter here turns a
+        #  silent `WAIT_TIMEOUT` into an immediate, accurate error.
+        for result in self.results.values():
+            result.exception = TimeoutError("Session stopped before an answer arrived")
+            result.event.set()
+
+        self.results.clear()
 
         self.ping_task_event.set()
 
@@ -434,7 +466,16 @@ class Session:
 
             msg_id = None
 
-            if isinstance(msg.body, (raw.types.BadMsgNotification, raw.types.BadServerSalt)):
+            if isinstance(msg.body, raw.types.BadServerSalt):
+                msg_id = msg.body.bad_msg_id
+
+                # Taken here rather than in `send()`, which only ever sees an answer
+                #  somebody awaited. `ping_worker` sends with `wait_response=False`, so a
+                #  salt offered in reply to a ping was dropped and an idle media session
+                #  kept a retired one until every request on it timed out.
+                #  https://core.telegram.org/mtproto/service_messages_about_messages#notice-of-ignored-error-message
+                self.salt = msg.body.new_server_salt
+            elif isinstance(msg.body, raw.types.BadMsgNotification):
                 msg_id = msg.body.bad_msg_id
             elif isinstance(msg.body, (FutureSalts, raw.types.RpcResult)):
                 msg_id = msg.body.req_msg_id
@@ -457,6 +498,40 @@ class Session:
                 pass
             else:
                 self.pending_acks.clear()
+
+    def _current_salt(self, server_time: float) -> int:
+        """Get the salt valid at `server_time`, dropping the ones it has passed"""
+        while self.future_salts and self.future_salts[0].valid_since <= server_time:
+            salt = self.future_salts.pop(0)
+
+            self.salt = salt.salt
+            self.salt_valid_until = salt.valid_until
+
+        return self.salt
+
+    async def _update_future_salts(self) -> None:
+        server_time = self.client.server_time
+
+        if server_time - self._future_salts_requested_at < self.FUTURE_SALTS_INTERVAL:
+            return
+
+        # Promote first, so `salt_valid_until` is the one actually in use right now.
+        self._current_salt(server_time)
+
+        if self.future_salts and self.salt_valid_until - server_time > self.FUTURE_SALTS_THRESHOLD:
+            return
+
+        self._future_salts_requested_at = server_time
+
+        # The same budget `start()` gives its own round trips, rather than the whole
+        #  `WAIT_TIMEOUT`: `stop()` waits on this task, and the request is pre-emptive,
+        #  so an answer that does not arrive is asked for again a minute later.
+        future_salts = await self.send(
+            raw.functions.GetFutureSalts(num=self.FUTURE_SALTS_COUNT),
+            timeout=self.START_TIMEOUT,
+        )
+
+        self.future_salts = sorted(future_salts.salts, key=lambda salt: salt.valid_since)
 
     async def ping_worker(self):
         log.info("PingTask started")
@@ -483,6 +558,15 @@ class Session:
                 break
             except RPCError:
                 pass
+
+            try:
+                await self._update_future_salts()
+
+            # Only logged: the current salt still has a minute of life, and a
+            #  `BadServerSalt` recovers the session anyway. `send` reports an answer
+            #  that never came as `TimeoutError`, which is an `OSError`.
+            except (OSError, RPCError) as e:
+                log.info("Could not get future salts - %s - %s", e.__class__.__name__, e)
 
         log.info("PingTask stopped")
 
@@ -532,8 +616,13 @@ class Session:
         message = await self.msg_factory.create(data)
         msg_id = message.msg_id
 
+        # Held locally as well: `_stop()` empties `self.results` when it fails the
+        #  pending waiters, so the dict entry may be gone by the time the wait ends.
+        pending_result: Result | None = None
+
         if wait_response:
-            self.results[msg_id] = Result()
+            pending_result = Result()
+            self.results[msg_id] = pending_result
 
         log.debug("Sent: %s", message)
 
@@ -541,7 +630,7 @@ class Session:
             self.connection.protocol.crypto_executor,
             mtproto.pack,
             message,
-            self.salt,
+            self._current_salt(self.client.server_time),
             self.session_id,
             self.auth_key,
             self.auth_key_id,
@@ -553,13 +642,18 @@ class Session:
             self.results.pop(msg_id, None)
             raise e
 
-        if wait_response:
+        if pending_result is not None:
             try:
-                await asyncio.wait_for(self.results[msg_id].event.wait(), timeout)
+                await asyncio.wait_for(pending_result.event.wait(), timeout)
             except asyncio.TimeoutError:
                 pass
 
-            result = self.results.pop(msg_id).value
+            self.results.pop(msg_id, None)
+
+            if pending_result.exception is not None:
+                raise pending_result.exception
+
+            result = pending_result.value
 
             if result is None:
                 raise TimeoutError("Request timed out")
@@ -577,8 +671,8 @@ class Session:
                     "%s: %s", BadMsgNotification.__name__, BadMsgNotification(result.error_code)
                 )
 
+            # `handle_packet` has already taken the new salt, so this only re-sends.
             if isinstance(result, raw.types.BadServerSalt):
-                self.salt = result.new_server_salt
                 return await self.send(data, wait_response, timeout)
 
             return result
@@ -591,17 +685,23 @@ class Session:
         sleep_threshold: float = SLEEP_THRESHOLD,
         retry_delay: float = RETRY_DELAY,
     ):
-        try:
-            await asyncio.wait_for(self.is_started.wait(), self.WAIT_TIMEOUT)
-        except asyncio.TimeoutError:
-            pass
-
         if isinstance(query, (raw.functions.InvokeWithoutUpdates, raw.functions.InvokeWithTakeout)):
             inner_query = query.query
         else:
             inner_query = query
 
         query_name = ".".join(inner_query.QUALNAME.split(".")[1:])
+
+        try:
+            await asyncio.wait_for(self.is_started.wait(), self.WAIT_TIMEOUT)
+
+        # Carrying on instead reaches `send()`, which reads `self.connection.protocol` on a
+        #  session whose `connection` is still `None`: `AttributeError: 'NoneType' object has
+        #  no attribute 'protocol'`, naming neither the session nor the query.
+        except asyncio.TimeoutError as e:
+            raise TimeoutError(
+                f'Waited {self.WAIT_TIMEOUT}s to invoke "{query_name}", and {self} is not started'
+            ) from e
 
         for attempt in range(1, retries + 1):
             try:
