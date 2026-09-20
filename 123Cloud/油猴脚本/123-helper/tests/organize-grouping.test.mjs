@@ -23,13 +23,13 @@ const driver = `;
 globalThis.__organize = {
   inferTitle, mediaKey, buildLooseGroups, stripLooseEpisodeTail, looseGroupBaseTitle,
   looseVariantRemainder, organizeVariantTag, injectNameVariant, synthesizeEpisodeCandidatesFromNames,
-  applyVariantTagsForCollisions, parseSeasonEpisode, specialContext, isVideoFile
+  applyVariantTagsForCollisions, parseSeasonEpisode, specialContext, isVideoFile, collectOrganizeGroups
 };
 `;
 const sandbox = { console, Date, Math, JSON, Number, String, Array, Object, Set, Map, RegExp, Intl, Symbol, Error, DOMException };
 vm.createContext(sandbox);
 vm.runInContext(code + driver, sandbox, { filename: "123-helper.user.js" });
-const { buildLooseGroups, stripLooseEpisodeTail, looseGroupBaseTitle, looseVariantRemainder, organizeVariantTag, injectNameVariant, synthesizeEpisodeCandidatesFromNames, applyVariantTagsForCollisions, inferTitle } = sandbox.__organize;
+const { buildLooseGroups, stripLooseEpisodeTail, looseGroupBaseTitle, looseVariantRemainder, organizeVariantTag, injectNameVariant, synthesizeEpisodeCandidatesFromNames, applyVariantTagsForCollisions, inferTitle, parseSeasonEpisode, collectOrganizeGroups } = sandbox.__organize;
 
 const config = { library: { recognition: { customWords: [] } } };
 const file = (name, id = name) => ({ id, name });
@@ -196,3 +196,156 @@ test("同剧各 part 文件归入同一分组，分组标题不带分段标记",
 
 await chain;
 console.log(`\n${passed} 个用例全部通过`);
+
+// —— 「集号+集名」形态：父目录名兜底分组（01 郭女侠怒砸同福店 佟掌柜秒点迷路人） ——
+const formFile = (name, id, extra = {}) => ({ id, name, ...extra });
+
+test("集名形态按父目录名并成一组，季集按前导数字解析", () => {
+  const groups = buildLooseGroups([
+    formFile("01 郭女侠怒砸同福店 佟掌柜秒点迷路人.mkv", "w1", { sourceFolderId: "f1", sourceFolderName: "武林外传", parentId: "900" }),
+    formFile("02 五岳盟主之争.mp4", "w2", { sourceFolderId: "f1", sourceFolderName: "武林外传", parentId: "900" }),
+    formFile("03 群雄争霸夺魁首.rmvb", "w3", { sourceFolderId: "f1", sourceFolderName: "武林外传", parentId: "900" })
+  ], config);
+  assert.equal(groups.length, 1, `应并成一组，实际 ${groups.length}`);
+  assert.equal(groups[0].title, "武林外传");
+  assert.equal(parseSeasonEpisode("01 郭女侠怒砸同福店 佟掌柜秒点迷路人.mkv").seasonEpisode, "S01E01");
+  assert.equal(parseSeasonEpisode("03 群雄争霸夺魁首.rmvb").episode, 3);
+});
+
+test("直接勾选文件时用当前目录名兜底（options.currentDirName）", () => {
+  const grouped = buildLooseGroups([
+    formFile("01 郭女侠怒砸同福店.mkv", "b1", { parentId: "900" }),
+    formFile("02 五岳盟主之争.mp4", "b2", { parentId: "900" })
+  ], config, { currentDirName: "武林外传" });
+  assert.equal(grouped.length, 1);
+  assert.equal(grouped[0].title, "武林外传");
+  // 没有目录名上下文时维持旧行为：逐文件一组
+  const loose = buildLooseGroups([
+    formFile("01 郭女侠怒砸同福店.mkv", "c1"),
+    formFile("02 五岳盟主之争.mp4", "c2")
+  ], config);
+  assert.equal(loose.length, 2);
+});
+
+test("目录名带季号时剥出剧名并记目标季；纯季目录向上找剧名", () => {
+  const seasonFolder = buildLooseGroups([
+    formFile("01 归来.mp4", "d1", { sourceFolderId: "f2", sourceFolderName: "武林外传 第二季", parentId: "901" }),
+    formFile("02 相逢.mp4", "d2", { sourceFolderId: "f2", sourceFolderName: "武林外传 第二季", parentId: "901" })
+  ], config);
+  assert.equal(seasonFolder.length, 1);
+  assert.equal(seasonFolder[0].title, "武林外传");
+  assert.equal(seasonFolder[0].targetSeason, 2);
+
+  const nested = buildLooseGroups([
+    { id: "n1", name: "07 风波.mp4", sourceFolderId: "s2", sourceFolderName: "Season 2", sourceFolders: [{ id: "f1", name: "武林外传", depth: 0 }, { id: "s2", name: "Season 2", depth: 1 }], parentId: "s2" },
+    { id: "n2", name: "08 转机.mp4", sourceFolderId: "s2", sourceFolderName: "Season 2", sourceFolders: [{ id: "f1", name: "武林外传", depth: 0 }, { id: "s2", name: "Season 2", depth: 1 }], parentId: "s2" }
+  ], config);
+  assert.equal(nested.length, 1);
+  assert.equal(nested[0].title, "武林外传");
+  assert.equal(nested[0].targetSeason, 2);
+});
+
+test("带年份/画质标记或年份形前导数字的不算集名形态", () => {
+  const groups = buildLooseGroups([
+    formFile("01 武林外传 2006 1080p.mkv", "g1"),
+    formFile("02 武林外传 2006 1080p.mkv", "g2"),
+    formFile("2001 太空漫游.mkv", "g3")
+  ], config, { currentDirName: "电影合集" });
+  // 前两个是普通命名（含年份/画质）按各自标题识别；2001 开头是年份不是集数，都不并入「电影合集」
+  for (const group of groups) {
+    assert.notEqual(group.title, "电影合集");
+  }
+});
+
+test("parseSeasonEpisode 集名形态边界", () => {
+  assert.equal(parseSeasonEpisode("07 风波.mp4").seasonEpisode, "S01E07");
+  assert.equal(parseSeasonEpisode("07-09 风波.mp4").endEpisode, 9);
+  assert.equal(parseSeasonEpisode("21 Jump Street.mp4").episode, 0, "拉丁集名不启用前导集数");
+  assert.equal(parseSeasonEpisode("2001 太空漫游.mp4").episode, 0, "年份形前导数字不是集数");
+  assert.equal(parseSeasonEpisode("武林外传.S01E01.mkv").episode, 1, "常规 SxxEyy 不受影响");
+});
+
+// —— 带年份的续作目录：按目录分组，不再塌缩成第一部的分组（怪物史瑞克 1-4） ——
+test("带年份的续作子目录各成一组，续作不再并进第一作", () => {
+  const mk = (index, folder, name) => ({ id: `s${index}`, name, relativePath: `${folder}/${name}`, sourceFolderId: `d${index}`, sourceFolderName: folder, parentId: "900" });
+  const frds = "BluRay.1080p.x265.10bit.3Audio.MNHD-FRDS";
+  const groups = buildLooseGroups([
+    mk(0, `怪物史瑞克.Shrek.2001.${frds}`, `Shrek.2001.${frds}.mkv`),
+    mk(0, `怪物史瑞克.Shrek.2001.${frds}`, "cover.jpg"),
+    mk(1, `怪物史瑞克2.Shrek.2.2004.${frds}`, `Shrek.2.2004.${frds}.mkv`),
+    mk(1, `怪物史瑞克2.Shrek.2.2004.${frds}`, "cover.jpg"),
+    mk(2, `怪物史瑞克3.Shrek.the.Third.2007.${frds}`, `Shrek.the.Third.2007.${frds}.mkv`),
+    mk(3, `怪物史瑞克4.Shrek.Forever.After.2010.${frds}`, `Shrek.Forever.After.2010.${frds}.mkv`)
+  ], config);
+  assert.equal(groups.length, 4, `四部续作应各成一组，实际 ${groups.length} 组`);
+  const titles = groups.map((group) => group.title).join("|");
+  assert.ok(titles.includes("怪物史瑞克2"), `第二部应有自己的分组：${titles}`);
+  assert.ok(titles.includes("怪物史瑞克3"), `第三部应有自己的分组：${titles}`);
+});
+
+test("无目录上下文时，带年份的续作文件名也不并入第一部", () => {
+  const groups = buildLooseGroups([
+    formFile("怪物史瑞克.Shrek.2001.BluRay.1080p.mkv", "m1"),
+    formFile("怪物史瑞克2.Shrek.2.2004.BluRay.1080p.mkv", "m2")
+  ], config);
+  assert.equal(groups.length, 2, `年份不相交的续作不应并组，实际 ${groups.length} 组`);
+});
+
+test("文件名带年份时结尾紧贴中文的数字按续作保留（叶问2 ≠ 叶问）", () => {
+  const groups = buildLooseGroups([
+    formFile("叶问.2008.BluRay.mkv", "y1"),
+    formFile("叶问2.2010.BluRay.mkv", "y2")
+  ], config);
+  assert.equal(groups.length, 2);
+});
+
+// —— 合集容器：顶层目录含多个强片名子目录时按子目录各成一组（怪物史莱克案例） ——
+const mkFile = (id, name, size) => ({ id, name, type: 0, size });
+test("合集容器：顶层目录含多个强片名子目录时按子目录各成一组", async () => {
+  const frds = "BluRay.1080p.x265.10bit.3Audio.MNHD-FRDS";
+  const tree = {
+    top: [
+      { id: "d1", name: `怪物史瑞克.Shrek.2001.${frds}`, type: 1 },
+      { id: "d2", name: `怪物史瑞克2.Shrek.2.2004.${frds}`, type: 1 },
+      { id: "d3", name: `怪物史瑞克3.Shrek.the.Third.2007.${frds}`, type: 1 }
+    ],
+    d1: [mkFile("f1", `Shrek.2001.${frds}.mkv`, 100), mkFile("f2", "cover.jpg", 5)],
+    d2: [mkFile("f3", `Shrek.2.2004.${frds}.mkv`, 110), mkFile("f4", "cover.jpg", 5)],
+    d3: [mkFile("f5", `Shrek.the.Third.2007.${frds}.mkv`, 120), mkFile("f6", "cover.jpg", 5)]
+  };
+  const api = { listAll: async (id) => tree[id] || [] };
+  const tmdb = { search: async () => [] };
+  const groups = await collectOrganizeGroups(api, [{ id: "top", name: "怪物史莱克", type: 1 }], config, { tmdb });
+  assert.equal(groups.length, 3, `三个续作子目录应各成一组，实际 ${groups.length}`);
+  assert.ok(groups.every((group) => group.id.startsWith("loose:subfolder:")), "校验失败时落回散文件目录分组兜底");
+  const titles = groups.map((group) => group.title).join("|");
+  assert.ok(titles.includes("怪物史瑞克2"), `第二部应有自己的分组：${titles}`);
+  assert.ok(titles.includes("怪物史瑞克3"), `第三部应有自己的分组：${titles}`);
+});
+
+test("带 TMDB 标记的子目录也算强片名子目录，触发容器拆分", async () => {
+  const tree = {
+    top: [
+      { id: "d1", name: "三体 (2023) {tmdb-808}", type: 1 },
+      { id: "d2", name: "三体 第二季 (2024) {tmdb-809}", type: 1 }
+    ],
+    d1: [mkFile("f1", "三体.S01E01.2023.1080p.mkv", 100)],
+    d2: [mkFile("f2", "三体.S02E01.2024.1080p.mkv", 110)]
+  };
+  const api = { listAll: async (id) => tree[id] || [] };
+  const tmdb = { search: async () => [] };
+  const groups = await collectOrganizeGroups(api, [{ id: "top", name: "三体系列", type: 1 }], config, { tmdb });
+  assert.equal(groups.length, 2, `带标记的两个子目录应各成一组，实际 ${groups.length}`);
+});
+
+test("单电影/剧集目录（子目录都是季目录）仍按整目录一组", async () => {
+  const tree = {
+    top: [{ id: "d1", name: "Season 1", type: 1 }],
+    d1: [mkFile("f1", "三体.S01E01.2023.1080p.mkv", 100), mkFile("f2", "三体.S01E02.2023.1080p.mkv", 101)]
+  };
+  const api = { listAll: async (id) => tree[id] || [] };
+  const tmdb = { details: async (type, id) => ({ id: Number(id), mediaType: type, title: "三体", year: "2023", aliases: [], genres: [], overview: "", posterUrl: "", backdropUrl: "", voteAverage: 0 }) };
+  const groups = await collectOrganizeGroups(api, [{ id: "top", name: "三体 (2023) {tmdb-808}", type: 1 }], config, { tmdb });
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].id, "folder:top", "季目录不算强片名子目录，维持整目录一组");
+});

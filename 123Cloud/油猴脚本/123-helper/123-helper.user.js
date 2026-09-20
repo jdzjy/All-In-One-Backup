@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         123 助手
 // @namespace    local.123-helper
-// @version      1.3.15
+// @version      1.3.16
 // @description  增强 123 云盘网页端与公开分享页的文件、分享与秒传管理：批量重命名、TMDB 媒体整理、文件清理、秒传工具箱（导出 / 转存 / 二级秒传 / 拆分互转 / 影库搜索）、批量分享与投稿推送、登录会话跨浏览器复用。完整功能与使用说明见项目 README。
 // @license      MIT
 // @icon         https://statics.123957.com/static-by-custom/favicon.ico
@@ -5069,7 +5069,9 @@
     }
     async search(query, mediaType = "", options = {}) {
       const path = mediaType === "movie" ? "/search/movie" : mediaType === "tv" ? "/search/tv" : "/search/multi";
-      const params = { query, include_adult: "false", page: 1 };
+      // TMDB 默认（include_adult=false）搜不到 18+ 影视：常规一轮无结果时由调用方
+      // 带 includeAdult=true 补搜，正常名称的搜索结果不受影响。
+      const params = { query, include_adult: options.includeAdult ? "true" : "false", page: 1 };
       const year = String(options.year || "").match(/^(?:19|20)\d{2}$/)?.[0] || "";
       if (year && mediaType === "movie") {
         params.year = year;
@@ -6541,6 +6543,19 @@
   // 头部条目版本必须与脚本 @version 一致（回归测试 changelog-notice.test.mjs 会盯着这条）。
   var CHANGELOG_SEEN_KEY = "Cloud123.Helper.SeenChangelog";
   var SCRIPT_CHANGELOG = [
+    {
+      version: "1.3.16",
+      notes: [
+        "整理认得「01 郭女侠怒砸同福店 佟掌柜秒点迷路人」这种「集号+集名」命名了：文件名里没有剧名时自动拿所在文件夹的名字当剧名、开头的数字当集数，81 集不再被拆成 81 个分组；文件夹名带「第2季 / Season 02」也会认成对应的季",
+        "电影合集整理不再串组：怪物史瑞克/怪物史瑞克2/3/4 这种「一片一目录」的续作合集，勾选最上层目录整理时会把容器认出来，每个电影目录各认各的电影（看目录名里的年份或 TMDB 标记区分），不会再全部合并成第一部的分组、把续作改名成第一部的名字；标题像但年份对不上的也不会硬合并",
+        "整理识别认得【频道】【字幕组】前缀了：【重温经典频道】黑猫警长、[字幕组]番剧 这类名字不再把频道名/组名当成片名，搜 TMDB 也能直接搜到",
+        "BluRay.1080p.Remux 这种写法现在能认出是蓝光原盘（Remux）；NF@ADWeb 这类「片源@发布组」会拆开记：片源 NF、发布组 ADWeb",
+        "按名字搜不到候选时自动换综合搜索（电影+剧集一起搜），手动查询输错类型、或脚本认错类型都不再空手而归；搜不到也会提示换词或填 TMDB ID",
+        "18+ 影视按名字也能搜到了（之前 TMDB 默认不给结果，只能填 ID）",
+        "全40集/共12集这类写法的剧不再被误认成电影",
+        "秒传投稿一键直投：秒传工具箱点「生成二级链接（短链）」生成成功后，自动把短链推送给客户端生成投稿草稿，不用再手动复制粘贴；投稿走短链，频道帖带「秒传链接」复制按钮（点一下复制整条），不再附带秒传 JSON 文件"
+      ]
+    },
     {
       version: "1.3.15",
       notes: [
@@ -9117,6 +9132,43 @@
     const seed = await api.uploadTextFile(fileName, content, parentId, options.signal);
     return { ...seed, fileName };
   }
+  // 二级链接直投投稿时随链接带给客户端的识别上下文：从种子内容里抽真实文件名（前 100 条）
+  // 与总体积，客户端识别剧集/电影、画质、大小才有据可依（对齐旧「JSON 文件发机器人」流程
+  // 的素材；种子名本身没有这些信息，会被当成种子文件自己识别）。轻量正则抽取，不整包 JSON.parse。
+  function buildFastlinkSubmissionContext(name, text) {
+    const content = String(text || "");
+    if (!content) return "";
+    const title = String(name || "").trim();
+    const lines = title ? [`\u{1F3AC}\uFF1A${title}`] : [];
+    const names = [];
+    let totalSize = 0;
+    if (/^\s*\{/.test(content)) {
+      const headerTotal = Number((content.match(/"totalSize"\s*:\s*(\d+)/) || [])[1]);
+      if (Number.isSafeInteger(headerTotal) && headerTotal > 0) totalSize = headerTotal;
+      const pathRe = /"path"\s*:\s*"((?:[^"\\]|\\.)*)"/g;
+      let match = null;
+      while ((match = pathRe.exec(content)) && names.length < 100) {
+        if (match[1]) names.push(match[1]);
+      }
+      if (totalSize <= 0) {
+        const sizeRe = /"size"\s*:\s*(\d+)/g;
+        while ((match = sizeRe.exec(content))) totalSize += Number(match[1]) || 0;
+      }
+    } else {
+      for (const chunk of content.replace(/^123FLCPV2\$%?/i, "").split("$")) {
+        const parts = chunk.split("#");
+        if (parts.length < 3) continue;
+        const size = Number(parts[1]);
+        if (Number.isSafeInteger(size) && size > 0) totalSize += size;
+        const path = parts.slice(2).join("#");
+        if (path && names.length < 100) names.push(path);
+      }
+    }
+    if (!names.length) return "";
+    if (totalSize > 0) lines.push(`\u{1F4BE}\uFF1A${formatBytes(totalSize)}`);
+    for (const item of names) lines.push(`\u{1F4C4}\uFF1A${item}`);
+    return lines.join("\n");
+  }
 
   // src/public-share-cleanup.js
   var PUBLIC_SHARE_AD_CSS = `
@@ -10504,8 +10556,18 @@
   function hasTechnicalContext(value) {
     return /(?:^|[ ._\-])(?:4320p|2160p|1440p|1080[pi]|720p|WEB[ ._-]?DL|WEBRip|Blu[ ._-]?Ray|REMUX|HDTV|UHD|HEVC|AVC|AV1|H[ .]?26[45]|x26[45]|DDP?|AAC|FLAC|TrueHD|DTS|HDR10?\+?|DV)(?:$|[ ._\-])/i.test(String(value || ""));
   }
+  // 「来源@发布组」记法（NF@ADWeb）：@ 前缀是片源平台记号、不是组名的一部分，发布组取
+  // @ 后段（识别预览里来源仍由 mediaSource 映射判成 NF）；「cXcY@FRDS」这类「小组@大组」
+  // 的 PT 记法前缀不是片源，保持原样不动。片源记号表直接取自 mediaSource 别名表。
+  var MEDIA_SOURCE_TOKENS = new Set(DEFAULT_FIXED_MAPPINGS.filter((item) => item?.field === "mediaSource").flatMap((item) => item.aliases || []).map((alias) => String(alias).replace(/[\s._-]+/g, "").toUpperCase()).filter(Boolean));
+  function splitSourceGroupTag(value) {
+    const text2 = String(value || "");
+    const match = text2.match(/^([A-Za-z0-9][A-Za-z0-9.-]*?)@([A-Za-z0-9][A-Za-z0-9.-]*)$/);
+    if (!match) return text2;
+    return MEDIA_SOURCE_TOKENS.has(match[1].replace(/[\s._-]+/g, "").toUpperCase()) ? match[2] : text2;
+  }
   function result(group, start, end, kind, removeStart = start) {
-    return { group: normalizedGroup(group), start, end, removeStart, kind };
+    return { group: splitSourceGroupTag(normalizedGroup(group)), start, end, removeStart, kind };
   }
   function parseReleaseGroup(filename, configured = []) {
     const name = String(filename || "");
@@ -17678,7 +17740,7 @@ ${end.comment}` : end.comment;
   var SEASON_MARKERS_RE = new RegExp(`\u7B2C\\s*([${CHINESE_NUMBER_PATTERN}]+)\\s*\u5B63|\\bS(\\d{1,3})`, "gi");
   var BRACKET_SEASON_TAIL_RE = new RegExp(`^(.*?\\s+(?:${CHINESE_SEASON_PATTERN}|Season\\s*\\d+)).*$`, "i");
   var BRACKET_EPISODE_TAIL_RE = new RegExp(`\\s+\u7B2C\\s*[${CHINESE_NUMBER_PATTERN}]+\\s*${CN_EPISODE_UNIT}.*$`);
-  var INFER_TITLE_TAIL_RE = new RegExp(`(?:${CHINESE_SEASON_PATTERN}|\u7B2C\\s*\\d+\\s*[\u671F\u96C6]|\\d{4}[.\\-]\\d{1,2}[.\\-]\\d{1,2}|\\d{8}|EP?\\s*\\d+|Part\\s*\\d+)\\s*$`, "gi");
+  var INFER_TITLE_TAIL_RE = new RegExp(`(?:${CHINESE_SEASON_PATTERN}|\u7B2C\\s*\\d+\\s*[\u671F\u96C6]|\\d{1,4}\\s*[\u96C6\u8BDD\u8A71]\u5168?|\\d{4}[.\\-]\\d{1,2}[.\\-]\\d{1,2}|\\d{8}|EP?\\s*\\d+|Part\\s*\\d+)\\s*$`, "gi");
   var EPISODE_HINT_DATE_RE = new RegExp("(?<!\\d)((?:19|20)\\d{2})[.\\-_\u5E74](\\d{1,2})[.\\-_\u6708](\\d{1,2})(?:\u65E5)?(?!\\d)");
   var EPISODE_HINT_COMPACT_DATE_RE = new RegExp("(?<!\\d)((?:19|20)\\d{2})(\\d{2})(\\d{2})(?!\\d)");
   var EPISODE_HINT_FRACTION_RE = new RegExp("(?<!\\d)(\\d{1,4})[._-](\\d)(?!\\d)");
@@ -17719,9 +17781,75 @@ ${end.comment}` : end.comment;
     title = stripPartMarkers(title);
     return trimVarietyTitleSuffix(title);
   }
-  function titleFromBrackets(stem) {
-    const matches = [...String(stem || "").matchAll(/[\[【]([^\]】]{2,80})[\]】]/g)].map((match) => match[1].trim());
-    return matches.filter((candidate) => /[\u3400-\u9fff]/.test(candidate) && !/^(?:国语|中字|简繁|1080|2160|WEB|BluRay|BD|HDR)/i.test(candidate)).map(normalizeBracketTitle).find(Boolean) || "";
+  // 括号内容「像标记不像标题」：频道/电视台/字幕组/工作室等前缀标记、清晰度/语言/
+  // 硬解等技术注记。此前 titleFromBrackets 无条件取第一个含中文的括号内容当标题，
+  // 【中国广电重温经典频道】黑猫警长 会把频道名当标题、[字幕组]剧名 会把组名当标题。
+  var BRACKET_TAG_SUFFIX_RE = /(?:频道|电视台|電視台|卫视|衛視|广播电台|廣播電台|电台|電台|字幕组|字幕組|字幕|工作组|工作組|制作组|製作組|发布组|發佈組|發布組|资源组|資源組|压制组|壓制組|翻译组|翻譯組|剪辑组|剪輯組|工作室|影业|影業|传媒|傳媒|小组|小組|联盟|聯盟|出品|压制|壓制|搬运|搬運|录播|錄播|连载中|連載中|陆续更新|陸續更新|持续更新|持續更新)$/;
+  var BRACKET_TAG_WORDS_RE = new RegExp(`^(?:4K|8K|2K|2160|1080|720|480|360|FHD|UHD|HDTV|HQ|SDR|HDR|HDR10|HDR10\\+|Dolby|杜比|杜比視界|杜比视界|全景声|全景聲|Atmos|国语|國語|粤语|粵語|闽南语|閩南語|中字|简繁|簡繁|简中|繁中|简体|簡體|繁体|繁體|中英|双语|雙語|内封|內封|内嵌|內嵌|外挂|外掛|生肉|熟肉|官中|无字|無字|中文字幕|完整版|未删减|未刪減|无删减|無刪減|无水印|高清|蓝光|藍光|原盘|原盤|修复|修復|珍藏|典藏|重制|重製|合集|完结|完結|加长|加長|导演剪辑|導演剪輯|精校|精修|DECSS|REMUX|WEB[- .]?DL|WEBRip|BluRay|Blu[- ]?Ray|HDTV|BDRip|HDRip|DVDRip|DoVi|3D|IMAX|60fps|小体积|小體積|高码|高碼|高压|高壓|官方|独家|獨家|首发|首發|资源|資源|补档|補檔|存档|存檔|DVD|ISO)(?=$|[^A-Za-z0-9])`, "i");
+  var BRACKET_TAG_EPISODE_MARKERS_RE = new RegExp(`(?:第\\s*[\\d零〇一二两兩三四五六七八九十百]+\\s*[集期话話季部場场]|EP?\\s*\\d{1,5}(?=$|[^A-Za-z0-9])|S\\d{1,3}(?:E\\d{1,5})?(?=$|[^A-Za-z0-9])|全\\s*\\d{1,5}\\s*[集话話期]|更新至|更至|\\d{1,5}\\s*[集话話期](?=$|[^一-龥]))`, "i");
+  var BRACKET_TAG_EPISODE_MARKERS_GLOBAL_RE = new RegExp(BRACKET_TAG_EPISODE_MARKERS_RE.source, "gi");
+  // 括号内容去掉季集/集数标记后剩不到 2 个汉字 → 整个括号就是集数注记（如「全36集」），
+  // 而不是「剧名+季集」（如「家有儿女第一部」去标记后还剩剧名）。
+  function bracketEpisodeTailStrips(value) {
+    const residue = String(value || "").replace(BRACKET_TAG_EPISODE_MARKERS_GLOBAL_RE, " ");
+    return ((residue.match(/[\u3400-\u9fff]/g) || []).length < 2);
+  }
+  function bracketContentLooksLikeTag(text2) {
+    const value = String(text2 || "").trim();
+    if (!value) return true;
+    if (/^(?:19|20)\d{2}(?:年|版)?$/.test(value)) return true;
+    if (BRACKET_TAG_SUFFIX_RE.test(value)) return true;
+    if (BRACKET_TAG_WORDS_RE.test(value)) return true;
+    if (BRACKET_TAG_EPISODE_MARKERS_RE.test(value) && bracketEpisodeTailStrips(value)) return true;
+    return false;
+  }
+  // 括号外的残余文本里是否还带着技术/集数标记：带着就不是干净标题
+  // （「第一季全集」「1080P」「星海飞驰篇」这类，说明真正的标题在括号里）。
+  function stemHasTagMarker(text2) {
+    const value = String(text2 || "").trim();
+    if (!value) return false;
+    if (BRACKET_TAG_EPISODE_MARKERS_RE.test(value) || /(?:19|20)\d{2}/.test(value)) return true;
+    if (BRACKET_TAG_WORDS_RE.test(value)) return true;
+    // 标记词可能在文本中段（「甄嬛传 国语版」「琅琊榜 DVD全集」）：按分词逐个试
+    if (value.split(/[\s._·-]+/).some((token) => token && BRACKET_TAG_WORDS_RE.test(token))) return true;
+    // 副标题式后缀（星海飞驰篇/某某章）：主标题在括号里，括号外只是分季名
+    if (/(?:第\s*\d+\s*|[\u3400-\u9fff]{1,8})(?:篇|章)\s*$/.test(value)) return true;
+    if (/\b(?:WEB[- .]?DL|WEBRip|BluRay|Blu[- ]?Ray|REMUX|HDTV|4320p|2160p|1440p|1080[pi]|720p|576p|480p|4K|8K|UHD|HDR\+?|SDR|DoVi|HEVC|AVC|H[. ]?26[45]|x26[45]|AAC|FLAC|DDP?|AC3|TrueHD|DTS|Atmos|DVD|ISO)\b/i.test(value)) return true;
+    return false;
+  }
+  function inferTitlePipeline(stem, mappings) {
+    let working = String(stem || "");
+    working = working.replace(/(?:tmdbid|tmdb)[=\-_: ]?\d{2,10}/gi, " ");
+    working = working.replace(/[_.]+/g, " ");
+    const year = working.match(YEAR);
+    if (year?.index >= 2) working = working.slice(0, year.index);
+    const aliasSource = audioAliasWordSource(mappings);
+    const token = working.match(inferTitleTokenRegex(aliasSource));
+    if (token?.index >= 2) working = working.slice(0, token.index);
+    const chineseLead = working.match(/^([\u3400-\u9fff][\u3400-\u9fff\s·]{1,70}?)(?=\s+[A-Za-z])/);
+    if (chineseLead) working = chineseLead[1];
+    working = working.replace(/\[[^\]]*]|\([^)]*\)|（[^）]*）|【[^】]*】/g, " ");
+    working = stripPartMarkers(working);
+    working = working.replace(INFER_TITLE_TAIL_RE, " ");
+    working = working.replace(/[\s([{【._-]+$/g, " ");
+    return trimVarietyTitleSuffix(toSimplified(working.replace(/\s+/g, " ").trim()));
+  }
+  function inferTitle(value, mappings) {
+    const [rawStem] = splitExtension(String(value || ""));
+    const brackets = [...String(rawStem).matchAll(/[\[【]([^\]】]{2,80})[\]】]/g)].map((match) => match[1].trim());
+    const chineseBrackets = brackets.filter((candidate) => /[\u3400-\u9fff]/.test(candidate));
+    const titleBrackets = chineseBrackets.filter((candidate) => !bracketContentLooksLikeTag(candidate));
+    const stemOutside = rawStem.replace(/[\[【][^\]】]*[\]】]/g, " ");
+    const fromBrackets = titleBrackets.length ? inferTitlePipeline(normalizeBracketTitle(titleBrackets[0]), mappings) : "";
+    const fromOutside = inferTitlePipeline(stemOutside, mappings);
+    // 「【组名/频道名】剧名」结构：括号内是短词、括号外是干净标题（无任何技术/集数
+    // 标记）时取括号外；括号外带着注记时真正的标题仍可能在括号里，保留括号内候选。
+    if (fromBrackets && fromOutside && fromOutside !== fromBrackets) {
+      if (titleBrackets[0].length <= 6 && !stemHasTagMarker(stemOutside)) return fromOutside;
+    }
+    if (fromBrackets) return fromBrackets;
+    if (fromOutside) return fromOutside;
+    return normalizeBracketTitle(chineseBrackets[0] || "");
   }
   function seasonNumberFromText(value) {
     const text2 = String(value || "").normalize("NFKC");
@@ -17729,25 +17857,6 @@ ${end.comment}` : end.comment;
     if (explicit) return Number(explicit[1]);
     const named = text2.match(NAMED_SEASON_RE);
     return named ? chineseInteger2(named[1]) : null;
-  }
-  function inferTitle(value, mappings) {
-    const [rawStem] = splitExtension(String(value || ""));
-    const bracketTitle = titleFromBrackets(rawStem);
-    let stem = bracketTitle || rawStem;
-    stem = stem.replace(/(?:tmdbid|tmdb)[=\-_: ]?\d{2,10}/gi, " ");
-    stem = stem.replace(/[_.]+/g, " ");
-    const year = stem.match(YEAR);
-    if (year?.index >= 2) stem = stem.slice(0, year.index);
-    const aliasSource = audioAliasWordSource(mappings);
-    const token = stem.match(inferTitleTokenRegex(aliasSource));
-    if (token?.index >= 2) stem = stem.slice(0, token.index);
-    const chineseLead = stem.match(/^([\u3400-\u9fff][\u3400-\u9fff\s·]{1,70}?)(?=\s+[A-Za-z])/);
-    if (chineseLead) stem = chineseLead[1];
-    stem = stem.replace(/\[[^\]]*]|\([^)]*\)|【[^】]*】/g, " ");
-    stem = stripPartMarkers(stem);
-    stem = stem.replace(INFER_TITLE_TAIL_RE, " ");
-    stem = stem.replace(/[\s([{【._-]+$/g, " ");
-    return trimVarietyTitleSuffix(toSimplified(stem.replace(/\s+/g, " ").trim()));
   }
   function mediaKey(value) {
     const title = inferTitle(value).replace(/[\s._-]+/g, "").toLocaleLowerCase() || "unknown";
@@ -17882,6 +17991,19 @@ ${end.comment}` : end.comment;
       const season2 = Number(fallbackSeason || 1);
       const episode = Number(match[2]);
       return { season: season2, episode, endEpisode: 0, ...span(match), seasonEpisode: `S${String(season2).padStart(2, "0")}E${String(episode).padStart(2, "0")}` };
+    }
+    // 「01 郭女侠怒砸同福店」集名形态：前导裸数字当集数（可带范围）。4 位数字按年份
+    // 处理（2001 太空漫游不是第 2001 集）；剩余文本要带 CJK（21 Jump Street 不误伤）
+    match = text2.match(/^\s*E?(\d{1,4})(?:\s*[-~到至]\s*E?(\d{1,4}))?(?=$|[ ._\-\u00B7\u3400-\u9fff])/i);
+    if (match) {
+      const season2 = Number(fallbackSeason || 1);
+      const episode = Number(match[1]);
+      const endEpisode = Number(match[2] || 0);
+      const rest2 = text2.slice(match[0].length).replace(/^[ ._\-\u00B7]+/, "").trim();
+      const yearLike = !endEpisode && episode >= 1900 && episode <= 2100;
+      if (episode > 0 && !yearLike && (!rest2 || /[\u3400-\u9fff]/.test(rest2))) {
+        return { season: season2, episode, endEpisode, ...span(match), seasonEpisode: `S${String(season2).padStart(2, "0")}E${String(episode).padStart(2, "0")}${endEpisode ? `-E${String(endEpisode).padStart(2, "0")}` : ""}` };
+      }
     }
     const seasonOnly = text2.match(/(?:Season\s*|\bS)(\d{1,3})(?:\s*季)?\b/i);
     const namedSeason = seasonOnly ? null : text2.match(NAMED_SEASON_RE);
@@ -18019,7 +18141,7 @@ ${end.comment}` : end.comment;
   }
   function inferMediaType(value, hints = []) {
     const text2 = `${value} ${hints.join(" ")}`;
-    if (new RegExp(`\\bS\\d{1,3}(?:E\\d{1,5})?|Season\\s*\\d+|${CHINESE_SEASON_PATTERN}|\u7B2C\\s*[${CHINESE_NUMBER_PATTERN}]+\\s*[\u96C6\u671F]|\u7EFC\u827A|\u771F\u4EBA\u79C0|\u8FDE\u7EED\u5267|\u7535\u89C6\u5267|TV\\b|\u756A\u5267`, "i").test(text2)) return "tv";
+    if (new RegExp(`\\bS\\d{1,3}(?:E\\d{1,5})?|Season\\s*\\d+|${CHINESE_SEASON_PATTERN}|\u7B2C\\s*[${CHINESE_NUMBER_PATTERN}]+\\s*[\u96C6\u671F]|[\u5168\u5171]\\s*\\d{1,4}\\s*[\u96C6\u8BDD\u8A71\u671F]|\u7EFC\u827A|\u771F\u4EBA\u79C0|\u8FDE\u7EED\u5267|\u7535\u89C6\u5267|TV\\b|\u756A\u5267`, "i").test(text2)) return "tv";
     if (/电影|影片|Movie|BluRay|REMUX|WEB[- .]?DL|WEBRip|UHD|2160p|1080p/i.test(text2) && YEAR.test(text2)) return "movie";
     return "unknown";
   }
@@ -18053,10 +18175,16 @@ ${end.comment}` : end.comment;
     const videoFormat = mapped("videoFormat");
     const mediaSource = mapped("mediaSource");
     let resourceType = mapped("resourceType");
-    // UHD.BluRay.2160p.REMUX 这类名字里 Remux 别名跨不过中间的分辨率段，会先被
-    // UHD BluRay/BluRay 条目命中；名字带 REMUX 记号时补升为对应 Remux 资源类型。
-    if (/\bREMUX\b/i.test(text2) && /^(?:UHD BluRay|BluRay)$/.test(resourceType)) {
-      resourceType = resourceType === "UHD BluRay" ? "UHD BluRay Remux" : "BluRay Remux";
+    // Remux 别名跨不过中间的分辨率段：「UHD.BluRay.2160p.REMUX」先被 UHD BluRay/BluRay
+    // 条目命中，「BluRay.1080p.Remux」落到单独的 Remux 条目。名字带 REMUX 记号时按
+    // BluRay/UHD 记号有无补升为对应 Remux 资源类型。
+    if (/\bREMUX\b/i.test(text2) && ["", "Remux", "BluRay", "UHD BluRay"].includes(resourceType)) {
+      const hasUhd = /\bUHD\b|Ultra[\s._-]*HD/i.test(text2);
+      const hasBluRay = /\bBlu[\s._-]*Ray\b|\bBD\b/i.test(text2);
+      if (hasUhd && hasBluRay) resourceType = "UHD BluRay Remux";
+      else if (hasBluRay) resourceType = "BluRay Remux";
+      else if (resourceType === "UHD BluRay") resourceType = "UHD BluRay Remux";
+      else if (resourceType === "BluRay") resourceType = "BluRay Remux";
     }
     const dolbyVision = mapped("dolbyVision");
     const dynamicRange = mapped("dynamicRange");
@@ -19167,6 +19295,27 @@ ${end.comment}` : end.comment;
     const stripped = stripLooseEpisodeTail(title);
     return stripped && !isWeakLooseTitle(stripped) ? stripped : String(title || "").trim();
   }
+  // 文件名带年份时，标题结尾紧贴中文的数字是续作序号（怪物史瑞克2/叶问2），不是
+  // 集数，不剥——剥了会让四部续作塌缩成第一部的同一个分组键。「标题02」这类没有
+  // 年份佐证的仍按集数剥（原行为不变）。
+  function looseGroupBaseTitleForFile(title, text) {
+    const hasYear = /(?:^|[^0-9])(?:19|20)\d{2}(?:[^0-9]|$)/.test(String(text || ""));
+    if (hasYear && /[\u3400-\u9fff]\d{1,4}$/.test(String(title || "").trim())) {
+      const value = String(title || "").trim();
+      return value;
+    }
+    return looseGroupBaseTitle(title);
+  }
+  // 文件名/目录名里出现的年份集合：年份不相交的两组是不同作品（史瑞克 2001 vs
+  // 史瑞克2 2004），标题再像也不做前缀归并
+  function looseTextYears(names) {
+    const years = new Set();
+    for (const name of names || []) {
+      const matches = String(name || "").match(/(?:19|20)\d{2}/g);
+      if (matches) for (const value of matches) years.add(value);
+    }
+    return years;
+  }
   function looseGroupKeyTitle(baseTitle, text) {
     const normalized = String(baseTitle || "").replace(/[\s._-]+/g, "").toLocaleLowerCase() || "unknown";
     const season = seasonNumberFromText(text);
@@ -19182,7 +19331,54 @@ ${end.comment}` : end.comment;
     if (seasonNumberFromText(rest) !== null) return "";
     return rest;
   }
-  function buildLooseGroups(loose, config) {
+  // 「01 郭女侠怒砸同福店 佟掌柜秒点迷路人」这类「集号+集名」文件名：前导 1-4 位集号
+  // （可带范围）+ 集名文本，文件名里没有剧名。集名带年份/分辨率/来源/SxxEyy 等真剧名
+  // 特征、或前导数字本身像年份（2001 太空漫游）时不算，走普通识别。
+  var EPISODE_TITLE_FORM_MARKER_RE = new RegExp(`(?:19|20)\\d{2}|S\\d{1,3}(?:E\\d{1,5})?|\\u7B2C\\s*\\d{1,3}\\s*\\u5B63|\\b(?:EP?\\s*\\d{1,5}|${SEASON_TECHNICAL_SUFFIX_SOURCE})\\b`, "i");
+  function parseEpisodeTitleForm(name) {
+    const stem = String(name || "").replace(/\.[a-z0-9]{1,5}$/i, "").trim();
+    const match = stem.match(/^E?(\d{1,4})(?:\s*[-~\u5230\u81F3]\s*E?(\d{1,4}))?[ ._\-\u00B7]+(\S.*)$/i);
+    if (!match) return null;
+    const episode = Number(match[1]);
+    const endEpisode = Number(match[2] || 0);
+    const episodeTitle = match[3].trim();
+    if (episode <= 0 || (episode >= 1900 && episode <= 2100 && !endEpisode)) return null;
+    if (!/[\u3400-\u9fff]/.test(episodeTitle)) return null;
+    if (EPISODE_TITLE_FORM_MARKER_RE.test(episodeTitle)) return null;
+    return { episode, endEpisode, episodeTitle };
+  }
+  // 集名形态文件目录名里剥季号：纯季目录不算剧名；「武林外传 第2季 / Season 02」
+  // 剥出剧名并把季号带出来当目标季。
+  function organizeEpisodeFormFolderContext(name, mappings) {
+    const text2 = normalizedTitle(name);
+    if (!text2 || isWeakOrganizeFolderTitle(text2, mappings)) return null;
+    const season = seasonNumberFromText(text2);
+    if (!Number.isInteger(season)) return { title: cleanName(text2) || text2, season: null };
+    const stripped = text2.replace(new RegExp(`\\s*[\\(（\\[【~～\\-]*\\s*(?:Season\\s*|S)0*${season}\\s*[)）\\]】]*$`, "i"), "").replace(new RegExp(`\\s*[\\(（\\[【~～\\-]*\\s*\\u7B2C\\s*[${CHINESE_NUMBER_PATTERN}]+\\s*\\u5B63\\s*[)）\\]】]*$`), "").replace(/[\s._\-·（(【【]+$/, "").trim();
+    if (!stripped || isWeakLooseTitle(stripped)) return null;
+    return { title: cleanName(stripped) || stripped, season: season > 0 ? season : null };
+  }
+  // 集名形态的剧名回退（GuessIt/Sonarr 的父目录兜底）：按「直接父目录 → 更上层目录
+  // → 当前目录」找第一个非弱标题的目录名当剧名；纯季目录（Season 2/第2季）不算剧名，
+  // 但其中的季号会在找到剧名时一并带上。
+  function episodeFormFolderContext(file, options, mappings) {
+    const candidates = [];
+    if (file.sourceFolderName) candidates.push(file.sourceFolderName);
+    const folders = [...(file.sourceFolders || [])].sort((left, right) => (Number(right.depth) || 0) - (Number(left.depth) || 0));
+    for (const folder of folders) {
+      if (folder && folder.name) candidates.push(folder.name);
+    }
+    if (options && options.currentDirName) candidates.push(options.currentDirName);
+    let season = null;
+    for (const name of candidates) {
+      const folderSeason = targetSeasonFromFolder(name);
+      if (season === null && Number.isInteger(folderSeason) && folderSeason > 0) season = folderSeason;
+      const context = organizeEpisodeFormFolderContext(name, mappings);
+      if (context) return { title: context.title, season: context.season === null ? season : context.season };
+    }
+    return null;
+  }
+  function buildLooseGroups(loose, config, options = {}) {
     const groups = [];
     const grouped = /* @__PURE__ */ new Map();
     const customWords = config.library?.recognition?.customWords || [];
@@ -19190,16 +19386,45 @@ ${end.comment}` : end.comment;
     for (const file of loose) {
       const text2 = looseRecognitionText(file, customWords);
       const title = inferTitle(text2, fixedMappings);
+      // 目录扫描的散文件：直接父目录是「一目录一部影片」的强片名目录（非弱标题且带
+      // 年份、不含季词）时按目录并组，不按文件名标题归并——「怪物史瑞克/怪物史瑞克2/
+      // 怪物史瑞克3/怪物史瑞克4」四个续作目录若按标题归并会塌缩成第一部的分组，
+      // 续作全被改名成第一部的名字。季目录/无年份目录不适用（剧集仍按标题归组）。
+      const subfolderName = String(file.sourceFolderName || "");
+      const subfolderTitle = subfolderName && !isWeakOrganizeFolderTitle(subfolderName, fixedMappings)
+        && /(?:^|[^0-9])(?:19|20)\d{2}(?:[^0-9]|$)/.test(subfolderName)
+        && seasonNumberFromText(subfolderName) === null
+        ? cleanName(normalizedTitle(subfolderName)) || normalizedTitle(subfolderName)
+        : "";
+      // 「01 集名」形态且能找到非弱父目录名：全部并进「父目录剧名」一组，不再逐集成组
+      const episodeForm = !subfolderTitle ? parseEpisodeTitleForm(file.name) : null;
+      const folderCtx = episodeForm ? episodeFormFolderContext(file, options, fixedMappings) : null;
+      if (folderCtx && !file.targetSeason && folderCtx.season) file.targetSeason = folderCtx.season;
       const unidentified = isWeakLooseTitle(title);
       const targetSeason = Number(file.targetSeason || 0);
       // 结尾集号（01 / 第01集 / E02…）不参与分组键，同一标题的各集归为一组。
-      const baseTitle = unidentified ? title : looseGroupBaseTitle(title);
-      const key = unidentified ? `unknown:${looseGroupAnchor(file)}:${targetSeason || ""}` : looseGroupKeyTitle(baseTitle, text2);
-      if (!grouped.has(key)) grouped.set(key, { key, baseTitle, files: [], names: [], titles: [], unidentified, targetSeason: targetSeason || null });
+      let baseTitle;
+      let key;
+      let folderTitle = "";
+      if (subfolderTitle) {
+        folderTitle = subfolderTitle;
+        baseTitle = subfolderTitle;
+        key = `subfolder:${file.sourceFolderId || looseGroupAnchor(file)}:${String(subfolderTitle).replace(/[\s._-]+/g, "").toLocaleLowerCase()}`;
+      } else if (folderCtx) {
+        folderTitle = folderCtx.title;
+        baseTitle = folderTitle;
+        const normalizedFolder = String(folderTitle).replace(/[\s._-]+/g, "").toLocaleLowerCase() || "unknown";
+        key = `epform:${normalizedFolder}${folderCtx.season ? `:s${String(folderCtx.season).padStart(3, "0")}` : ""}:${looseGroupAnchor(file)}`;
+      } else {
+        baseTitle = unidentified ? title : looseGroupBaseTitleForFile(title, text2);
+        key = unidentified ? `unknown:${looseGroupAnchor(file)}:${targetSeason || ""}` : looseGroupKeyTitle(baseTitle, text2);
+      }
+      if (!grouped.has(key)) grouped.set(key, { key, baseTitle, files: [], names: [], titles: [], unidentified: true, targetSeason: targetSeason || null, folderTitle });
       const group = grouped.get(key);
       group.files.push(file);
       group.names.push(text2);
       group.titles.push(title);
+      if (folderTitle && !group.folderTitle) group.folderTitle = folderTitle;
       if (targetSeason && !group.targetSeason) group.targetSeason = targetSeason;
       group.unidentified &&= unidentified;
     }
@@ -19214,10 +19439,15 @@ ${end.comment}` : end.comment;
       }
       let base = null;
       let baseRemainder = "";
+      const entryYears = looseTextYears(entry.names);
       for (const candidate of mergedEntries) {
         if (candidate.unidentified || !candidate.baseTitle) continue;
         const remainder = looseVariantRemainder(entry.baseTitle, candidate.baseTitle);
-        if (remainder && (!base || candidate.baseTitle.length > base.baseTitle.length)) {
+        if (!remainder) continue;
+        // 双方都带年份且年份不相交 = 不同作品（史瑞克 2001 vs 史瑞克2 2004），不并
+        const candidateYears = looseTextYears(candidate.names);
+        if (entryYears.size && candidateYears.size && ![...entryYears].some((year) => candidateYears.has(year))) continue;
+        if (!base || candidate.baseTitle.length > base.baseTitle.length) {
           base = candidate;
           baseRemainder = remainder;
         }
@@ -19276,8 +19506,14 @@ ${end.comment}` : end.comment;
         if (!candidates.length && errors.some((error) => /配置 TMDB/.test(String(error?.message || "")))) throw errors.find((error) => /配置 TMDB/.test(String(error?.message || "")));
         media = normalizeTmdbMedia(chooseTmdbCandidate(candidates, fields) || candidates[0]);
       } else {
-        const candidates = await searchTmdbCandidates(tmdb, fields, { ...options, sourceTitle: title });
-        media = normalizeTmdbMedia(chooseTmdbCandidate(candidates, fields));
+        const sourceOptions = { ...options, sourceTitle: title };
+        let candidates = await searchTmdbCandidates(tmdb, fields, sourceOptions);
+        let chosen = normalizeTmdbMedia(chooseTmdbCandidate(candidates, fields));
+        if (!chosen && ["movie", "tv"].includes(fields.mediaType)) {
+          candidates = [...candidates, ...await searchTmdbCandidates(tmdb, fields, { ...sourceOptions, typeOverride: "" })];
+          chosen = normalizeTmdbMedia(chooseTmdbCandidate(candidates, fields));
+        }
+        media = chosen;
       }
       if (!media || !fields.tmdbId && !tmdbCandidateHasExactTitle(media, fields.title)) return { available: true, media: null };
       return { available: true, media };
@@ -19334,6 +19570,44 @@ ${end.comment}` : end.comment;
       if (Number(item.type) === 1) {
         const scanned = await scanFolder(api, item, options);
         if (!scanned.files.some((file) => isVideoFile(file.name))) continue;
+        const mappings = config?.library?.recognition?.fixedMappings;
+        // 「一目录一部的续作/系列合集」容器：直接子目录里有 ≥2 个「非弱标题 + 带年份或
+        // 带 {tmdb-N} 标记、不含季词」的强片名目录时，顶层只是容器（怪物史莱克/怪物
+        // 史瑞克+2+3+4）。若仍按顶层目录识别，TMDB 会模糊命中第一部（怪物史莱克→
+        // Shrek 2001），整棵树含全部续作都被改名成第一部——按强片名子目录各成一组、
+        // 各认各的；校验不过的子目录文件落回散文件分组（还有目录名兜底分组托底）。
+        const childFolders = scanned.sourceFolders.filter((folder) => Number(folder.depth) === 1 && folder.id && folder.name);
+        const isStrongChildFolder = (name) => !isWeakOrganizeFolderTitle(name, mappings)
+          && (/(?:^|[^0-9])(?:19|20)\d{2}(?:[^0-9]|$)/.test(name) || /\{\s*tmdb-?\d+\s*\}/i.test(name))
+          && seasonNumberFromText(name) === null;
+        const strongChildren = childFolders.filter((folder) => isStrongChildFolder(folder.name));
+        if (strongChildren.length >= 2) {
+          const claimed = /* @__PURE__ */ new Set();
+          for (const child of strongChildren) {
+            const childFiles = scanned.files.filter((file) => String(file.relativePath || "").startsWith(`${child.name}/`));
+            if (!childFiles.length) continue;
+            childFiles.forEach((file) => claimed.add(String(file.id)));
+            if (!childFiles.some((file) => isVideoFile(file.name))) continue;
+            const validation = await validateStrongFolderTitle(options.tmdb, child.name, config, options);
+            if (!validation.available || validation.media) {
+              groups.push({
+                id: `folder:${child.id}`,
+                title: child.name,
+                files: childFiles,
+                sourceFolders: scanned.sourceFolders,
+                sourceFolderId: child.id,
+                sourceFolderName: child.name,
+                media: validation.media || void 0
+              });
+            } else {
+              for (const file of childFiles) loose.push({ ...file, sourceFolders: scanned.sourceFolders });
+            }
+          }
+          for (const file of scanned.files) {
+            if (!claimed.has(String(file.id))) loose.push({ ...file, sourceFolders: scanned.sourceFolders });
+          }
+          continue;
+        }
         const targetSeason = targetSeasonFromFolder(item.name);
         if (!isWeakOrganizeFolderTitle(item.name, config?.library?.recognition?.fixedMappings)) {
           const validation = await validateStrongFolderTitle(options.tmdb, item.name, config, options);
@@ -19364,7 +19638,7 @@ ${end.comment}` : end.comment;
         loose.push({ ...item, relativePath: item.name, sourceFolders: [] });
       }
     }
-    return [...groups, ...buildLooseGroups(loose, config)];
+    return [...groups, ...buildLooseGroups(loose, config, options)];
   }
   function inferTitleLength(value) {
     return mediaKey(value).length || String(value || "").length;
@@ -19388,12 +19662,12 @@ ${end.comment}` : end.comment;
     return output;
   }
   async function searchTmdbCandidates(tmdb, fields, options = {}) {
-    const mediaType = fields.mediaType === "unknown" ? "" : fields.mediaType;
-    const runSearch = async (searchOptions) => {
+    const mediaType = typeof options.typeOverride === "string" ? options.typeOverride : fields.mediaType === "unknown" ? "" : fields.mediaType;
+    const runSearch = async (searchOptions, includeAdult = false) => {
       const queries = [...tmdbSearchQueries(options.sourceTitle || fields.title), ...tmdbSearchQueries(fields.title)].filter((query, index, items) => items.findIndex((item) => item.toLocaleLowerCase() === query.toLocaleLowerCase()) === index);
       // 多组查询词 2 并发（TMDB 限流宽松）：串行时一个标题最多 8 个查询逐个等，
       // 是整理预览"识别媒体"阶段的主要等待。
-      const batches = await mapLimit(queries, 2, (query) => (searchOptions ? tmdb.search(query, mediaType, searchOptions) : tmdb.search(query, mediaType)), { signal: options.signal });
+      const batches = await mapLimit(queries, 2, (query) => tmdb.search(query, mediaType, { ...(searchOptions || {}), includeAdult }), { signal: options.signal });
       const results2 = [];
       for (const batch of batches || []) for (const candidate of batch || []) results2.push(candidate);
       return results2;
@@ -19407,6 +19681,9 @@ ${end.comment}` : end.comment;
         results = [...results, ...await runSearch(void 0)];
       }
     }
+    // 18+ 影视在 include_adult=false 的搜索里一条都不会返回：常规轮全空时带
+    // includeAdult 再补一轮，命中判断仍走后续打分，不影响正常资源。
+    if (!results.length) results = await runSearch(void 0, true);
     const byId = /* @__PURE__ */ new Map();
     for (const item of results.map(normalizeTmdbMedia).filter(Boolean)) byId.set(`${item.mediaType}:${item.id}`, item);
     if (typeof tmdb.details !== "function") return [...byId.values()];
@@ -19449,8 +19726,15 @@ ${end.comment}` : end.comment;
         if (!candidates2.length && errors.some((error) => /配置 TMDB/.test(String(error?.message || "")))) throw errors.find((error) => /配置 TMDB/.test(String(error?.message || "")));
         return normalizeTmdbMedia(chooseTmdbCandidate(candidates2, fields) || candidates2[0]);
       }
-      const candidates = await searchTmdbCandidates(tmdb, fields, { ...options, sourceTitle: group.title });
-      const candidate = normalizeTmdbMedia(chooseTmdbCandidate(candidates, fields));
+      const sourceOptions = { ...options, sourceTitle: group.title };
+      let candidates = await searchTmdbCandidates(tmdb, fields, sourceOptions);
+      let candidate = normalizeTmdbMedia(chooseTmdbCandidate(candidates, fields));
+      if (!candidate && ["movie", "tv"].includes(fields.mediaType)) {
+        // 类型推断只是猜测（如把有年份+分辨率的剧名当成电影）：单一类型搜不到时放宽到
+        // 综合搜索（电影+剧集）重试一轮，命中与否仍由打分器把关。
+        candidates = [...candidates, ...await searchTmdbCandidates(tmdb, fields, { ...sourceOptions, typeOverride: "" })];
+        candidate = normalizeTmdbMedia(chooseTmdbCandidate(candidates, fields));
+      }
       if (!candidate) return null;
       // 注意不能用 englishTitles 非空判断"详情已补全"：英文原名的影片搜索结果天然带
       // 原名这个英文标题，会短路跳过 details（alternative_titles/translations）补全，
@@ -22019,7 +22303,8 @@ ${end.comment}` : end.comment;
             method: "POST",
             // 结构化直投：链接数组直接给客户端后端扫成草稿（跳过归属判断，快一倍）；
             // 老后端不认识 links 字段时会返回 400，此时回退拼接文本形式。
-            body: { links: batch.map((item) => ({ name: item.name || "", url: item.url || "" })) },
+            // sourceText：秒传直投附带的真实文件名/大小上下文（分享直投没有此字段）
+            body: { links: batch.map((item) => ({ name: item.name || "", url: item.url || "", ...(item.sourceText ? { sourceText: String(item.sourceText) } : {}) })) },
             signal: options.signal,
             timeoutMs: options.timeoutMs || DEFAULT_TIMEOUT_MS
           }).catch(async (error) => {
@@ -22226,7 +22511,7 @@ ${end.comment}` : end.comment;
     const exportRows = state.items.map((item) => `<tr><td>${escapeHtml(item.name)}</td><td>${Number(item.type) === 1 ? "\u6587\u4EF6\u5939\uFF08\u9012\u5F52\uFF09" : "\u6587\u4EF6"}</td></tr>`).join("");
     const artifactCards = state.artifacts.slice(0, 30);
     const generatedLinks = state.artifacts.length ? `<div class="fastlink-results">${artifactCards.map((artifact, index) => `<section class="fastlink-result-card"><div><strong>${escapeHtml(artifact.item?.name || artifact.filename || `第 ${index + 1} 份`)}</strong><span>${artifact.fileCount} 个文件</span></div><textarea readonly aria-label="${escapeHtml(artifact.item?.name || artifact.filename || `第 ${index + 1} 份`)} 秒传链接">${escapeHtml(artifact.link || "")}</textarea><button class="button" data-action="fastlink-copy-link" data-index="${index}">${icon("copy", 15)}复制链接</button></section>`).join("")}</div>${state.artifacts.length > artifactCards.length ? `<span class="footer-note">链接仅回显前 ${artifactCards.length} 份（共 ${state.artifacts.length} 份），其余文件已下载到本地，不逐条塞进页面。</span>` : ""}` : "";
-    const exportPane = state.items.length ? `${notice("\u6BCF\u4E2A\u9876\u5C42\u9879\u76EE\u4F1A\u5206\u522B\u751F\u6210\u9879\u76EE\u683C\u5F0F\u7684 JSON \u4E0E 123FLCPV2 \u94FE\u63A5\uFF0C\u5BFC\u51FA\u4E0D\u4F1A\u4FEE\u6539\u6E90\u6587\u4EF6\u3002", "", "download")}<div class="table-wrap"><table><thead><tr><th>\u9876\u5C42\u9879\u76EE</th><th>\u8303\u56F4</th></tr></thead><tbody>${exportRows}</tbody></table></div><div class="button-row"><button class="button" data-action="fastlink-secondary-generate">${icon("link", 15)}\u751F\u6210\u4E8C\u7EA7\u94FE\u63A5\uFF08\u77ED\u94FE\uFF09</button><button class="button" data-action="fastlink-secondary-save-link">${icon("download", 15)}\u628A\u5DF2\u751F\u6210\u94FE\u63A5\u4FDD\u5B58\u5230\u4E91\u76D8</button></div>${state.artifacts.length ? `${notice(`\u5DF2\u5BFC\u51FA ${state.artifacts.length} \u4E2A\u79D2\u4F20\u6587\u4EF6\uFF0C\u5171\u5305\u542B ${state.fileCount} \u4E2A\u4E91\u76D8\u6587\u4EF6\u3002`, "success", "check")}${generatedLinks}` : ""}` : notice("\u5BFC\u51FA\u9700\u8981\u5148\u5728\u6587\u4EF6\u5217\u8868\u9009\u62E9\u4E00\u4E2A\u6216\u591A\u4E2A\u6587\u4EF6\u3001\u6587\u4EF6\u5939\u3002", "warning", "alert");
+    const exportPane = state.items.length ? `${notice("\u6BCF\u4E2A\u9876\u5C42\u9879\u76EE\u4F1A\u5206\u522B\u751F\u6210\u9879\u76EE\u683C\u5F0F\u7684 JSON \u4E0E 123FLCPV2 \u94FE\u63A5\uFF0C\u5BFC\u51FA\u4E0D\u4F1A\u4FEE\u6539\u6E90\u6587\u4EF6\u3002\u70B9\u300C\u751F\u6210\u4E8C\u7EA7\u94FE\u63A5\uFF08\u77ED\u94FE\uFF09\u300D\u6210\u529F\u540E\u4F1A\u81EA\u52A8\u628A\u77ED\u94FE\u63A8\u9001\u5230\u5BA2\u6237\u7AEF\u751F\u6210\u6295\u7A3F\u8349\u7A3F\u3002", "", "download")}<div class="table-wrap"><table><thead><tr><th>\u9876\u5C42\u9879\u76EE</th><th>\u8303\u56F4</th></tr></thead><tbody>${exportRows}</tbody></table></div><div class="button-row"><button class="button" data-action="fastlink-secondary-generate">${icon("link", 15)}\u751F\u6210\u4E8C\u7EA7\u94FE\u63A5\uFF08\u77ED\u94FE\uFF09</button><button class="button" data-action="fastlink-secondary-save-link">${icon("download", 15)}\u628A\u5DF2\u751F\u6210\u94FE\u63A5\u4FDD\u5B58\u5230\u4E91\u76D8</button></div>${state.artifacts.length ? `${notice(`\u5DF2\u5BFC\u51FA ${state.artifacts.length} \u4E2A\u79D2\u4F20\u6587\u4EF6\uFF0C\u5171\u5305\u542B ${state.fileCount} \u4E2A\u4E91\u76D8\u6587\u4EF6\u3002`, "success", "check")}${generatedLinks}` : ""}` : notice("\u5BFC\u51FA\u9700\u8981\u5148\u5728\u6587\u4EF6\u5217\u8868\u9009\u62E9\u4E00\u4E2A\u6216\u591A\u4E2A\u6587\u4EF6\u3001\u6587\u4EF6\u5939\u3002", "warning", "alert");
     const importPane = `${notice("\u652F\u6301 123FastLink JSON\u3001V1/V2 \u79D2\u4F20\u6587\u672C\u3001.123share \u4E0E\u4E8C\u7EA7\u79D2\u4F20\u77ED\u94FE\uFF08\u81EA\u52A8\u8BC6\u522B\uFF09\uFF1B\u6587\u4EF6\u4F1A\u5BFC\u5165\u5230\u5F53\u524D\u76EE\u5F55\u5E76\u4FDD\u7559\u539F\u76EE\u5F55\u7ED3\u6784\u3002", "", "import")}<div class="button-row"><button class="button" data-action="fastlink-secondary-from-file">${icon("folderOpen", 15)}\u4ECE\u52FE\u9009\u7684\u79D2\u4F20\u6587\u4EF6\u8F6C\u5B58</button><button class="button" data-action="fastlink-file-open">${icon("folderOpen", 15)}\u9009\u62E9\u672C\u5730\u79D2\u4F20\u6587\u4EF6</button></div><span class="footer-note">${state.importFile ? `\u5DF2\u9009\u62E9\uFF1A${escapeHtml(state.importFileName || "")}\uFF08${formatBytes(state.importFileSize)}\uFF09\u00B7 \u70B9\u300C\u5F00\u59CB\u8F6C\u5B58\u300D\u65F6\u6D41\u5F0F\u8BFB\u53D6\uFF0C\u4E0D\u6574\u8BFB\u8FDB\u5185\u5B58` : escapeHtml(state.importFileName || "\u672A\u9009\u62E9\u672C\u5730\u6587\u4EF6")}</span>${state.importFile ? `<button class="button compact" data-action="fastlink-import-file-clear">\u6E05\u9664\u6587\u4EF6</button>` : ""}<input id="fastlink-file" type="file" accept=".json,.txt,.123fastlink,.123share,application/json,text/plain" hidden>${state.input && state.input.length > 2000000 ? `<span class="footer-note">\u7C98\u8D34\u5185\u5BB9\u8F83\u5927\uFF08${formatBytes(stringByteSize(state.input))}\uFF09\uFF0C\u5DF2\u4FDD\u7559\u4F46\u4E0D\u56DE\u663E\uFF0C\u53EF\u76F4\u63A5\u5F00\u59CB\u8F6C\u5B58</span>` : ""}<div class="editor-surface"><textarea id="fastlink-input" placeholder="\u7C98\u8D34\u79D2\u4F20 JSON\u3001\u94FE\u63A5\u3001.123share \u6216\u4E8C\u7EA7\u79D2\u4F20\u77ED\u94FE">${state.input && state.input.length > 2000000 ? "" : escapeHtml(state.input || "")}</textarea></div>`;
     const publicPane = `${notice("\u8F93\u5165 123 \u4E91\u76D8\u5206\u4EAB\u94FE\u63A5\uFF0C\u9012\u5F52\u8BFB\u53D6\u5176\u4E2D\u7684\u6587\u4EF6\u5E76\u4E0B\u8F7D\u53EF\u76F4\u63A5\u8F6C\u5B58\u7684\u6807\u51C6 JSON\uFF1B\u540C\u65F6\u4FDD\u7559 123FLCPV2 \u94FE\u63A5\u4F9B\u590D\u5236\u3002", "", "share")}<label class="field"><span>\u5206\u4EAB\u94FE\u63A5 / Key</span><input id="fastlink-public-input" value="${escapeHtml(state.publicInput || "")}" placeholder="\u652F\u6301 www.123865.com/s/... \u4E0E share.123pan.cn/123pan/..."></label><label class="field"><span>\u63D0\u53D6\u7801\uFF08\u53EF\u9009\uFF0C\u94FE\u63A5\u5DF2\u5305\u542B\u65F6\u65E0\u9700\u586B\u5199\uFF09</span><input id="fastlink-public-password" value="${escapeHtml(state.publicPassword || "")}"></label>`;
     const batchPane = `${notice("\u6BCF\u884C\u4E00\u4E2A\u5206\u4EAB\u94FE\u63A5\u3001Key \u6216\u5E26\u63D0\u53D6\u7801\u7684\u6587\u672C\uFF1B\u6BCF\u4E2A\u5206\u4EAB\u4F1A\u72EC\u7ACB\u4E0B\u8F7D\u4E00\u4E2A\u6807\u51C6 JSON\u3002", "", "share")}<div class="editor-surface"><textarea id="fastlink-public-batch" placeholder="https://www.123865.com/s/xxxx?pwd=ABCD&#10;xxxx \u63D0\u53D6\u7801:ABCD">${escapeHtml(state.publicBatch || "")}</textarea></div>`;
@@ -22412,7 +22697,7 @@ ${end.comment}` : end.comment;
     const tool = ui.organize.tool;
     if (!tool || tool.type !== "search" || tool.groupId !== group.id) return "";
     if (tool.loading) return `<div class="candidate-loading">${icon("loading", 22, "spin")} \u6B63\u5728\u67E5\u8BE2 TMDB</div>`;
-    if (!tool.candidates?.length) return "";
+    if (!tool.candidates?.length) return notice("\u6CA1\u6709\u67E5\u5230\u5019\u9009\uFF1A\u8BD5\u8BD5\u53EA\u7559\u5267\u540D\uFF08\u53EF\u5E26\u5E74\u4EFD\uFF09\u518D\u67E5\uFF0C\u6216\u76F4\u63A5\u586B TMDB ID\u3002", "info");
     return `<div class="candidate-rail">${tool.candidates.map((candidate, index) => {
       const type = candidate.media_type || candidate.mediaType;
       const title = candidate.title || candidate.name || "TMDB \u7ED3\u679C";
@@ -25270,13 +25555,40 @@ ${end.comment}` : end.comment;
         const artifact = outcome.result;
         this.fastlink.artifacts = [artifact];
         this.fastlink.fileCount = artifact.fileCount;
-        if (this.completeFastlinkTask(outcome.task, artifact)) return;
-        this.toast("\u4E8C\u7EA7\u79D2\u4F20\u94FE\u63A5\u5DF2\u751F\u6210\uFF0C\u53EF\u590D\u5236\u6216\u76F4\u63A5\u5206\u4EAB", "success");
+        // 生成成功即自动直投：二级短链推给客户端生成投稿草稿（与分享直投同一接口）。
+        // 只推短链种子（单条记录，必不超 TG「秒传链接」复制按钮 256 字符上限），
+        // 频道帖靠复制按钮取内容，不再附带秒传 JSON 文件。
+        const pushNote = await this.pushFastlinkSubmissionDraft(artifact);
+        if (this.completeFastlinkTask(outcome.task, artifact)) {
+          if (pushNote) this.toast(pushNote, "warning");
+          return;
+        }
+        this.toast(pushNote || "二级秒传链接已生成，投稿草稿已推送", pushNote ? "warning" : "success");
         this.syncFastlinkCheckpointSummary();
         this.render();
       } catch (error) {
         if (this.offerFastlinkSalvage("secondaryExport", error)) return;
         throw error;
+      }
+    }
+    // 二级链接生成后自动直投客户端生成投稿草稿：和分享链接直投走同一接口、同一响应校验。
+    // 推送失败只提示、不影响已生成的链接；返回空字符串表示推送成功。
+    async pushFastlinkSubmissionDraft(artifact) {
+      const link = String(artifact?.link || "").trim();
+      if (!link) return "";
+      const submissionUrl = String(this.config.share?.submissionUrl || "").trim();
+      if (!submissionUrl) return "还没配置投稿地址，本次只生成了链接（设置 → 分享与秒传 → 投稿地址）";
+      const name = String(artifact.item?.name || artifact.filename || "秒传分享").replace(/\.123fastlink\.(?:json|txt)$/i, "").trim() || "秒传分享";
+      try {
+        // 带上种子内容里抽出的真实文件名/总体积（前 100 条）：
+        // 客户端识别剧集类型、画质、真实大小全靠这些，种子名里没有
+        const sourceText = buildFastlinkSubmissionContext(name, artifact?.text);
+        const results = await this.submissionClient.submitShares(submissionUrl, [{ name, url: link, sourceText }]);
+        const failed = results.find((item) => item.status === "failed");
+        return failed ? `投稿草稿推送失败：${failed.message || "客户端没有返回结果"}` : "";
+      } catch (error) {
+        if (error?.name === "AbortError") throw error;
+        return `投稿草稿推送失败：${error instanceof Error ? error.message : String(error)}`;
       }
     }
     async restoreFastlinkFromCloudFile() {
@@ -25479,6 +25791,7 @@ ${end.comment}` : end.comment;
       const location2 = mode === "inPlace" ? "inPlace" : mode ? "library" : this.organize.location;
       return {
         currentDir: this.organize.currentDir,
+        currentDirName: this.organize.currentDirName || "",
         inPlace: location2 === "inPlace",
         naming: "normalized",
         mediaByGroup: this.organize.mediaByGroup,
@@ -25510,6 +25823,7 @@ ${end.comment}` : end.comment;
       this.organize = {
         items: items.map((item) => ({ ...item })),
         currentDir: String(currentDir || "0"),
+        currentDirName: "",
         location: this.config.library.rootId ? "library" : "inPlace",
         naming: "normalized",
         preview: null,
@@ -25548,6 +25862,9 @@ ${end.comment}` : end.comment;
       const requestId = ++organizeState.previewRequestId;
       const previousSelection = this.organize.selectedGroupId;
       const previousPreview = this.organize.preview;
+      // 「01 集名」形态的兜底分组需要当前目录名当剧名；拿不到就退回逐文件分组的旧行为
+      organizeState.currentDirName = await this.loadOrganizeCurrentDirName();
+      if (this.organize !== organizeState) return;
       const preview = await this.runTask(async (signal) => {
         this.setProgress(0, 1, "\u626B\u63CF\u5E76\u8BC6\u522B\u5A92\u4F53");
         return buildOrganizePreview(this.api, this.tmdb, this.organize.items, this.config, {
@@ -25577,6 +25894,17 @@ ${end.comment}` : end.comment;
       this.organize.selectedGroupId = selectedStillExists ? previousSelection : matchingGroup?.id || preview.groups[0]?.id || "";
       this.organize.tool = null;
       if (this.state.view === "organize") this.render();
+    }
+    // 整理「集名形态」兜底用：取当前目录名当候选剧名（根目录/接口失败给空串，退回旧行为）
+    async loadOrganizeCurrentDirName() {
+      const dirId = String(this.organize?.currentDir || "0");
+      if (dirId === "0" || typeof this.api.fileInfos !== "function") return "";
+      try {
+        const folders = await this.api.fileInfos([dirId]);
+        return String(folders.find((item) => String(item.id) === dirId)?.name || folders[0]?.name || "").trim();
+      } catch {
+        return "";
+      }
     }
     setOrganizeProgress(done, total, name, stage) {
       const labels = {
@@ -26492,11 +26820,55 @@ ${end.comment}` : end.comment;
           this.organize.searchHints[groupId] = parsed;
           this.organize.tool = { type: "search", groupId, loading: true, candidates: [] };
           this.render();
-          let candidates;
-          if (parsed.tmdbId) candidates = [await this.tmdb.details(type, parsed.tmdbId)];
-          else {
-            candidates = await this.tmdb.search(parsed.query || query, type);
-            if (parsed.year) candidates.sort((left, right) => Number(String(right.year || "") === parsed.year) - Number(String(left.year || "") === parsed.year));
+          let candidates = [];
+          let lastError = null;
+          if (parsed.tmdbId) {
+            // 类型下拉可能选错（电影/剧集）：ID 查询按所选类型优先，失败自动换另一类型再试。
+            for (const itemType of [type, ...["movie", "tv"].filter((item) => item !== type)]) {
+              try {
+                candidates = [await this.tmdb.details(itemType, parsed.tmdbId)];
+                break;
+              } catch (error) {
+                lastError = error;
+              }
+            }
+            if (!candidates.length && lastError) throw lastError;
+          } else {
+            // 名称查询同时搜所选类型与综合（电影+剧集一起返回）：类型推断错或下拉选错时
+            // 另一侧的结果仍能出来，不再空手而归。
+            const searchOptions = parsed.year ? { year: parsed.year } : {};
+            const keyword = parsed.query || query;
+            const run = async (searchType, includeAdult) => {
+              try {
+                return await this.tmdb.search(keyword, searchType, { ...searchOptions, includeAdult });
+              } catch {
+                return [];
+              }
+            };
+            let batches = await Promise.all([...new Set([type, ""])].map((searchType) => run(searchType, false)));
+            // 常规搜索一条都没有时带 include_adult 补一轮：18+ 影视在默认搜索里一条不返回
+            if (!batches.some((batch) => batch?.length)) {
+              batches = await Promise.all([...new Set([type, ""])].map((searchType) => run(searchType, true)));
+            }
+            const seen = new Set();
+            for (const batch of batches) {
+              for (const item of batch || []) {
+                const key = `${item.media_type || type}:${item.id}`;
+                if (seen.has(key)) continue;
+                seen.add(key);
+                candidates.push(item);
+              }
+            }
+            // 精确同名 > 名称包含 > 年份匹配 > 所选类型 > 热度，候选卡片按相关度排。
+            const wanted = keyword.replace(/[\s._:·-]+/g, "").toLocaleLowerCase();
+            const score = (item) => {
+              const titles = [item.title, item.original_title].map((value) => String(value || "").replace(/[\s._:·-]+/g, "").toLocaleLowerCase());
+              let value = (item.media_type || type) === type ? 10 : 0;
+              if (wanted) value += titles.some((name) => name === wanted) ? 200 : titles.some((name) => name.includes(wanted)) ? 60 : -20;
+              if (parsed.year) value += String(item.year || "") === parsed.year ? 100 : 0;
+              return value + Math.min(Number(item.popularity || 0), 100) / 25;
+            };
+            candidates.sort((left, right) => score(right) - score(left));
           }
           this.organize.tool.candidates = candidates;
           this.organize.tool.loading = false;
