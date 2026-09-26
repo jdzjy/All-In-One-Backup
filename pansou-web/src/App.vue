@@ -1310,20 +1310,12 @@ onUnmounted(() => {
           />
         </div>
         
-        <!-- 加载状态 -->
-        <div v-if="loading" class="search-loading-block card p-6">
-          <div class="space-y-3">
-            <div class="h-4 bg-muted rounded animate-pulse"></div>
-            <div class="h-4 bg-muted rounded animate-pulse w-3/4"></div>
-            <div class="h-4 bg-muted rounded animate-pulse w-1/2"></div>
-            <div class="h-4 bg-muted rounded animate-pulse w-2/3"></div>
-            <div class="h-4 bg-muted rounded animate-pulse"></div>
-          </div>
-        </div>
-        
-        <!-- 搜索结果 -->
+        <!-- 搜索结果：结果区常驻，等待态由 ResultTabs 内部管理。
+             此前这里是 v-if="loading" 与 v-else 两块互斥：4 秒窗口结束时 loading 转 false，
+             整个结果块先卸载再重新挂载，新挂载的 LoadingOrbit 从第 0 帧开始播——
+             用户看到的就是"等待动画重置播放"+界面闪烁。
+             改成常驻后，同一个轨道实例从搜索开始连续播到出结果。 -->
         <div
-          v-else
           ref="searchResultsBlockRef"
           class="search-results-block"
           :style="mobileSearchResultsHeight ? {
@@ -1557,9 +1549,10 @@ onUnmounted(() => {
     gap: 1rem;
   }
 
+  /* 统计栏与表单块不能做 flex 容器：里面的 .card 是 flex 子项，会按内容宽度收缩成一小条。
+     只有结果块需要 flex（它内部自己管理高度与滚动）。 */
   .search-form-block,
-  .search-stats-block,
-  .search-loading-block {
+  .search-stats-block {
     margin-bottom: 0 !important;
     min-height: 0;
   }

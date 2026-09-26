@@ -54,6 +54,12 @@ const (
 	GyingConfigFileName = "gying_config.json"
 )
 
+// powMinSolveTime 是 PoW 计算完成后提交前的最短等待。
+// 浏览器端 powSolve 脚本会等满 3 秒再提交，但实测服务端不校验提交时刻：
+// 置 0 后冷路径依然通过验证（2026-09 实测）。冷路径必须挤进框架的响应观察窗口，
+// 所以默认不等待；如站点将来开始校验，把它调回 3*time.Second 即可。
+var powMinSolveTime time.Duration
+
 var legacyGyingHosts = map[string]struct{}{
 	"gying.net":      {},
 	"www.gying.net":  {},
@@ -225,7 +231,9 @@ const HTMLTemplate = `<!DOCTYPE html>
             padding: 15px;
             border-radius: 6px;
             margin-top: 10px;
-        }
+        
+          overflow-x: hidden;
+          overflow-wrap: anywhere;}
         .hidden { display: none; }
     </style>
 </head>
@@ -511,6 +519,7 @@ type User struct {
 	LoginAt           time.Time `json:"login_at"`
 	ExpireAt          time.Time `json:"expire_at"`
 	LastAccessAt      time.Time `json:"last_access_at"`
+	LastWarmupAt      time.Time `json:"last_warmup_at"` // 上次详情页预热时间，决定防爬 cookie 能否复用
 }
 
 // SearchData 搜索页面JSON数据结构
@@ -834,6 +843,7 @@ func (p *GyingPlugin) Search(keyword string, ext map[string]interface{}) ([]mode
 // 2. 有自己的用户会话管理
 // 3. Service层已经有缓存，无需插件层再次缓存
 func (p *GyingPlugin) SearchWithResult(keyword string, ext map[string]interface{}) (model.PluginSearchResult, error) {
+	searchStart := time.Now()
 	// 解析 ext["refresh"]
 	forceRefresh := false
 	if ext != nil {
@@ -844,18 +854,21 @@ func (p *GyingPlugin) SearchWithResult(keyword string, ext map[string]interface{
 		}
 	}
 
-	if !forceRefresh {
-		if cacheItem, ok := p.searchCache.Load(keyword); ok {
-			cached := cacheItem.(model.PluginSearchResult)
-			if DebugLog {
-				fmt.Printf("[Gying] 命中插件缓存: %s\n", keyword)
-			}
-			return cached, nil
-		}
-	} else {
+	// 已存在的缓存：非刷新时直接返回；刷新失败时作为兜底，避免"刷新一下结果反而没了"。
+	var cached *model.PluginSearchResult
+	if cacheItem, ok := p.searchCache.Load(keyword); ok {
+		existing := cacheItem.(model.PluginSearchResult)
+		cached = &existing
+	}
+
+	if !forceRefresh && cached != nil {
 		if DebugLog {
-			fmt.Printf("[Gying] 强制刷新，此次跳过插件缓存，关键词: %s\n", keyword)
+			fmt.Printf("[Gying] 命中插件缓存: %s\n", keyword)
 		}
+		return *cached, nil
+	}
+	if forceRefresh && DebugLog {
+		fmt.Printf("[Gying] 强制刷新，此次跳过插件缓存，关键词: %s\n", keyword)
 	}
 
 	// 原有真实抓取逻辑
@@ -867,9 +880,14 @@ func (p *GyingPlugin) SearchWithResult(keyword string, ext map[string]interface{
 		fmt.Printf("[Gying] 找到 %d 个有效用户\n", len(users))
 	}
 	if len(users) == 0 {
-		if DebugLog {
-			fmt.Printf("[Gying] 没有有效用户，返回空结果\n")
+		// 无可用账号时同样优先回退缓存，避免把有效结果替换成空。
+		if cached != nil && len(cached.Results) > 0 {
+			fmt.Printf("[Gying] 没有有效用户，返回缓存结果 %d 条（关键词: %s）\n", len(cached.Results), keyword)
+			return *cached, nil
 		}
+		// 这条无条件打印：没有可用账号时返回空结果且不报错，调用方看起来与"没搜到"一样，
+		// 是排查时最容易误判的坑。
+		fmt.Printf("[Gying] ⚠️  没有可用账号（状态 active 且 Cookie 非空），关键词 %q 直接返回空结果\n", keyword)
 		return model.PluginSearchResult{Results: []model.SearchResult{}, IsFinal: true}, nil
 	}
 	if len(users) > MaxConcurrentUsers {
@@ -878,17 +896,36 @@ func (p *GyingPlugin) SearchWithResult(keyword string, ext map[string]interface{
 		})
 		users = users[:MaxConcurrentUsers]
 	}
-	results := p.executeSearchTasks(users, keyword)
+	results, searchErr := p.executeSearchTasks(users, keyword)
 	if DebugLog {
 		fmt.Printf("[Gying] 搜索完成，获得 %d 条结果\n", len(results))
 	}
+
+	// 抓取整体失败：优先回退已缓存结果，而不是返回空。否则 refresh=true 时
+	// 会表现为"刷新一下结果就没了"——用户看到的正是这个现象。
+	if searchErr != nil {
+		if cached != nil && len(cached.Results) > 0 {
+			fmt.Printf("[Gying] 刷新失败，返回缓存结果 %d 条（关键词: %s，原因: %v）\n",
+				len(cached.Results), keyword, searchErr)
+			return *cached, nil
+		}
+		return model.PluginSearchResult{}, fmt.Errorf("[Gying] 搜索失败: %w", searchErr)
+	}
+
+	if cost := time.Since(searchStart); cost > 3*time.Second {
+		fmt.Printf("[Gying] ⏱️  SearchWithResult 总耗时: %s（关键词 %q，结果 %d 条）\n",
+			cost.Round(time.Millisecond), keyword, len(results))
+	}
+
 	realResult := model.PluginSearchResult{
 		Results: results,
 		IsFinal: true,
 	}
-	// 写入缓存
+	// 只在实际拿到结果时覆盖缓存，避免用空结果冲掉有效缓存
 	if len(results) > 0 {
 		p.searchCache.Store(keyword, realResult)
+	} else if DebugLog {
+		fmt.Printf("[Gying] 抓取成功但无匹配，保留原缓存: %s\n", keyword)
 	}
 	return realResult, nil
 }
@@ -995,6 +1032,10 @@ func (p *GyingPlugin) initDefaultAccounts() {
 			p.initOrRestoreUser(user.Username, password, "restore")
 		}
 	}
+
+	// 恢复完成后立刻预热：把 PoW 与防爬 cookie 的开销挪到启动阶段，
+	// 否则启动后第一次搜索要自己扛这个开销，容易被框架观察窗口截断。
+	p.warmUpAllSessions()
 
 	// fmt.Printf("[Gying] ========== 所有账户初始化完成 ==========\n")
 }
@@ -1345,17 +1386,22 @@ func (p *GyingPlugin) handleTestSearch(c *gin.Context, hash string, reqData map[
 		return
 	}
 
-	// 获取scraper实例
-	scraperVal, exists := p.scrapers.Load(hash)
-	if !exists {
-		respondError(c, "用户scraper实例不存在，请重新登录")
-		return
+	// 获取scraper实例：内存里没有就用已保存的 cookie 现场重建，
+	// 否则重启后（恢复流程尚未跑完）测试搜索会直接报"请重新登录"。
+	var scraper *cloudscraper.Scraper
+	if scraperVal, exists := p.scrapers.Load(hash); exists {
+		if typed, ok := scraperVal.(*cloudscraper.Scraper); ok && typed != nil {
+			scraper = typed
+		}
 	}
-
-	scraper, ok := scraperVal.(*cloudscraper.Scraper)
-	if !ok || scraper == nil {
-		respondError(c, "scraper实例无效，请重新登录")
-		return
+	if scraper == nil {
+		rebuilt, buildErr := p.createScraperWithCookies(user.Cookie)
+		if buildErr != nil {
+			respondError(c, "用户scraper实例不存在，请重新登录")
+			return
+		}
+		p.scrapers.Store(hash, rebuilt)
+		scraper = rebuilt
 	}
 
 	// 执行搜索（带403自动重新登录）
@@ -1765,8 +1811,11 @@ func (p *GyingPlugin) computePowResult(challenge *ChallengePageData) (string, er
 			challenge.ID, challenge.T, elapsed.Round(time.Millisecond))
 	}
 
-	if minSolveTime := 3 * time.Second; elapsed < minSolveTime {
-		time.Sleep(minSolveTime - elapsed)
+	// 浏览器端算完会等满 3 秒再提交，这里跟上是为了贴近真实客户端行为。
+	// 是否必须由服务端决定，所以做成可调变量：冷路径要挤进框架的响应观察窗口，
+	// 少这 3 秒往往就是"能出结果"和"出不来结果"的分界。
+	if powMinSolveTime > 0 && elapsed < powMinSolveTime {
+		time.Sleep(powMinSolveTime - elapsed)
 	}
 
 	return y.Text(16), nil
@@ -2309,11 +2358,17 @@ func (p *GyingPlugin) reloginUser(user *User) error {
 
 // ============ 搜索逻辑 ============
 
-// executeSearchTasks 并发执行搜索任务
-func (p *GyingPlugin) executeSearchTasks(users []*User, keyword string) []model.SearchResult {
+// executeSearchTasks 并发执行搜索任务。
+//
+// 返回值区分两种情况：err != nil 表示所有用户都没能完成抓取（网络/会话问题）；
+// err == nil 且结果为空表示抓取本身成功、确实没有匹配。二者的区别很关键——
+// 前者需要向上报错并回退缓存，后者是合法的空结果，不能当成失败。
+func (p *GyingPlugin) executeSearchTasks(users []*User, keyword string) ([]model.SearchResult, error) {
 	var allResults []model.SearchResult
 	var mu sync.Mutex
 	var wg sync.WaitGroup
+	var succeeded int
+	var firstErr error
 
 	for _, user := range users {
 		wg.Add(1)
@@ -2335,6 +2390,11 @@ func (p *GyingPlugin) executeSearchTasks(users []*User, keyword string) []model.
 					if DebugLog {
 						fmt.Printf("[Gying] 为用户 %s 创建scraper失败: %v\n", u.Username, err)
 					}
+					mu.Lock()
+					if firstErr == nil {
+						firstErr = fmt.Errorf("创建scraper失败: %w", err)
+					}
+					mu.Unlock()
 					return
 				}
 
@@ -2352,6 +2412,11 @@ func (p *GyingPlugin) executeSearchTasks(users []*User, keyword string) []model.
 					if DebugLog {
 						fmt.Printf("[Gying] 用户 %s scraper实例无效，跳过\n", u.Username)
 					}
+					mu.Lock()
+					if firstErr == nil {
+						firstErr = fmt.Errorf("用户 %s 的scraper实例无效", u.Username)
+					}
+					mu.Unlock()
 					return
 				}
 			}
@@ -2361,10 +2426,16 @@ func (p *GyingPlugin) executeSearchTasks(users []*User, keyword string) []model.
 				if DebugLog {
 					fmt.Printf("[Gying] 用户 %s 搜索失败（已重试）: %v\n", u.Username, err)
 				}
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = err
+				}
+				mu.Unlock()
 				return
 			}
 
 			mu.Lock()
+			succeeded++
 			allResults = append(allResults, results...)
 			mu.Unlock()
 		}(user)
@@ -2372,12 +2443,85 @@ func (p *GyingPlugin) executeSearchTasks(users []*User, keyword string) []model.
 
 	wg.Wait()
 
-	// 去重
-	return p.deduplicateResults(allResults)
+	deduped := p.deduplicateResults(allResults)
+	if succeeded == 0 && firstErr != nil {
+		return deduped, firstErr
+	}
+	return deduped, nil
 }
 
 // searchWithScraperWithRetry 使用scraper搜索（带403自动重新登录重试）
+// warmupSessionTTL 是两次详情页预热之间的最小复用间隔。
+// 预热走挑战感知路径访问详情页，顺带完成 PoW 校验并刷新防爬 cookie（vrg_sc/vrg_go）；
+// 但它是一次完整页面请求，放进"每次搜索"会把冷路径推出框架的响应观察窗口（默认 4 秒），
+// 结果是搜索结果被整体丢弃——用户看到的现象就是"登录正常但搜不出结果"。
+const warmupSessionTTL = 10 * time.Minute
+
+// warmupSession 预热会话：完成 PoW 校验并刷新防爬 cookie，成功后记录时间供后续复用。
+func (p *GyingPlugin) warmupSession(scraper *cloudscraper.Scraper, user *User) error {
+	if scraper == nil {
+		return fmt.Errorf("scraper 为空")
+	}
+	_, status, _, err := p.requestWithChallengeRetry(scraper, http.MethodGet, p.getWarmupDetailURL(), "", "")
+	if err != nil {
+		return err
+	}
+	if status != http.StatusOK {
+		return fmt.Errorf("详情页预热返回 HTTP %d", status)
+	}
+	if user != nil {
+		user.LastWarmupAt = time.Now()
+		if saveErr := p.saveUser(user); saveErr != nil && DebugLog {
+			fmt.Printf("[Gying] ⚠️  预热时间保存失败: %v\n", saveErr)
+		}
+	}
+	return nil
+}
+
+// needsWarmup 判断该用户的会话是否已冷到需要重新预热。
+func (p *GyingPlugin) needsWarmup(user *User) bool {
+	if user == nil {
+		return true
+	}
+	return user.LastWarmupAt.IsZero() || time.Since(user.LastWarmupAt) > warmupSessionTTL
+}
+
+// warmUpAllSessions 在账户恢复完成后立即预热一遍。
+// 否则启动后第一次搜索要自己扛 PoW，很容易被框架的观察窗口截断。
+func (p *GyingPlugin) warmUpAllSessions() {
+	p.users.Range(func(key, value interface{}) bool {
+		user := value.(*User)
+		if user.Status != "active" || !p.needsWarmup(user) {
+			return true
+		}
+		scraperVal, exists := p.scrapers.Load(user.Hash)
+		if !exists {
+			return true
+		}
+		scraper, ok := scraperVal.(*cloudscraper.Scraper)
+		if !ok || scraper == nil {
+			return true
+		}
+		go func(u *User, s *cloudscraper.Scraper) {
+			if err := p.warmupSession(s, u); err != nil {
+				fmt.Printf("[Gying] ⚠️  账户 %s 启动预热失败: %v\n", u.Username, err)
+				return
+			}
+			fmt.Printf("[Gying] ✅ 账户 %s 启动预热完成（PoW 与防爬 cookie 已就绪）\n", u.Username)
+		}(user, scraper)
+		return true
+	})
+}
+
 func (p *GyingPlugin) searchWithScraperWithRetry(keyword string, scraper *cloudscraper.Scraper, user *User) ([]model.SearchResult, error) {
+	retryStart := time.Now()
+	// 预热只在会话变冷时做一次：它同时完成 PoW 校验与防爬 cookie 刷新。
+	if p.needsWarmup(user) {
+		if warmErr := p.warmupSession(scraper, user); warmErr != nil && DebugLog {
+			fmt.Printf("[Gying] ⚠️  搜索前预热失败（继续尝试搜索）: %v\n", warmErr)
+		}
+	}
+
 	results, err := p.searchWithScraper(keyword, scraper)
 	if err == nil {
 		if syncErr := p.syncUserCookiesFromScraper(user, scraper); syncErr != nil && DebugLog {
@@ -2387,6 +2531,7 @@ func (p *GyingPlugin) searchWithScraperWithRetry(keyword string, scraper *clouds
 
 	// 检测是否为403错误
 	if err != nil && strings.Contains(err.Error(), "403") {
+		fmt.Printf("[Gying] ⚠️  搜索返回 403（会话失效），准备重新登录；关键词 %q\n", keyword)
 		if DebugLog {
 			fmt.Printf("[Gying] ⚠️  检测到403错误，尝试重新登录用户 %s\n", user.Username)
 		}
@@ -2410,6 +2555,9 @@ func (p *GyingPlugin) searchWithScraperWithRetry(keyword string, scraper *clouds
 			return nil, fmt.Errorf("重新登录后scraper实例无效")
 		}
 
+		// doLogin 内部已经访问过详情页，这里同步预热时间，避免紧接着又预热一次
+		user.LastWarmupAt = time.Now()
+
 		// 使用新scraper重试搜索
 		if DebugLog {
 			fmt.Printf("[Gying] 🔄 使用新登录状态重试搜索\n")
@@ -2423,11 +2571,17 @@ func (p *GyingPlugin) searchWithScraperWithRetry(keyword string, scraper *clouds
 		}
 	}
 
+	if cost := time.Since(retryStart); cost > 3*time.Second {
+		fmt.Printf("[Gying] ⏱️  searchWithScraperWithRetry 总耗时: %s（关键词 %q，结果 %d 条，含可能的重登）\n",
+			cost.Round(time.Millisecond), keyword, len(results))
+	}
+
 	return results, err
 }
 
 // searchWithScraper 使用scraper搜索
 func (p *GyingPlugin) searchWithScraper(keyword string, scraper *cloudscraper.Scraper) ([]model.SearchResult, error) {
+	searchStart := time.Now()
 	if DebugLog {
 		fmt.Printf("[Gying] ---------- searchWithScraper 开始 ----------\n")
 		fmt.Printf("[Gying] 关键词: %s\n", keyword)
@@ -2535,16 +2689,8 @@ func (p *GyingPlugin) searchWithScraper(keyword string, scraper *cloudscraper.Sc
 		}
 	}
 
-	// 3. 刷新防爬cookies（关键！访问详情页触发vrg_sc、vrg_go等防爬cookies）
-	if DebugLog {
-		fmt.Printf("[Gying] 刷新防爬cookies...\n")
-	}
-	_, refreshStatus, _, err := p.requestWithChallengeRetry(scraper, http.MethodGet, p.getWarmupDetailURL(), "", "")
-	if err == nil {
-		if DebugLog {
-			fmt.Printf("[Gying] 防爬cookies刷新成功 (状态码: %d)\n", refreshStatus)
-		}
-	}
+	// 3. 防爬 cookie 刷新已上移到 searchWithScraperWithRetry 的按需预热。
+	// 放在这里意味着每次搜索都多一次完整页面请求，冷路径会被顶出框架观察窗口。
 
 	// 4. 并发请求详情接口
 	results, err := p.fetchAllDetails(&searchData, scraper, keyword)
@@ -2559,6 +2705,13 @@ func (p *GyingPlugin) searchWithScraper(keyword string, scraper *cloudscraper.Sc
 	if DebugLog {
 		fmt.Printf("[Gying] fetchAllDetails 返回 %d 条结果\n", len(results))
 		fmt.Printf("[Gying] ---------- searchWithScraper 结束 ----------\n")
+	}
+
+	// 框架默认只等 4 秒就把已拿到的结果返回给调用方，超时的插件会被整体丢弃。
+	// 慢搜索必须留痕，否则用户看到的就是"登录正常但没有结果"。
+	if cost := time.Since(searchStart); cost > 3*time.Second {
+		fmt.Printf("[Gying] ⏱️  搜索偏慢: %s（关键词 %q，结果 %d 条）；框架默认观察窗口 4 秒，超过即被截断\n",
+			cost.Round(time.Millisecond), keyword, len(results))
 	}
 
 	return results, nil
@@ -2602,9 +2755,9 @@ func (p *GyingPlugin) fetchAllDetails(searchData *SearchData, scraper *cloudscra
 			mu.Unlock()
 
 			// 检查标题是否包含搜索关键词
-			if index >= len(searchData.L.Title) {
+			if !searchData.hasAlignedIndex(index) {
 				if DebugLog {
-					fmt.Printf("[Gying]   [%d/%d] ⏭️  跳过: 索引超出标题数组范围\n",
+					fmt.Printf("[Gying]   [%d/%d] ⏭️  跳过: 索引超出标题/类型/ID 数组范围\n",
 						index+1, len(searchData.L.I))
 				}
 				return
@@ -2761,9 +2914,23 @@ func (p *GyingPlugin) fetchDetail(resourceID, resourceType string, scraper *clou
 	return &detail, nil
 }
 
+// hasAlignedIndex 判断三个必需数组是否都覆盖了 index。
+//
+// 上游返回的 l.title / l.d / l.i 是三个互相独立的 JSON 数组，长度并不保证一致。
+// 搜索循环的边界只由 l.i 决定，旧守卫又只校验了 l.title，于是 l.d 短一截时
+// searchData.L.D[index] 直接越界 panic；这段代码跑在 goroutine 里，而全仓
+// goroutine 都没有 recover，后果不是单次请求失败而是整个进程退出。
+// Year/Info/Daoyan/Zhuyan 这些可选数组本来就都写了 len 守卫，唯独 D 漏了。
+func (s *SearchData) hasAlignedIndex(index int) bool {
+	return index >= 0 &&
+		index < len(s.L.Title) &&
+		index < len(s.L.D) &&
+		index < len(s.L.I)
+}
+
 // buildResult 构建SearchResult
 func (p *GyingPlugin) buildResult(detail *DetailData, searchData *SearchData, index int) model.SearchResult {
-	if index >= len(searchData.L.Title) {
+	if !searchData.hasAlignedIndex(index) {
 		return model.SearchResult{}
 	}
 
@@ -3441,16 +3608,19 @@ func (p *GyingPlugin) keepAllSessionsAlive() {
 			return true
 		}
 
-		// 访问首页保持session活跃
-		go func(s *cloudscraper.Scraper, username, homeURL string) {
-			resp, err := s.Get(homeURL)
-			if err == nil && resp != nil {
-				resp.Body.Close()
+		// 保活必须走挑战感知路径访问详情页：站点加了 PoW 之后，
+		// 裸 GET 首页只会拿到验证页，既没真正保活，也没刷新防爬 cookie。
+		go func(s *cloudscraper.Scraper, u *User) {
+			if err := p.warmupSession(s, u); err != nil {
 				if DebugLog {
-					fmt.Printf("[Gying] 💓 Session保活成功: %s (状态码: %d)\n", username, resp.StatusCode)
+					fmt.Printf("[Gying] ⚠️  Session保活失败: %s: %v\n", u.Username, err)
 				}
+				return
 			}
-		}(scraper, user.Username, p.getBaseURL()+"/")
+			if DebugLog {
+				fmt.Printf("[Gying] 💓 Session保活成功: %s\n", u.Username)
+			}
+		}(scraper, user)
 
 		count++
 		return true
