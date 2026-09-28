@@ -651,6 +651,7 @@ def pyrogram_api():
         Advanced
             invoke
             recover_gaps
+            get_app_config
             resolve_peer
             save_file
         """,
@@ -757,7 +758,7 @@ def pyrogram_api():
             ChatInviteLink
             ChatAdminWithInviteLinks
             ChatEvent
-            ChatEventFilter
+            ChatEventLogFilters
             ChatMemberUpdated
             ChatJoinRequest
             ChatJoinResult
@@ -791,6 +792,60 @@ def pyrogram_api():
             CommunityMemberStatusLeft
             CommunityMemberStatusBanned
             CommunityPermissions
+            ChatEventAction
+            ChatEventActionMessageEdited
+            ChatEventActionMessageDeleted
+            ChatEventActionMessagePinned
+            ChatEventActionMessageUnpinned
+            ChatEventActionPollStopped
+            ChatEventActionMemberJoined
+            ChatEventActionMemberJoinedByInviteLink
+            ChatEventActionMemberJoinedByRequest
+            ChatEventActionMemberInvited
+            ChatEventActionMemberLeft
+            ChatEventActionMemberPromoted
+            ChatEventActionMemberRestricted
+            ChatEventActionMemberTagChanged
+            ChatEventActionMemberSubscriptionExtended
+            ChatEventActionAvailableReactionsChanged
+            ChatEventActionBackgroundChanged
+            ChatEventActionDescriptionChanged
+            ChatEventActionEmojiStatusChanged
+            ChatEventActionLinkedChatChanged
+            ChatEventActionLocationChanged
+            ChatEventActionMessageAutoDeleteTimeChanged
+            ChatEventActionPermissionsChanged
+            ChatEventActionPhotoChanged
+            ChatEventActionSlowModeDelayChanged
+            ChatEventActionStickerSetChanged
+            ChatEventActionCustomEmojiStickerSetChanged
+            ChatEventActionTitleChanged
+            ChatEventActionUsernameChanged
+            ChatEventActionActiveUsernamesChanged
+            ChatEventActionAccentColorChanged
+            ChatEventActionProfileAccentColorChanged
+            ChatEventActionHasProtectedContentToggled
+            ChatEventActionInvitesToggled
+            ChatEventActionIsAllHistoryAvailableToggled
+            ChatEventActionHasAggressiveAntiSpamEnabledToggled
+            ChatEventActionSignMessagesToggled
+            ChatEventActionShowMessageSenderToggled
+            ChatEventActionAutomaticTranslationToggled
+            ChatEventActionInviteLinkEdited
+            ChatEventActionInviteLinkRevoked
+            ChatEventActionInviteLinkDeleted
+            ChatEventActionVideoChatCreated
+            ChatEventActionVideoChatEnded
+            ChatEventActionVideoChatMuteNewParticipantsToggled
+            ChatEventActionVideoChatParticipantIsMutedToggled
+            ChatEventActionVideoChatParticipantVolumeLevelChanged
+            ChatEventActionIsForumToggled
+            ChatEventActionForumTopicCreated
+            ChatEventActionForumTopicEdited
+            ChatEventActionForumTopicToggleIsClosed
+            ChatEventActionForumTopicToggleIsHidden
+            ChatEventActionForumTopicDeleted
+            ChatEventActionForumTopicPinned
         """,
         "messages_media": """
         Messages & Media
@@ -1443,7 +1498,7 @@ def pyrogram_api():
             BusinessSchedule
             ButtonStyle
             ChatAction
-            ChatEventAction
+            ChatEventActionType
             ChatJoinType
             ChatMemberStatus
             ChatMembersFilter

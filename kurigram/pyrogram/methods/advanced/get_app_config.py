@@ -16,11 +16,24 @@
 #  You should have received a copy of the GNU Lesser General Public License
 #  along with Pyrogram.  If not, see <http://www.gnu.org/licenses/>.
 
-"""Type aliases used by Kurigram's own signatures. Not part of the public API."""
+from __future__ import annotations as _annotations
 
-import os
 
-# `[str]` rather than a bare `os.PathLike`: a bytes path satisfies the `isinstance` checks
-#  the upload sites use, then fails in `Path()` with "argument should be a str object or
-#  an os.PathLike object returning str, not <class 'bytes'>".
-PathType = str | os.PathLike[str]
+import pyrogram
+from pyrogram import raw, utils
+
+
+class GetAppConfig:
+    async def get_app_config(self: pyrogram.Client) -> dict:
+        """Get app-specific configuration.
+
+        .. include:: /_includes/usable-by/users.rst
+
+        Returns:
+            ``dict``: App-specific configuration is returned.
+        """
+        r = await self.invoke(raw.functions.help.GetAppConfig(hash=0))
+
+        self._app_config = r
+
+        return utils.jsonvalue_to_obj(r.config)
