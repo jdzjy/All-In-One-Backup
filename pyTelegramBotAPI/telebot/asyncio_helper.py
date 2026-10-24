@@ -338,7 +338,8 @@ async def send_rich_message(
         reply_parameters=None, reply_markup=None, business_connection_id=None,  allow_paid_broadcast=None, direct_messages_topic_id=None,
         suggested_post_parameters=None, message_thread_id=None, ephemeral_message_parameters=None):
     method_url = r'sendRichMessage'
-    payload = {'chat_id': str(chat_id), 'rich_message': rich_message.to_json()}
+    rich_message_json, files = rich_message.convert_input_rich_message()
+    payload = {'chat_id': str(chat_id), 'rich_message': rich_message_json}
     if disable_notification is not None:
         payload['disable_notification'] = disable_notification
     if protect_content is not None:
@@ -362,19 +363,20 @@ async def send_rich_message(
     if ephemeral_message_parameters is not None:
         payload['ephemeral_message_parameters'] = ephemeral_message_parameters.to_json()
     
-    return await _process_request(token, method_url, params=payload, method='post')
+    return await _process_request(token, method_url, params=payload, files=files, method='post')
 
 
 async def send_rich_message_draft(token, chat_id, draft_id, rich_message, message_thread_id=None, can_stop=None, keep_on_stop=None):
     method_url = r'sendRichMessageDraft'
-    payload = {'chat_id': chat_id, 'draft_id': draft_id, 'rich_message': rich_message.to_json()}
+    rich_message_json, files = rich_message.convert_input_rich_message()
+    payload = {'chat_id': chat_id, 'draft_id': draft_id, 'rich_message': rich_message_json}
     if message_thread_id is not None:
         payload['message_thread_id'] = message_thread_id
     if can_stop is not None:
         payload['can_stop'] = can_stop
     if keep_on_stop is not None:
         payload['keep_on_stop'] = keep_on_stop
-    return await _process_request(token, method_url, params=payload, method='post')
+    return await _process_request(token, method_url, params=payload, files=files, method='post')
 
 
 async def get_user_profile_photos(token, user_id, offset=None, limit=None):
@@ -445,8 +447,9 @@ async def get_chat_member_count(token, chat_id):
 
 async def replace_sticker_in_set(token, user_id, name, old_sticker, sticker):
     method_url = r'replaceStickerInSet'
-    payload = {'user_id': user_id, 'name': name, 'old_sticker': old_sticker, 'sticker': sticker.to_json()}
-    return await _process_request(token, method_url, params=payload)
+    json_dict, files = sticker.convert_input_sticker()
+    payload = {'user_id': user_id, 'name': name, 'old_sticker': old_sticker, 'sticker': json_dict}
+    return await _process_request(token, method_url, params=payload, files=files, method='post')
 
 async def set_sticker_set_thumbnail(token, name, user_id, thumbnail, format):
     method_url = r'setStickerSetThumbnail'
@@ -576,7 +579,7 @@ async def send_checklist(
         reply_parameters=None, reply_markup=None
 ):
     method_url = r'sendChecklist'
-    payload = {'chat_id': chat_id, 'checklist': checklist, 'business_connection_id': business_connection_id}
+    payload = {'chat_id': chat_id, 'checklist': checklist.to_json(), 'business_connection_id': business_connection_id}
     if disable_notification is not None:
         payload['disable_notification'] = disable_notification
     if protect_content is not None:
@@ -595,7 +598,7 @@ async def edit_message_checklist(
         reply_markup=None
 ):
     method_url = r'editMessageChecklist'
-    payload = {'chat_id': chat_id, 'message_id': message_id, 'checklist': checklist, 'business_connection_id': business_connection_id}
+    payload = {'chat_id': chat_id, 'message_id': message_id, 'checklist': checklist.to_json(), 'business_connection_id': business_connection_id}
     if reply_markup:
         payload['reply_markup'] = await _convert_markup(reply_markup)
     return await _process_request(token, method_url, params=payload)
@@ -1872,9 +1875,10 @@ async def edit_message_text(
         payload['business_connection_id'] = business_connection_id
     if timeout:
         payload['timeout'] = timeout
+    files = None
     if rich_message:
-        payload['rich_message'] = rich_message.to_json()
-    return await _process_request(token, method_url, params=payload, method='post')
+        payload['rich_message'], files = rich_message.convert_input_rich_message()
+    return await _process_request(token, method_url, params=payload, files=files, method='post')
 
 
 async def edit_message_caption(
