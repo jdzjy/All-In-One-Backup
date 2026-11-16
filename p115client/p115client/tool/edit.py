@@ -3,11 +3,11 @@
 
 __all__ = [
     "update_abstract", "update_cover", "update_desc", "update_label", "update_show_play_long", 
-    "update_star", "update_score", "update_top", "update_category_shortcut", "batch_unstar", 
-    "update_name", "post_event", "makedir", "iter_batch_makedir", "batch_makedir", 
-    "batch_copy", "batch_copy_files", "batch_delete", "batch_delete_files", 
-    "batch_move", "batch_move_files", "batch_recyclebin_clean", "batch_recyclebin_revert", 
-    "batch_hide", "batch_label", "copyfile", "renamefile", "transferfile", 
+    "update_star", "update_star_fast", "update_score", "update_top", "update_category_shortcut", 
+    "batch_unstar", "update_name", "post_event", "iter_batch_desc", "batch_desc", "makedir", 
+    "iter_batch_makedir", "batch_makedir", "batch_copy", "batch_copy_files", "batch_delete", 
+    "batch_delete_files", "batch_move", "batch_move_files", "batch_recyclebin_clean", 
+    "batch_recyclebin_revert", "batch_hide", "batch_label", "copyfile", "renamefile", "transferfile", 
 ]
 __doc__ = "这个模块提供了一些和修改文件或目录信息有关的函数"
 
@@ -20,13 +20,14 @@ from contextlib import suppress
 from functools import partial
 from itertools import batched
 from os import PathLike
+from _thread import start_new_thread
 from typing import cast, overload, Any, Literal
 from types import EllipsisType
 
 from concurrenttools import conmap
 from iterutils import (
     chunked, collect, foreach, map as do_map, run_gen_step, as_gen_step, 
-    through, 
+    through, with_iter_next, 
 )
 
 from .attr import _get_id
@@ -38,7 +39,7 @@ from ..type import P115URL
 @overload
 def update_abstract(
     client: str | PathLike | P115Client, 
-    ids: Iterable[int | str], 
+    ids: int | str | Mapping | Iterable[int | str | Mapping], 
     /, 
     method: str, 
     value: Any, 
@@ -52,7 +53,7 @@ def update_abstract(
 @overload
 def update_abstract(
     client: str | PathLike | P115Client, 
-    ids: Iterable[int | str] | AsyncIterable[int | str], 
+    ids: int | str | Mapping | Iterable[int | str | Mapping] | AsyncIterable[int | str | Mapping], 
     /, 
     method: str, 
     value: Any, 
@@ -65,7 +66,7 @@ def update_abstract(
     ...
 def update_abstract(
     client: str | PathLike | P115Client, 
-    ids: Iterable[int | str] | AsyncIterable[int | str], 
+    ids: int | str | Mapping | Iterable[int | str | Mapping] | AsyncIterable[int | str | Mapping], 
     /, 
     method: str, 
     value: Any, 
@@ -88,6 +89,8 @@ def update_abstract(
     """
     if isinstance(client, (str, PathLike)):
         client = P115Client(client)
+    if isinstance(ids, (int, str, Mapping)):
+        ids = ids,
     def call(batch, func=getattr(client, method), /):
         return check_response(func(batch, value, async_=async_, **request_kwargs))
     return through(conmap(
@@ -101,7 +104,7 @@ def update_abstract(
 @overload
 def update_cover(
     client: str | PathLike | P115Client, 
-    ids: Iterable[int | str], 
+    ids: int | str | Mapping | Iterable[int | str | Mapping], 
     /, 
     fid_cover: int | str = 0, 
     batch_size: int = 1_000, 
@@ -115,7 +118,7 @@ def update_cover(
 @overload
 def update_cover(
     client: str | PathLike | P115Client, 
-    ids: Iterable[int | str] | AsyncIterable[int | str], 
+    ids: int | str | Mapping | Iterable[int | str | Mapping] | AsyncIterable[int | str | Mapping], 
     /, 
     fid_cover: int | str = 0, 
     batch_size: int = 1_000, 
@@ -128,7 +131,7 @@ def update_cover(
     ...
 def update_cover(
     client: str | PathLike | P115Client, 
-    ids: Iterable[int | str] | AsyncIterable[int | str], 
+    ids: int | str | Mapping | Iterable[int | str | Mapping] | AsyncIterable[int | str | Mapping], 
     /, 
     fid_cover: int | str = 0, 
     batch_size: int = 1_000, 
@@ -169,7 +172,7 @@ def update_cover(
 @overload
 def update_desc(
     client: str | PathLike | P115Client, 
-    ids: Iterable[int | str], 
+    ids: int | str | Mapping | Iterable[int | str | Mapping], 
     /, 
     desc: str = "", 
     batch_size: int = 1_000, 
@@ -183,7 +186,7 @@ def update_desc(
 @overload
 def update_desc(
     client: str | PathLike | P115Client, 
-    ids: Iterable[int | str] | AsyncIterable[int | str], 
+    ids: int | str | Mapping | Iterable[int | str] | AsyncIterable[int | str | Mapping], 
     /, 
     desc: str = "", 
     batch_size: int = 1_000, 
@@ -196,7 +199,7 @@ def update_desc(
     ...
 def update_desc(
     client: str | PathLike | P115Client, 
-    ids: Iterable[int | str] | AsyncIterable[int | str], 
+    ids: int | str | Mapping | Iterable[int | str | Mapping] | AsyncIterable[int | str | Mapping], 
     /, 
     desc: str = "", 
     batch_size: int = 1_000, 
@@ -237,9 +240,9 @@ def update_desc(
 @overload
 def update_label(
     client: str | PathLike | P115Client, 
-    ids: Iterable[int | str], 
+    ids: int | str | Mapping | Iterable[int | str | Mapping], 
     /, 
-    label: int | str = 1, 
+    label_id: int | str = 1, 
     batch_size: int = 1_000, 
     max_workers: None | int = 0, 
     app: str = "android", 
@@ -251,9 +254,9 @@ def update_label(
 @overload
 def update_label(
     client: str | PathLike | P115Client, 
-    ids: Iterable[int | str] | AsyncIterable[int | str], 
+    ids: int | str | Mapping | Iterable[int | str | Mapping] | AsyncIterable[int | str | Mapping], 
     /, 
-    label: int | str = 1, 
+    label_id: int | str = 1, 
     batch_size: int = 1_000, 
     max_workers: None | int = 0, 
     app: str = "android", 
@@ -264,9 +267,9 @@ def update_label(
     ...
 def update_label(
     client: str | PathLike | P115Client, 
-    ids: Iterable[int | str] | AsyncIterable[int | str], 
+    ids: int | str | Mapping | Iterable[int | str | Mapping] | AsyncIterable[int | str | Mapping], 
     /, 
-    label: int | str = 1, 
+    label_id: int | str = 1, 
     batch_size: int = 1_000, 
     max_workers: None | int = 0, 
     app: str = "android", 
@@ -276,9 +279,12 @@ def update_label(
 ):
     """批量给文件或目录设置标签
 
+    .. note::
+        ``label_id`` 的取值范围是 [-2⁶³, 2⁶³-1]，超出区间的，视同最近的边界值
+
     :param client: 115 客户端或 cookies
     :param ids: 一组文件或目录的 id 或 pickcode
-    :param label: 标签 id，多个用逗号 "," 隔开，如果用一个根本不存在的 id，效果就是清空标签列表
+    :param label_id: 标签 id，多个用逗号 "," 隔开，即使用一个不存在的非零 id（默认为 1），也可以成功关联，且可以罗列文件列表
     :param batch_size: 批次大小，分批次，每次提交的 id 数
     :param max_workers: 并发工作数，如果为 None 或者 < 0，则自动确定
     :param app: 使用此设备的接口
@@ -294,7 +300,7 @@ def update_label(
         client, 
         ids, # type: ignore
         method=method, 
-        value=label, 
+        value=label_id, 
         batch_size=batch_size, 
         max_workers=max_workers, 
         async_=async_, # type: ignore
@@ -305,7 +311,7 @@ def update_label(
 @overload
 def update_show_play_long(
     client: str | PathLike | P115Client, 
-    ids: Iterable[int | str], 
+    ids: int | str | Mapping | Iterable[int | str | Mapping], 
     /, 
     show: bool = True, 
     batch_size: int = 1_000, 
@@ -319,7 +325,7 @@ def update_show_play_long(
 @overload
 def update_show_play_long(
     client: str | PathLike | P115Client, 
-    ids: Iterable[int | str] | AsyncIterable[int | str], 
+    ids: int | str | Mapping | Iterable[int | str | Mapping] | AsyncIterable[int | str | Mapping], 
     /, 
     show: bool = True, 
     batch_size: int = 1_000, 
@@ -332,7 +338,7 @@ def update_show_play_long(
     ...
 def update_show_play_long(
     client: str | PathLike | P115Client, 
-    ids: Iterable[int | str] | AsyncIterable[int | str], 
+    ids: int | str | Mapping | Iterable[int | str | Mapping] | AsyncIterable[int | str | Mapping], 
     /, 
     show: bool = True, 
     batch_size: int = 1_000, 
@@ -373,7 +379,7 @@ def update_show_play_long(
 @overload
 def update_star(
     client: str | PathLike | P115Client | P115OpenClient, 
-    ids: Iterable[int | str], 
+    ids: int | str | Mapping | Iterable[int | str | Mapping], 
     /, 
     star: bool = True, 
     batch_size: int = 1_000, 
@@ -387,7 +393,7 @@ def update_star(
 @overload
 def update_star(
     client: str | PathLike | P115Client | P115OpenClient, 
-    ids: Iterable[int | str] | AsyncIterable[int | str], 
+    ids: int | str | Mapping | Iterable[int | str | Mapping] | AsyncIterable[int | str | Mapping], 
     /, 
     star: bool = True, 
     batch_size: int = 1_000, 
@@ -400,7 +406,7 @@ def update_star(
     ...
 def update_star(
     client: str | PathLike | P115Client | P115OpenClient, 
-    ids: Iterable[int | str] | AsyncIterable[int | str], 
+    ids: int | str | Mapping | Iterable[int | str | Mapping] | AsyncIterable[int | str | Mapping], 
     /, 
     star: bool = True, 
     batch_size: int = 1_000, 
@@ -413,7 +419,7 @@ def update_star(
     """批量给文件或目录设置星标
 
     .. note::
-        如果一批中有任何一个 id 已经被删除，则这一批直接失败报错
+        如果一批中有任何一个 id 已经被删除，则这一批直接失败报错，除非 client 是 P115OpenClient 或 ``app="open"``
 
     :param client: 115 客户端或 cookies
     :param ids: 一组文件或目录的 id 或 pickcode
@@ -426,13 +432,18 @@ def update_star(
     """
     if isinstance(client, (str, PathLike)):
         client = P115Client(client)
+    if batch_size <= 0:
+        batch_size = 10_000
     if app == "open" or not isinstance(client, P115Client):
         method = "fs_star_set_open"
+        batch_size = min(batch_size, 1_000)
     elif app in ("", "web", "desktop", "aps"):
         method = "fs_star_set"
+        batch_size = min(batch_size, 10_000)
     else:
         method = "fs_star_set_app"
         request_kwargs["app"] = app
+        batch_size = min(batch_size, 5_000)
     return update_abstract(
         client, 
         ids, # type: ignore
@@ -445,10 +456,75 @@ def update_star(
     )
 
 
+def update_star_fast(
+    client: str | PathLike | P115Client | P115OpenClient, 
+    ids: int | str | Mapping | Iterable[int | str | Mapping], 
+    /, 
+    star: bool = True, 
+    batch_size: int = 0, 
+    app: str = "web", 
+):
+    """快速批量给文件或目录设置星标
+
+    .. note::
+        如果一批中有任何一个 id 已经被删除，则这一批直接失败报错，除非 client 是 P115OpenClient 或 ``app="open"``
+
+    .. attention::
+        无论有多少 id，这个接口几乎是立即返回的，但服务器上处理得可能没那么快，需要等上几秒
+
+    :param client: 115 客户端或 cookies
+    :param ids: 一组文件或目录的 id 或 pickcode
+    :param star: 是否设置星标
+    :param batch_size: 批次大小，分批次，每次提交的 id 数
+    :param app: 使用此设备的接口
+    """
+    if isinstance(client, (str, PathLike)):
+        client = P115Client(client)
+    if batch_size <= 0:
+        batch_size = 100_000
+    make_data: Callable
+    headers = {"content-type": "application/x-www-form-urlencoded"}
+    if app == "open" or not isinstance(client, P115Client):
+        headers["authorization"] = "Bearer " + client.access_token
+        host, path = "proapi.115.com", "/open/ufile/update"
+        batch_size = min(batch_size, 1_000)
+        make_data = lambda batch, /: [("star", int(star))] + [("file_id[]", id) for id in batch]
+    elif app in ("", "web", "desktop", "aps"):
+        headers["cookie"] = client.cookies_str
+        host, path = "webapi.115.com", "/files/star"
+        batch_size = min(batch_size, 20_000)
+        make_data = lambda batch, /: {
+            "file_id": ",".join(map(str, batch)), 
+            "star": int(star), 
+        }
+    else:
+        headers["cookie"] = client.cookies_str
+        host, path = "proapi.115.com", "/android/files/star"
+        batch_size = min(batch_size, 11_000)
+        make_data = lambda batch, /: {
+            "ids": ",".join(map(str, batch)), 
+            "star": int(star), 
+            "user_id": client.user_id, 
+        }
+    from http.client import HTTPSConnection
+    from urllib.parse import urlencode
+    def star_set(batch, /):
+        data = urlencode(make_data(batch)).encode("ascii")
+        con = HTTPSConnection(host)
+        try:
+            con.request("POST", path, data, headers)
+        finally:
+            con.close()
+    if isinstance(ids, (int, str, Mapping)):
+        ids = ids,
+    for batch in batched(map(_get_id, ids), batch_size):
+        start_new_thread(star_set, (batch,))
+
+
 @overload
 def update_score(
     client: str | PathLike | P115Client, 
-    ids: Iterable[int | str], 
+    ids: int | str | Mapping | Iterable[int | str | Mapping], 
     /, 
     score: int = 0, 
     batch_size: int = 1_000, 
@@ -461,7 +537,7 @@ def update_score(
 @overload
 def update_score(
     client: str | PathLike | P115Client, 
-    ids: Iterable[int | str] | AsyncIterable[int | str], 
+    ids: int | str | Mapping | Iterable[int | str | Mapping] | AsyncIterable[int | str | Mapping], 
     /, 
     score: int = 0, 
     batch_size: int = 1_000, 
@@ -473,7 +549,7 @@ def update_score(
     ...
 def update_score(
     client: str | PathLike | P115Client, 
-    ids: Iterable[int | str] | AsyncIterable[int | str], 
+    ids: int | str | Mapping | Iterable[int | str | Mapping] | AsyncIterable[int | str | Mapping], 
     /, 
     score: int = 0, 
     batch_size: int = 1_000, 
@@ -507,7 +583,7 @@ def update_score(
 @overload
 def update_top(
     client: str | PathLike | P115Client, 
-    ids: Iterable[int | str], 
+    ids: int | str | Mapping | Iterable[int | str | Mapping], 
     /, 
     top: bool = True, 
     batch_size: int = 1_000, 
@@ -520,7 +596,7 @@ def update_top(
 @overload
 def update_top(
     client: str | PathLike | P115Client, 
-    ids: Iterable[int | str] | AsyncIterable[int | str], 
+    ids: int | str | Mapping | Iterable[int | str | Mapping] | AsyncIterable[int | str | Mapping], 
     /, 
     top: bool = True, 
     batch_size: int = 1_000, 
@@ -532,7 +608,7 @@ def update_top(
     ...
 def update_top(
     client: str | PathLike | P115Client, 
-    ids: Iterable[int | str] | AsyncIterable[int | str], 
+    ids: int | str | Mapping | Iterable[int | str | Mapping] | AsyncIterable[int | str | Mapping], 
     /, 
     top: bool = True, 
     batch_size: int = 1_000, 
@@ -563,15 +639,15 @@ def update_top(
     )
 
 
-
 @overload
 def update_category_shortcut(
     client: str | PathLike | P115Client, 
-    ids: Iterable[int | str], 
+    ids: int | str | Mapping | Iterable[int | str | Mapping], 
     /, 
     set: bool = True, 
     batch_size: int = 1_000, 
     max_workers: None | int = 0, 
+    app: str = "web", 
     *, 
     async_: Literal[False] = False, 
     **request_kwargs, 
@@ -580,11 +656,12 @@ def update_category_shortcut(
 @overload
 def update_category_shortcut(
     client: str | PathLike | P115Client, 
-    ids: Iterable[int | str] | AsyncIterable[int | str], 
+    ids: int | str | Mapping | Iterable[int | str | Mapping] | AsyncIterable[int | str | Mapping], 
     /, 
     set: bool = True, 
     batch_size: int = 1_000, 
     max_workers: None | int = 0, 
+    app: str = "web", 
     *, 
     async_: Literal[True], 
     **request_kwargs, 
@@ -592,11 +669,12 @@ def update_category_shortcut(
     ...
 def update_category_shortcut(
     client: str | PathLike | P115Client, 
-    ids: Iterable[int | str] | AsyncIterable[int | str], 
+    ids: int | str | Mapping | Iterable[int | str | Mapping] | AsyncIterable[int | str | Mapping], 
     /, 
     set: bool = True, 
     batch_size: int = 1_000, 
     max_workers: None | int = 0, 
+    app: str = "web", 
     *, 
     async_: Literal[False, True] = False, 
     **request_kwargs, 
@@ -608,13 +686,19 @@ def update_category_shortcut(
     :param set: 是否设为快捷入口
     :param batch_size: 批次大小，分批次，每次提交的 id 数
     :param max_workers: 并发工作数，如果为 None 或者 < 0，则自动确定
+    :param app: 使用此设备的接口
     :param async_: 是否异步
     :param request_kwargs: 其它请求参数
     """
+    if app in ("", "web", "desktop", "aps"):
+        method = "fs_category_shortcut_set"
+    else:
+        method = "fs_category_shortcut_set_app"
+        request_kwargs["app"] = app
     return update_abstract(
         client, 
         ids, # type: ignore
-        method="fs_category_shortcut_set", 
+        method=method, 
         value=set, 
         batch_size=batch_size, 
         max_workers=max_workers, 
@@ -626,7 +710,7 @@ def update_category_shortcut(
 @overload
 def update_name(
     client: str | PathLike | P115Client, 
-    id_name_pairs: Iterable[tuple[int | str, str]], 
+    id_name_pairs: tuple[int | str, str] | Iterable[tuple[int | str, str]], 
     /, 
     batch_size: int = 1_000, 
     app: str = "web", 
@@ -638,7 +722,7 @@ def update_name(
 @overload
 def update_name(
     client: str | PathLike | P115Client, 
-    id_name_pairs: Iterable[tuple[int | str, str]], 
+    id_name_pairs: tuple[int | str, str] | Iterable[tuple[int | str, str]] | AsyncIterable[tuple[int | str, str]], 
     /, 
     batch_size: int = 1_000, 
     app: str = "web", 
@@ -649,7 +733,7 @@ def update_name(
     ...
 def update_name(
     client: str | PathLike | P115Client, 
-    id_name_pairs: Iterable[tuple[int | str, str]], 
+    id_name_pairs: tuple[int | str, str] | Iterable[tuple[int | str, str]] | AsyncIterable[tuple[int | str, str]], 
     /, 
     batch_size: int = 1_000, 
     app: str = "web", 
@@ -660,7 +744,25 @@ def update_name(
     """批量给文件或目录设置名字
 
     .. note::
-        不支持 open，是因为它仅能一次修改一个名字，并不能批量
+        不支持 open，是因为它仅能一次修改一个名字，并不能批量。
+
+        下面的代码，支持批量修改某个目录树下的所有名字：
+
+        .. code:: python
+            from collections.abc import Callable
+            from p115client import P115Client
+            from p115client.tool import *
+
+            def batch_rename(
+                client: P115Client, 
+                cid: int, 
+                repl: Callable[[str], str], 
+            ) -> dict:
+                return update_name(client, (
+                    (a["id"], n) 
+                    for a in traverse_tree(client, cid) 
+                    if (n := repl(a["name"])) != a["name"]
+                ))
 
     :param client: 115 客户端或 cookies
     :param id_name_pairs: 一堆文件或目录的 id 到新名字的元组
@@ -673,6 +775,8 @@ def update_name(
     """
     if isinstance(client, (str, PathLike)):
         client = P115Client(client)
+    if isinstance(id_name_pairs, tuple) and id_name_pairs and not isinstance(id_name_pairs[0], tuple):
+        id_name_pairs = id_name_pairs,
     if app in ("", "web", "desktop", "aps"):
         method: Callable = client.fs_rename
     else:
@@ -680,16 +784,18 @@ def update_name(
         request_kwargs["app"] = app
     def gen_step():
         mapping: dict[int, str] = {}
-        for batch in batched(id_name_pairs, batch_size):
-            resp = yield method(
-                batch, 
-                async_=async_, 
-                **request_kwargs, 
-            )
-            check_response(resp)
-            if data := resp["data"]:
-                for k, v in data.items():
-                    mapping[int(k)] = v
+        with with_iter_next(chunked(id_name_pairs, batch_size)) as get_next:
+            while True:
+                batch = yield get_next()
+                resp = yield method(
+                    batch, 
+                    async_=async_, 
+                    **request_kwargs, 
+                )
+                check_response(resp)
+                if data := resp["data"]:
+                    for k, v in data.items():
+                        mapping[int(k)] = v
         return mapping
     return run_gen_step(gen_step, async_)
 
@@ -748,11 +854,6 @@ def batch_unstar(
     """
     if isinstance(client, (str, PathLike)):
         client = P115Client(client)
-    def get_id(info: dict, /) -> int:
-        for k in ("file_id", "category_id", "fid", "cid"):
-            if k in info:
-                return int(info[k])
-        raise KeyError
     def gen_step():
         if max_workers == 0:
             from .attr import overview_attr
@@ -760,7 +861,7 @@ def batch_unstar(
             while True:
                 resp = yield fs_files(
                     client, 
-                    payload={"cid": 0, "cur": 0, "star": 1}, 
+                    {"cid": 0, "cur": 0, "star": 1}, 
                     page_size=batch_size, 
                     ensure_file=ensure_file, 
                     app=app, 
@@ -781,37 +882,41 @@ def batch_unstar(
                     break
         else:
             from .iterdir import iterdir
+            from .attr import normalize_attr_simple
             ids: list[int] = []
             append = ids.append
             yield foreach(
-                lambda a: append(get_id(a)), 
+                lambda a: append(a["id"]), 
                 iterdir(
                     client, 
                     cur=0, 
                     star=1, 
+                    normalize_attr=normalize_attr_simple, 
                     ensure_file=ensure_file, 
+                    max_workers=max_workers, 
                     app=app, 
                     async_=async_, 
                     **request_kwargs, 
                 )
             )
-            yield update_star(
-                client, 
-                ids, 
-                star=False, 
-                batch_size=batch_size or 10_000, 
-                max_workers=max_workers, 
-                app=app, 
-                async_=async_, 
-                **request_kwargs, 
-            )
+            if ids:
+                yield update_star(
+                    client, 
+                    ids, 
+                    star=False, 
+                    batch_size=batch_size or 1_000, 
+                    max_workers=max_workers, 
+                    app=app, 
+                    async_=async_, 
+                    **request_kwargs, 
+                )
     return run_gen_step(gen_step, async_)
 
 
 @overload
 def post_event(
     client: str | PathLike | P115Client, 
-    ids: Iterable[int | str], 
+    ids: int | str | Mapping | Iterable[int | str | Mapping], 
     /, 
     type: Literal["doc", "img"] = "doc", 
     batch_size: int = 1_000, 
@@ -825,7 +930,7 @@ def post_event(
 @overload
 def post_event(
     client: str | PathLike | P115Client, 
-    ids: Iterable[int | str] | AsyncIterable[int | str], 
+    ids: int | str | Mapping | Iterable[int | str | Mapping] | AsyncIterable[int | str | Mapping], 
     /, 
     type: Literal["doc", "img"] = "doc", 
     batch_size: int = 1_000, 
@@ -838,7 +943,7 @@ def post_event(
     ...
 def post_event(
     client: str | PathLike | P115Client, 
-    ids: Iterable[int | str] | AsyncIterable[int | str], 
+    ids: int | str | Mapping | Iterable[int | str | Mapping] | AsyncIterable[int | str | Mapping], 
     /, 
     type: Literal["doc", "img"] = "doc", 
     batch_size: int = 1_000, 
@@ -868,6 +973,8 @@ def post_event(
     """
     if isinstance(client, (str, PathLike)):
         client = P115Client(client)
+    if isinstance(ids, (int, str, Mapping)):
+        ids = ids,
     if type == "doc":
         post = client.life_behavior_doc_post_app
     else:
@@ -878,6 +985,133 @@ def post_event(
         max_workers=max_workers, 
         async_=async_, # type: ignore
     ))
+
+
+@overload
+def iter_batch_desc(
+    client: str | PathLike | P115Client, 
+    pairs: Iterable[tuple[int | str | tuple[int | str], str]], 
+    /, 
+    max_workers: None | int = 0, 
+    app: str = "android", 
+    *, 
+    async_: Literal[False] = False, 
+    **request_kwargs, 
+) -> Iterator[tuple[int | str | tuple[int | str], dict]]:
+    ...
+@overload
+def iter_batch_desc(
+    client: str | PathLike | P115Client, 
+    pairs: Iterable[tuple[int | str | tuple[int | str], str]], 
+    /, 
+    max_workers: None | int = 0, 
+    app: str = "android", 
+    *, 
+    async_: Literal[True], 
+    **request_kwargs, 
+) -> AsyncIterator[tuple[int | str | tuple[int | str], dict]]:
+    ...
+def iter_batch_desc(
+    client: str | PathLike | P115Client, 
+    pairs: Iterable[tuple[int | str | tuple[int | str], str]], 
+    /, 
+    max_workers: None | int = 0, 
+    app: str = "android", 
+    *, 
+    async_: Literal[False, True] = False, 
+    **request_kwargs, 
+) -> Iterator[tuple[int | str | tuple[int | str], dict]] | AsyncIterator[tuple[int | str | tuple[int | str], dict]]:
+    """批量设置备注
+
+    :param client: 115 客户端或 cookies
+    :param pairs: 一系列的 **名字或相对路径** 或者 (**目录的 id 或 pickcode**, **名字或相对路径**) 的 2 元组
+    :param max_workers: 并发工作数，如果为 None 或者 < 0，则自动确定
+    :param app: 使用此设备的接口
+    :param async_: 是否异步
+    :param request_kwargs: 其它请求参数
+
+    :return: 迭代器，产生 (**每项输入**, **相应的接口响应**) 的 2 元组
+    """
+    if isinstance(client, (str, PathLike)):
+        client = P115Client(client)
+    if app in ("", "web", "desktop", "aps"):
+        label_set: Callable = client.fs_desc_set
+    else:
+        label_set = client.fs_desc_set_app
+        request_kwargs["app"] = app
+    @as_gen_step(async_=async_)
+    def call(pair: tuple[int | str | tuple[int | str], str], /):
+        resp = yield label_set(
+            *pair, 
+            async_=async_, 
+            **request_kwargs, 
+        )
+        return pair[0], resp
+    return conmap(
+        call, 
+        pairs, 
+        max_workers=max_workers, 
+        async_=async_, 
+    )
+
+
+@overload
+def batch_desc(
+    client: str | PathLike | P115Client | P115OpenClient, 
+    pairs: tuple[int, str] | Iterable[tuple[int | str, str]], 
+    /, 
+    max_workers: None | int = 0, 
+    app: str = "android", 
+    *, 
+    async_: Literal[False] = False, 
+    **request_kwargs, 
+) -> dict[int | str, dict]:
+    ...
+@overload
+def batch_desc(
+    client: str | PathLike | P115Client | P115OpenClient, 
+    pairs: tuple[int, str] | Iterable[tuple[int | str, str]], 
+    /, 
+    max_workers: None | int = 0, 
+    app: str = "android", 
+    *, 
+    async_: Literal[True], 
+    **request_kwargs, 
+) -> Coroutine[Any, Any, dict[int | str, dict]]:
+    ...
+def batch_desc(
+    client: str | PathLike | P115Client | P115OpenClient, 
+    pairs: tuple[int, str] | Iterable[tuple[int | str, str]], 
+    /, 
+    max_workers: None | int = 0, 
+    app: str = "android", 
+    *, 
+    async_: Literal[False, True] = False, 
+    **request_kwargs, 
+) -> dict[int | str, dict] | Coroutine[Any, Any, dict[int | str, dict]]:
+    """批量设置备注
+
+    :param client: 115 客户端或 cookies
+    :param pairs: 一系列的 **名字或相对路径** 或者 (**目录的 id 或 pickcode**, **名字或相对路径**) 的 2 元组
+    :param max_workers: 并发工作数，如果为 None 或者 < 0，则自动确定
+    :param app: 使用此设备的接口
+    :param async_: 是否异步
+    :param request_kwargs: 其它请求参数
+
+    :return: 字典，id 到 接口响应
+    """
+    if isinstance(client, (str, PathLike)):
+        client = P115Client(client)
+    def gen_step():
+        return (yield collect(iter_batch_desc(
+            client, 
+            pairs, 
+            max_workers=max_workers, 
+            app=app, 
+            async_=async_, # type: ignore
+            **request_kwargs, 
+        ), rettype=dict))
+    return run_gen_step(gen_step, async_)
 
 
 @overload
@@ -1114,7 +1348,7 @@ def batch_makedir(
     :param async_: 是否异步
     :param request_kwargs: 其它请求参数
 
-    :return: 迭代器，产生 (**每项输入**, **相应的接口响应**) 的 2 元组
+    :return: 映射容器，参数 (id, name) 到 接口响应
     """
     if async_:
         async def take(it, /):
@@ -1172,7 +1406,7 @@ def batch_makedir(
 @overload
 def batch_copy(
     client: str | PathLike | P115Client | P115OpenClient, 
-    ids: int | str | Iterable[int | str], 
+    ids: int | str | Mapping | Iterable[int | str | Mapping], 
     pid: int | str = 0, 
     batch_size: int = 1_000, 
     app: str = "android", 
@@ -1184,7 +1418,7 @@ def batch_copy(
 @overload
 def batch_copy(
     client: str | PathLike | P115Client | P115OpenClient, 
-    ids: int | str | Iterable[int | str], 
+    ids: int | str | Mapping | Iterable[int | str | Mapping], 
     pid: int | str = 0, 
     batch_size: int = 1_000, 
     app: str = "android", 
@@ -1195,7 +1429,7 @@ def batch_copy(
     ...
 def batch_copy(
     client: str | PathLike | P115Client | P115OpenClient, 
-    ids: int | str | Iterable[int | str], 
+    ids: int | str | Mapping | Iterable[int | str | Mapping], 
     pid: int | str = 0, 
     batch_size: int = 1_000, 
     app: str = "android", 
@@ -1367,7 +1601,7 @@ def batch_copy_files(
 @overload
 def batch_delete(
     client: str | PathLike | P115Client | P115OpenClient, 
-    ids: int | str | Iterable[int | str], 
+    ids: int | str | Mapping | Iterable[int | str | Mapping], 
     batch_size: int = 1_000, 
     app: str = "android", 
     *, 
@@ -1378,7 +1612,7 @@ def batch_delete(
 @overload
 def batch_delete(
     client: str | PathLike | P115Client | P115OpenClient, 
-    ids: int | str | Iterable[int | str], 
+    ids: int | str | Mapping | Iterable[int | str | Mapping], 
     batch_size: int = 1_000, 
     app: str = "android", 
     *, 
@@ -1388,7 +1622,7 @@ def batch_delete(
     ...
 def batch_delete(
     client: str | PathLike | P115Client | P115OpenClient, 
-    ids: int | str | Iterable[int | str], 
+    ids: int | str | Mapping | Iterable[int | str | Mapping], 
     batch_size: int = 1_000, 
     app: str = "android", 
     *, 
@@ -1542,7 +1776,7 @@ def batch_delete_files(
 @overload
 def batch_move(
     client: str | PathLike | P115Client | P115OpenClient, 
-    ids: int | str | Iterable[int | str], 
+    ids: int | str | Mapping | Iterable[int | str | Mapping], 
     pid: int | str = 0, 
     batch_size: int = 1_000, 
     app: str = "android", 
@@ -1554,7 +1788,7 @@ def batch_move(
 @overload
 def batch_move(
     client: str | PathLike | P115Client | P115OpenClient, 
-    ids: int | str | Iterable[int | str], 
+    ids: int | str | Mapping | Iterable[int | str | Mapping], 
     pid: int | str = 0, 
     batch_size: int = 1_000, 
     app: str = "android", 
@@ -1565,7 +1799,7 @@ def batch_move(
     ...
 def batch_move(
     client: str | PathLike | P115Client | P115OpenClient, 
-    ids: int | str | Iterable[int | str], 
+    ids: int | str | Mapping | Iterable[int | str | Mapping], 
     pid: int | str = 0, 
     batch_size: int = 1_000, 
     app: str = "android", 
@@ -1739,7 +1973,7 @@ def batch_move_files(
 @overload
 def batch_recyclebin_clean(
     client: str | PathLike | P115Client | P115OpenClient, 
-    rids: int | str | Iterable[int | str], 
+    rids: int | str | Mapping | Iterable[int | str | Mapping], 
     /, 
     password: str = "000000", 
     batch_size: int = 1_000, 
@@ -1752,7 +1986,7 @@ def batch_recyclebin_clean(
 @overload
 def batch_recyclebin_clean(
     client: str | PathLike | P115Client | P115OpenClient, 
-    rids: int | str | Iterable[int | str], 
+    rids: int | str | Mapping | Iterable[int | str | Mapping], 
     /, 
     password: str = "000000", 
     batch_size: int = 1_000, 
@@ -1764,7 +1998,7 @@ def batch_recyclebin_clean(
     ...
 def batch_recyclebin_clean(
     client: str | PathLike | P115Client | P115OpenClient, 
-    rids: int | str | Iterable[int | str], 
+    rids: int | str | Mapping | Iterable[int | str | Mapping], 
     /, 
     password: str = "000000", 
     batch_size: int = 1_000, 
@@ -1814,7 +2048,7 @@ def batch_recyclebin_clean(
 @overload
 def batch_recyclebin_revert(
     client: str | PathLike | P115Client | P115OpenClient, 
-    rids: int | str | Iterable[int | str], 
+    rids: int | str | Mapping | Iterable[int | str | Mapping], 
     /, 
     batch_size: int = 1_000, 
     app: str = "android", 
@@ -1826,7 +2060,7 @@ def batch_recyclebin_revert(
 @overload
 def batch_recyclebin_revert(
     client: str | PathLike | P115Client | P115OpenClient, 
-    rids: int | str | Iterable[int | str], 
+    rids: int | str | Mapping | Iterable[int | str | Mapping], 
     /, 
     batch_size: int = 1_000, 
     app: str = "android", 
@@ -1837,7 +2071,7 @@ def batch_recyclebin_revert(
     ...
 def batch_recyclebin_revert(
     client: str | PathLike | P115Client | P115OpenClient, 
-    rids: int | str | Iterable[int | str], 
+    rids: int | str | Mapping | Iterable[int | str | Mapping], 
     /, 
     batch_size: int = 1_000, 
     app: str = "android", 
@@ -1881,7 +2115,7 @@ def batch_recyclebin_revert(
 @overload
 def batch_hide(
     client: str | PathLike | P115Client, 
-    ids: int | str | Iterable[int | str], 
+    ids: int | str | Mapping | Iterable[int | str | Mapping], 
     hidden: bool = True, 
     batch_size: int = 1_000, 
     app: str = "web", 
@@ -1893,7 +2127,7 @@ def batch_hide(
 @overload
 def batch_hide(
     client: str | PathLike | P115Client, 
-    ids: int | str | Iterable[int | str], 
+    ids: int | str | Mapping | Iterable[int | str | Mapping], 
     hidden: bool = True, 
     batch_size: int = 1_000, 
     app: str = "web", 
@@ -1904,7 +2138,7 @@ def batch_hide(
     ...
 def batch_hide(
     client: str | PathLike | P115Client, 
-    ids: int | str | Iterable[int | str], 
+    ids: int | str | Mapping | Iterable[int | str | Mapping], 
     hidden: bool = True, 
     batch_size: int = 1_000, 
     app: str = "web", 
@@ -1983,7 +2217,7 @@ def batch_label(
     """批量调整标签
 
     .. caution::
-        接口有缺陷，不仅速度比较慢，而且经常会出现遗漏，且可能有延迟
+        接口似乎有缺陷，不仅速度比较慢，而且可能会出现遗漏，并且延迟较高
 
     :param client: 115 客户端或 cookies
     :param ids: 一组文件或目录的 id 或 pickcode

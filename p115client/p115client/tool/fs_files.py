@@ -36,6 +36,7 @@ def fs_files(
     /, 
     page_size: int = 0, 
     app: str = "web", 
+    app_api_suffix: Literal[1, 2, 3] = 1, 
     use_media_api: bool = False, 
     fs_files: None | Callable = None, 
     *, 
@@ -50,6 +51,7 @@ def fs_files(
     /, 
     page_size: int = 0, 
     app: str = "web", 
+    app_api_suffix: Literal[1, 2, 3] = 1, 
     use_media_api: bool = False, 
     fs_files: None | Callable = None, 
     *, 
@@ -63,6 +65,7 @@ def fs_files(
     /, 
     page_size: int = 0, 
     app: str = "web", 
+    app_api_suffix: Literal[1, 2, 3] = 1, 
     use_media_api: bool = False, 
     fs_files: None | Callable = None, 
     *, 
@@ -75,6 +78,7 @@ def fs_files(
     :param payload: 目录的 id 或者详细的查询参数
     :param page_size: 分页大小，如果 <= 0，则自动确定
     :param app: 使用此设备的接口
+    :param app_api_suffix: 当 ``app`` 不是 web 端且 ``use_media_api=False``时，调用 ``getattr(client, "fs_files_app" + str(app_api_suffix))``
     :param use_media_api: 是否使用 ``P115Client.fs_files_media`` 接口
     :param fs_files: 指定所用的接口，而不是自动确定
     :param async_: 是否异步
@@ -120,7 +124,7 @@ def fs_files(
                 else:
                     fs_files = client.fs_files_media_app
             else:
-                fs_files = client.fs_files_app
+                fs_files = getattr(client, "fs_files_app" + str(app_api_suffix))
             request_kwargs["app"] = app
             request_kwargs.setdefault("base_url", get_proapi_origin)
     fs_files = cast(Callable, fs_files)
@@ -142,6 +146,7 @@ def fs_files_iter(
     page_size: int = 0, 
     first_page_size: int = 0, 
     app: str = "web", 
+    app_api_suffix: Literal[1, 2, 3] = 1, 
     use_media_api: bool = False, 
     fs_files: None | Callable = None, 
     raise_for_changed_count: bool = False, 
@@ -160,6 +165,7 @@ def fs_files_iter(
     page_size: int = 0, 
     first_page_size: int = 0, 
     app: str = "web", 
+    app_api_suffix: Literal[1, 2, 3] = 1, 
     use_media_api: bool = False, 
     fs_files: None | Callable = None, 
     raise_for_changed_count: bool = False, 
@@ -177,6 +183,7 @@ def fs_files_iter(
     page_size: int = 0, 
     first_page_size: int = 0, 
     app: str = "web", 
+    app_api_suffix: Literal[1, 2, 3] = 1, 
     use_media_api: bool = False, 
     fs_files: None | Callable = None, 
     raise_for_changed_count: bool = False, 
@@ -193,6 +200,7 @@ def fs_files_iter(
     :param page_size: 分页大小，如果 <= 0，则自动确定
     :param first_page_size: 首次拉取的分页大小，如果 <= 0，则自动确定
     :param app: 使用此设备的接口
+    :param app_api_suffix: 当 ``app`` 不是 web 端且 ``use_media_api=False``时，调用 ``getattr(client, "fs_files_app" + str(app_api_suffix))``
     :param use_media_api: 是否使用 ``P115Client.fs_files_media`` 接口
     :param fs_files: 指定所用的接口，而不是自动确定
     :param raise_for_changed_count: 分批拉取时，发现总数发生变化后，是否报错
@@ -241,7 +249,7 @@ def fs_files_iter(
                 else:
                     fs_files = client.fs_files_media_app
             else:
-                fs_files = client.fs_files_app
+                fs_files = getattr(client, "fs_files_app" + str(app_api_suffix))
             request_kwargs["app"] = app
             request_kwargs.setdefault("base_url", get_proapi_origin)
     fs_files = cast(Callable, fs_files)

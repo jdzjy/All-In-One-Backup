@@ -464,10 +464,10 @@ def check_response(resp: dict | Awaitable[dict], /) -> dict | Coroutine[Any, Any
                 # {"state": 0, "errno": 40140124, "error": "access_token 签名校验失败（防篡改）"}
                 case 40140124:
                     raise P115AccessTokenError(errno.EINVAL, resp)
-                # {"state": 0, "errno": 40140125, "error": "access_token 无效（已过期或者已解除授权）"}
+                # {"state": 0, "errno": 40140125, "error": "access_token 无效(已过期、已解除授权或授权缓存不存在)"}
                 case 40140125:
                     raise P115AccessTokenError(errno.EINVAL, resp)
-                # {"state": 0, "errno": 40140126, "error": "access_token 校验失败（防篡改）"}
+                # {"state": 0, "errno": 40140126, "error": "access_token 与当前授权记录不匹配"}
                 case 40140126:
                     raise P115AccessTokenError(errno.EINVAL, resp)
                 # {"state": 0, "errno": 40140127, "error": "response_type 错误"}
@@ -499,6 +499,9 @@ def check_response(resp: dict | Awaitable[dict], /) -> dict | Coroutine[Any, Any
                     throw(errno.EINVAL, resp)
                 # {"state": 0, "errno": 40140136, "error": "redirect_uri 验证失败（防MITM）"}
                 case 40140136:
+                    throw(errno.EINVAL, resp)
+                # {"state": 0, "errno": 40140137, "error": "refresh_token 已失效，请停止重试并重新授权(终态)"}
+                case 40140137:
                     throw(errno.EINVAL, resp)
         elif error := resp.get("error"):
             if error == "更新的数据为空":
@@ -776,7 +779,7 @@ class ClientRequestMixin:
                         access_token = self.access_token
                         headers["authorization"] = "Bearer " + access_token
                         resp = yield request(async_=async_, **request_kwargs)
-                        if resp.get("errno") != 40140125:
+                        if resp.get("errno") not in (40140120, 40140125, 40140126):
                             if check:
                                 return check_response(resp)
                             return resp
@@ -2447,6 +2450,16 @@ class P115OpenClient(ClientRequestMixin):
         return run_gen_step(gen_step, async_)
 
     @locked_cacheproperty
+    def access_token(self, /) -> str:
+        if getattr(self, "refresh_token", None):
+            self.refresh_access_token()
+        elif hasattr(self, "login_another_open"):
+            self.login_another_open(replace=True)
+        else:
+            raise RuntimeError("can't get access token")
+        return self.access_token
+
+    @locked_cacheproperty
     def pickcode_stable_point(self, /) -> str:
         """获取 pickcode 的不动点，或者也叫本征值
 
@@ -3060,7 +3073,7 @@ class P115OpenClient(ClientRequestMixin):
     @overload
     def download_url_info(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
         user_agent: None | str = None, 
@@ -3072,7 +3085,7 @@ class P115OpenClient(ClientRequestMixin):
     @overload
     def download_url_info(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
         user_agent: None | str = None, 
@@ -3083,7 +3096,7 @@ class P115OpenClient(ClientRequestMixin):
         ...
     def download_url_info(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
         user_agent: None | str = None, 
@@ -3108,6 +3121,8 @@ class P115OpenClient(ClientRequestMixin):
         api = complete_url("/open/ufile/downurl", base_url)
         if isinstance(payload, str):
             payload = {"pick_code": payload}
+        elif isinstance(payload, int):
+            payload = {"pick_code": self.to_pickcode(payload)}
         headers = request_kwargs["headers"] = dict(request_kwargs.get("headers") or ())
         if user_agent is None:
             headers.setdefault("user-agent", "")
@@ -3745,8 +3760,13 @@ class P115OpenClient(ClientRequestMixin):
         .. note::
             即使其中任何一个 id 目前已经被删除，也可以操作成功
 
+        .. attention::
+            传入的 id 最好不要超过 1,000，否则可能会报错
+
         :payload:
             - file_id: int | str    💡 只能传入 1 个
+            - file_id[]: int | str
+            - ...
             - file_id[0]: int | str 💡 如果有多个，则按顺序给出
             - file_id[1]: int | str
             - ...
@@ -3762,7 +3782,7 @@ class P115OpenClient(ClientRequestMixin):
     @overload
     def fs_video(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
         *, 
@@ -3773,7 +3793,7 @@ class P115OpenClient(ClientRequestMixin):
     @overload
     def fs_video(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
         *, 
@@ -3783,7 +3803,7 @@ class P115OpenClient(ClientRequestMixin):
         ...
     def fs_video(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
         *, 
@@ -3808,12 +3828,14 @@ class P115OpenClient(ClientRequestMixin):
         api = complete_url("/open/video/play", base_url)
         if isinstance(payload, str):
             payload = {"pick_code": payload}
+        elif isinstance(payload, int):
+            payload = {"pick_code": self.to_pickcode(payload)}
         return self.request(url=api, params=payload, async_=async_, **request_kwargs)
 
     @overload
     def fs_video_history(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
         *, 
@@ -3824,7 +3846,7 @@ class P115OpenClient(ClientRequestMixin):
     @overload
     def fs_video_history(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
         *, 
@@ -3834,7 +3856,7 @@ class P115OpenClient(ClientRequestMixin):
         ...
     def fs_video_history(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
         *, 
@@ -3855,12 +3877,14 @@ class P115OpenClient(ClientRequestMixin):
         api = complete_url("/open/video/history", base_url)
         if isinstance(payload, str):
             payload = {"pick_code": payload}
+        elif isinstance(payload, int):
+            payload = {"pick_code": self.to_pickcode(payload)}
         return self.request(url=api, params=payload, async_=async_, **request_kwargs)
 
     @overload
     def fs_video_history_set(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
         *, 
@@ -3871,7 +3895,7 @@ class P115OpenClient(ClientRequestMixin):
     @overload
     def fs_video_history_set(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
         *, 
@@ -3881,7 +3905,7 @@ class P115OpenClient(ClientRequestMixin):
         ...
     def fs_video_history_set(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
         *, 
@@ -3904,12 +3928,14 @@ class P115OpenClient(ClientRequestMixin):
         api = complete_url("/open/video/history", base_url)
         if isinstance(payload, str):
             payload = {"pick_code": payload}
+        elif isinstance(payload, int):
+            payload = {"pick_code": self.to_pickcode(payload)}
         return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
 
     @overload
     def fs_video_push(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
         *, 
@@ -3920,7 +3946,7 @@ class P115OpenClient(ClientRequestMixin):
     @overload
     def fs_video_push(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
         *, 
@@ -3930,7 +3956,7 @@ class P115OpenClient(ClientRequestMixin):
         ...
     def fs_video_push(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
         *, 
@@ -3955,13 +3981,15 @@ class P115OpenClient(ClientRequestMixin):
         api = complete_url("/open/video/video_push", base_url)
         if isinstance(payload, str):
             payload = {"pick_code": payload}
+        elif isinstance(payload, int):
+            payload = {"pick_code": self.to_pickcode(payload)}
         payload.setdefault("op", "vip_push")
         return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
 
     @overload
     def fs_video_subtitle(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
         *, 
@@ -3972,7 +4000,7 @@ class P115OpenClient(ClientRequestMixin):
     @overload
     def fs_video_subtitle(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
         *, 
@@ -3982,7 +4010,7 @@ class P115OpenClient(ClientRequestMixin):
         ...
     def fs_video_subtitle(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
         *, 
@@ -4003,6 +4031,8 @@ class P115OpenClient(ClientRequestMixin):
         api = complete_url("/open/video/subtitle", base_url)
         if isinstance(payload, str):
             payload = {"pick_code": payload}
+        elif isinstance(payload, int):
+            payload = {"pick_code": self.to_pickcode(payload)}
         return self.request(url=api, params=payload, async_=async_, **request_kwargs)
 
     @overload
@@ -4222,6 +4252,7 @@ class P115OpenClient(ClientRequestMixin):
     @overload
     def upload_gettoken_open(
         self, 
+        payload: int | dict = {}, 
         /, 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
         *, 
@@ -4232,6 +4263,7 @@ class P115OpenClient(ClientRequestMixin):
     @overload
     def upload_gettoken_open(
         self, 
+        payload: int | dict = {}, 
         /, 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
         *, 
@@ -4241,6 +4273,7 @@ class P115OpenClient(ClientRequestMixin):
         ...
     def upload_gettoken_open(
         self, 
+        payload: int | dict = {}, 
         /, 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
         *, 
@@ -4254,9 +4287,14 @@ class P115OpenClient(ClientRequestMixin):
         .. admonition:: Reference
 
             https://www.yuque.com/115yun/open/kzacvzl0g7aiyyn4
+
+        :payload:
+            - upload_v2: 0 | 1 = <default> 💡 新版客户端能力标志；仅用于版本观测，不影响开放平台自动切换V2
         """
         api = complete_url("/open/upload/get_token", base_url)
-        return self.request(url=api, async_=async_, **request_kwargs)
+        if isinstance(payload, int):
+            payload = {"upload_v2": payload}
+        return self.request(url=api, params=payload, async_=async_, **request_kwargs)
 
     @overload
     def upload_init(
@@ -4309,8 +4347,12 @@ class P115OpenClient(ClientRequestMixin):
                 -  2: 目录任务调度的其余后续子文件不作记作单独上传的上传记录 
                 - -1: 没有该参数
 
-            - sign_key: str = "" 💡 2 次验证时读取文件的范围
-            - sign_val: str = "" 💡 2 次验证的签名值
+            - sign_key: str = <default> 💡 2 次验证时读取文件的范围
+            - sign_val: str = <default> 💡 2 次验证的签名值
+            - preid: str = <default> 💡 文件前 128 KiB 内容的 SHA1 值
+            - path: str = <default> 💡 上传路径
+            - pick_code: str = <default> 💡 上传任务唯一标识，用于续传
+            - upload_v2: 0 | 1 = <default> 💡 新版客户端能力标志；开放平台可选携带，服务端自动完成V2升级
         """
         api = complete_url("/open/upload/init", base_url)
         return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
@@ -4318,7 +4360,7 @@ class P115OpenClient(ClientRequestMixin):
     @overload
     def upload_resume(
         self, 
-        payload: dict | str, 
+        payload: str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
         *, 
@@ -4329,7 +4371,7 @@ class P115OpenClient(ClientRequestMixin):
     @overload
     def upload_resume(
         self, 
-        payload: dict | str, 
+        payload: str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
         *, 
@@ -4339,7 +4381,7 @@ class P115OpenClient(ClientRequestMixin):
         ...
     def upload_resume(
         self, 
-        payload: dict | str, 
+        payload: str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
         *, 
@@ -4355,10 +4397,11 @@ class P115OpenClient(ClientRequestMixin):
             https://www.yuque.com/115yun/open/tzvi9sbcg59msddz
 
         :payload:
-            - pick_code: str 💡 上传任务 key
+            - pick_code: str 💡 上传任务唯一标识
             - target: str    💡 上传目标，默认为 "U_1_0"，格式为 f"U_{aid}_{pid}" 或 f"S_{share_id}_{pid}"
             - fileid: str    💡 文件的 sha1 值（⚠️ 可以是任意值）
             - file_size: int 💡 文件大小，单位是字节（⚠️ 可以是任意值）
+            - upload_v2: 0 | 1 = <default> 💡 新版客户端能力标志；开放平台可选携带，服务端自动完成V2升级
         """
         api = complete_url("/open/upload/resume", base_url)
         if isinstance(payload, str):
@@ -4579,7 +4622,7 @@ class P115OpenClient(ClientRequestMixin):
         """
         request_kwargs["headers"] = dict(
             request_kwargs.get("headers") or (), 
-            authorization=self.headers["authorization"], 
+            authorization="Bearer " + self.access_token, 
         )
         return upload_file(
             file=file, 
@@ -4681,14 +4724,15 @@ class P115OpenClient(ClientRequestMixin):
             https://www.yuque.com/115yun/open/cguk6qshgapwg4qn#oByvI
 
         :payload:
-            - open_device: int
             - default_product_id: int = <default> 💡 打开产品列表默认选中的产品对应的产品id，如果没有则使用默认的产品顺序。
 
                 - 月费: 5
                 - 年费: 1
                 - 尝鲜1天: 101
-                - 长期VIP(长期): 24072401
-                - 超级VIP: 24072402
+                - 长期VIP(至尊版): 24072401
+
+            - open_device: str 💡 设备号
+            - hide_title: int 💡 是否隐藏购买页推荐人信息：0-不隐藏；1-隐藏
         """
         api = complete_url("/open/vip/qr_url", base_url)
         if not isinstance(payload, dict):
@@ -8406,7 +8450,7 @@ class P115Client(P115OpenClient):
     @overload
     def download_files(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -8417,7 +8461,7 @@ class P115Client(P115OpenClient):
     @overload
     def download_files(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -8427,7 +8471,7 @@ class P115Client(P115OpenClient):
         ...
     def download_files(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -8449,13 +8493,15 @@ class P115Client(P115OpenClient):
         api = complete_url(f"/files/downfiles", base_url)
         if isinstance(payload, str):
             payload = {"pickcode": payload}
+        elif isinstance(payload, int):
+            payload = {"pickcode": self.to_pickcode(payload)}
         payload = {"page": 1, "per_page": 5000, **payload}
         return self.request(url=api, params=payload, async_=async_, **request_kwargs)
 
     @overload
     def download_files_app(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         app: str = "chrome", 
         version: str = "2.0", 
@@ -8468,7 +8514,7 @@ class P115Client(P115OpenClient):
     @overload
     def download_files_app(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         app: str = "chrome", 
         version: str = "2.0", 
@@ -8480,7 +8526,7 @@ class P115Client(P115OpenClient):
         ...
     def download_files_app(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         app: str = "chrome", 
         version: str = "2.0", 
@@ -8513,13 +8559,15 @@ class P115Client(P115OpenClient):
             request_kwargs.setdefault("ecdh_encrypt", True)
         if isinstance(payload, str):
             payload = {"pickcode": payload}
+        elif isinstance(payload, int):
+            payload = {"pickcode": self.to_pickcode(payload)}
         payload = {"page": 1, "per_page": 5000, **payload}
         return self.request(url=api, params=payload, async_=async_, **request_kwargs)
 
     @overload
     def download_folders(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -8530,7 +8578,7 @@ class P115Client(P115OpenClient):
     @overload
     def download_folders(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -8540,7 +8588,7 @@ class P115Client(P115OpenClient):
         ...
     def download_folders(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -8562,13 +8610,15 @@ class P115Client(P115OpenClient):
         api = complete_url(f"/files/downfolders", base_url)
         if isinstance(payload, str):
             payload = {"pickcode": payload}
+        elif isinstance(payload, int):
+            payload = {"pickcode": self.to_pickcode(payload)}
         payload = {"page": 1, "per_page": 5000, **payload}
         return self.request(url=api, params=payload, async_=async_, **request_kwargs)
 
     @overload
     def download_folders_app(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         app: str = "chrome", 
         version: str = "2.0", 
@@ -8581,7 +8631,7 @@ class P115Client(P115OpenClient):
     @overload
     def download_folders_app(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         app: str = "chrome", 
         version: str = "2.0", 
@@ -8593,7 +8643,7 @@ class P115Client(P115OpenClient):
         ...
     def download_folders_app(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         app: str = "chrome", 
         version: str = "2.0", 
@@ -8623,13 +8673,15 @@ class P115Client(P115OpenClient):
             request_kwargs.setdefault("ecdh_encrypt", True)
         if isinstance(payload, str):
             payload = {"pickcode": payload}
+        elif isinstance(payload, int):
+            payload = {"pickcode": self.to_pickcode(payload)}
         payload = {"page": 1, "per_page": 5000, **payload}
         return self.request(url=api, params=payload, async_=async_, **request_kwargs)
 
     @overload
     def download_downfolder_app(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         app: str = "chrome", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
@@ -8641,7 +8693,7 @@ class P115Client(P115OpenClient):
     @overload
     def download_downfolder_app(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         app: str = "chrome", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
@@ -8652,7 +8704,7 @@ class P115Client(P115OpenClient):
         ...
     def download_downfolder_app(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         app: str = "chrome", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
@@ -8677,6 +8729,8 @@ class P115Client(P115OpenClient):
             api = complete_url("/folder/downfolder", base_url=base_url, app=app)
         if isinstance(payload, str):
             payload = {"pickcode": payload}
+        elif isinstance(payload, int):
+            payload = {"pickcode": self.to_pickcode(payload)}
         return self.request(url=api, params=payload, async_=async_, **request_kwargs)
 
     @overload
@@ -8948,7 +9002,7 @@ class P115Client(P115OpenClient):
     @overload
     def download_url_app(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         user_agent: None | str = None, 
         app: str = "chrome", 
@@ -8961,7 +9015,7 @@ class P115Client(P115OpenClient):
     @overload
     def download_url_app(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         user_agent: None | str = None, 
         app: str = "chrome", 
@@ -8973,7 +9027,7 @@ class P115Client(P115OpenClient):
         ...
     def download_url_app(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         user_agent: None | str = None, 
         app: str = "chrome", 
@@ -9004,6 +9058,8 @@ class P115Client(P115OpenClient):
             api = complete_url("/app/chrome/downurl", base_url)
             if isinstance(payload, str):
                 payload = {"pickcode": payload}
+            elif isinstance(payload, int):
+                payload = {"pickcode": self.to_pickcode(payload)}
             elif "pickcode" not in payload:
                 payload["pickcode"] = payload["pick_code"]
         elif app in ("os_windows", "os_mac", "os_linux", "windows", "mac", "linux"):
@@ -9012,6 +9068,8 @@ class P115Client(P115OpenClient):
             api = complete_url("/2.0/ufile/downurl", base_url=base_url, app=app)
             if isinstance(payload, str):
                 payload = {"pickcode": payload}
+            elif isinstance(payload, int):
+                payload = {"pickcode": self.to_pickcode(payload)}
             elif "pickcode" not in payload:
                 payload["pickcode"] = payload["pick_code"]
             # NOTE: 提取码不可是 "f" 开头，但允许由任何特征值构造（由 0-9 和 a-z 这 36 个字符，构成的 4 位字符串，例如 "0000"），但限定必须是自己网盘的文件（不能获取别人的文件）
@@ -9021,6 +9079,8 @@ class P115Client(P115OpenClient):
             api = complete_url("/2.0/ufile/download", base_url=base_url, app=app)
             if isinstance(payload, str):
                 payload = {"pick_code": payload}
+            elif isinstance(payload, int):
+                payload = {"pick_code": self.to_pickcode(payload)}
             elif "pick_code" not in payload:
                 payload["pick_code"] = payload["pickcode"]
         payload.setdefault("user_id", self.user_id)
@@ -9897,7 +9957,7 @@ class P115Client(P115OpenClient):
     @overload
     def extract_info(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -9908,7 +9968,7 @@ class P115Client(P115OpenClient):
     @overload
     def extract_info(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -9918,7 +9978,7 @@ class P115Client(P115OpenClient):
         ...
     def extract_info(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -9939,13 +9999,15 @@ class P115Client(P115OpenClient):
         api = complete_url("/files/extract_info", base_url=base_url)
         if isinstance(payload, str):
             payload = {"pick_code": payload}
+        elif isinstance(payload, int):
+            payload = {"pick_code": self.to_pickcode(payload)}
         payload = {"paths": "文件", "page_count": 999, "next_marker": "", "file_name": "", **payload}
         return self.request(url=api, params=payload, async_=async_, **request_kwargs)
 
     @overload
     def extract_info_app(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
@@ -9957,7 +10019,7 @@ class P115Client(P115OpenClient):
     @overload
     def extract_info_app(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
@@ -9968,7 +10030,7 @@ class P115Client(P115OpenClient):
         ...
     def extract_info_app(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
@@ -9990,6 +10052,8 @@ class P115Client(P115OpenClient):
         api = complete_url("/2.0/ufile/extract_info", base_url=base_url, app=app)
         if isinstance(payload, str):
             payload = {"pick_code": payload}
+        elif isinstance(payload, int):
+            payload = {"pick_code": self.to_pickcode(payload)}
         payload = {"paths": "文件", "page_count": 999, "next_marker": "", "file_name": "", **payload}
         return self.request(url=api, params=payload, async_=async_, **request_kwargs)
 
@@ -10157,7 +10221,7 @@ class P115Client(P115OpenClient):
     @overload
     def extract_push(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -10168,7 +10232,7 @@ class P115Client(P115OpenClient):
     @overload
     def extract_push(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -10178,7 +10242,7 @@ class P115Client(P115OpenClient):
         ...
     def extract_push(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -10199,12 +10263,14 @@ class P115Client(P115OpenClient):
         api = complete_url("/files/push_extract", base_url=base_url)
         if isinstance(payload, str):
             payload = {"pick_code": payload}
+        elif isinstance(payload, int):
+            payload = {"pick_code": self.to_pickcode(payload)}
         return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
 
     @overload
     def extract_push_app(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
@@ -10216,7 +10282,7 @@ class P115Client(P115OpenClient):
     @overload
     def extract_push_app(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
@@ -10227,7 +10293,7 @@ class P115Client(P115OpenClient):
         ...
     def extract_push_app(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
@@ -10249,12 +10315,14 @@ class P115Client(P115OpenClient):
         api = complete_url("/2.0/ufile/push_extract", base_url=base_url, app=app)
         if isinstance(payload, str):
             payload = {"pick_code": payload}
+        elif isinstance(payload, int):
+            payload = {"pick_code": self.to_pickcode(payload)}
         return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
 
     @overload
     def extract_push_progress(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -10265,7 +10333,7 @@ class P115Client(P115OpenClient):
     @overload
     def extract_push_progress(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -10275,7 +10343,7 @@ class P115Client(P115OpenClient):
         ...
     def extract_push_progress(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -10292,12 +10360,14 @@ class P115Client(P115OpenClient):
         api = complete_url("/files/push_extract", base_url=base_url)
         if isinstance(payload, str):
             payload = {"pick_code": payload}
+        elif isinstance(payload, int):
+            payload = {"pick_code": self.to_pickcode(payload)}
         return self.request(url=api, params=payload, async_=async_, **request_kwargs)
 
     @overload
     def extract_push_progress_app(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
@@ -10309,7 +10379,7 @@ class P115Client(P115OpenClient):
     @overload
     def extract_push_progress_app(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
@@ -10320,7 +10390,7 @@ class P115Client(P115OpenClient):
         ...
     def extract_push_progress_app(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
@@ -10338,6 +10408,8 @@ class P115Client(P115OpenClient):
         api = complete_url("/2.0/ufile/push_extract", base_url=base_url, app=app)
         if isinstance(payload, str):
             payload = {"pick_code": payload}
+        elif isinstance(payload, int):
+            payload = {"pick_code": self.to_pickcode(payload)}
         return self.request(url=api, params=payload, async_=async_, **request_kwargs)
 
     ########## File System API ##########
@@ -10604,6 +10676,54 @@ class P115Client(P115OpenClient):
         return self.request(url=api, params=payload, async_=async_, **request_kwargs)
 
     @overload
+    def fs_category_shortcut_app(
+        self, 
+        payload: int | str | dict = 0, 
+        /, 
+        app: str = "android", 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def fs_category_shortcut_app(
+        self, 
+        payload: int | str | dict = 0, 
+        /, 
+        app: str = "android", 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def fs_category_shortcut_app(
+        self, 
+        payload: int | str | dict = 0, 
+        /, 
+        app: str = "android", 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """快捷入口列表（罗列所有的快捷入口）
+
+        GET https://proapi.115.com/{app}/2.0/category/shortcut
+
+        :payload:
+            - offset: int = 0
+            - limit: int = 1150
+        """
+        api = complete_url("/2.0/category/shortcut", base_url=base_url, app=app)
+        if isinstance(payload, (int, str)):
+            payload = {"offset": payload}
+        payload = {"limit": 1150, "offset": 0, **payload}
+        return self.request(url=api, params=payload, async_=async_, **request_kwargs)
+
+    @overload
     def fs_category_shortcut_set(
         self, 
         payload: int | str | Iterable[int | str] | dict, 
@@ -10650,6 +10770,64 @@ class P115Client(P115OpenClient):
                 - "top":    置顶
         """
         api = complete_url("/category/shortcut", base_url=base_url)
+        if isinstance(payload, (int, str)):
+            payload = {"file_id": payload, "op": ("delete", "add")[set]}
+        elif not isinstance(payload, dict):
+            payload = {"file_id": ",".join(map(str, payload)), "op": ("delete", "add")[set]}
+        else:
+            payload = {"op": ("delete", "add")[set], **payload}
+        return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
+
+    @overload
+    def fs_category_shortcut_set_app(
+        self, 
+        payload: int | str | dict = 0, 
+        /, 
+        set: bool = True, 
+        app: str = "android", 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def fs_category_shortcut_set_app(
+        self, 
+        payload: int | str | dict = 0, 
+        /, 
+        set: bool = True, 
+        app: str = "android", 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def fs_category_shortcut_set_app(
+        self, 
+        payload: int | str | dict = 0, 
+        /, 
+        set: bool = True, 
+        app: str = "android", 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """把一个目录设置或取消为快捷入口（快捷入口需要是目录）
+
+        POST https://proapi.115.com/{app}/2.0/category/shortcut
+
+        :payload:
+            - file_id: int | str 目录 id，多个用逗号 "," 隔开
+            - op: "add" | "delete" | "top" = "add" 操作代码
+
+                - "add":    添加
+                - "delete": 删除
+                - "top":    置顶
+        """
+        api = complete_url("/2.0/category/shortcut", base_url=base_url, app=app)
         if isinstance(payload, (int, str)):
             payload = {"file_id": payload, "op": ("delete", "add")[set]}
         elif not isinstance(payload, dict):
@@ -11344,7 +11522,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_document(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -11355,7 +11533,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_document(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -11365,7 +11543,7 @@ class P115Client(P115OpenClient):
         ...
     def fs_document(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -11385,12 +11563,14 @@ class P115Client(P115OpenClient):
         api = complete_url("/files/document", base_url=base_url)
         if isinstance(payload, str):
             payload = {"pickcode": payload}
+        elif isinstance(payload, int):
+            payload = {"pickcode": self.to_pickcode(payload)}
         return self.request(url=api, params=payload, async_=async_, **request_kwargs)
 
     @overload
     def fs_document_app(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
@@ -11402,7 +11582,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_document_app(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
@@ -11413,7 +11593,7 @@ class P115Client(P115OpenClient):
         ...
     def fs_document_app(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
@@ -11434,6 +11614,8 @@ class P115Client(P115OpenClient):
         api = complete_url("/files/document", base_url=base_url, app=app)
         if isinstance(payload, str):
             payload = {"pickcode": payload}
+        elif isinstance(payload, int):
+            payload = {"pickcode": self.to_pickcode(payload)}
         return self.request(url=api, params=payload, async_=async_, **request_kwargs)
 
     @overload
@@ -11478,8 +11660,11 @@ class P115Client(P115OpenClient):
             - fid: int | str
             - fid[]: int | str
             - ...
+            - fid[0]: int | str
+            - fid[1]: int | str
+            - ...
             - file_desc: str = <default> 💡 可以用 html
-            - file_label: int | str = <default> 💡 标签 id，多个用逗号 "," 隔开
+            - file_label: int | str = <default> 💡 标签 id，多个用逗号 "," 隔开，可以是不存在的非零 id，也会成功关联，但不会产生操作事件 "folder_label"
             - fid_cover: int | str = <default>  💡 封面图片的文件 id，多个用逗号 "," 隔开，如果要删除，值设为 0 即可
             - show_play_long: 0 | 1 = <default> 💡 文件名称显示时长
             - ...
@@ -11528,11 +11713,11 @@ class P115Client(P115OpenClient):
         """
         if isinstance(payload, (int, str)):
             payload = [("fid", payload), (attr, default)]
-        elif isinstance(payload, list):
-            if not any(a[0] == attr for a in payload):
-                payload.append((attr, default))
         elif isinstance(payload, dict):
             payload.setdefault(attr, default)
+        elif isinstance(payload, list) and all(isinstance(a, tuple) for a in payload):
+            if all(a[0] != attr for a in payload):
+                payload.append((attr, default))
         else:
             payload = [(f"fid[{i}]", fid) for i, fid in enumerate(payload, 1)]
             payload.append((attr, default))
@@ -11582,11 +11767,11 @@ class P115Client(P115OpenClient):
         """
         if isinstance(payload, (int, str)):
             payload = [("file_id", payload), (attr, default)]
-        elif isinstance(payload, list):
-            if not any(a[0] == attr for a in payload):
-                payload.append((attr, default))
         elif isinstance(payload, dict):
             payload.setdefault(attr, default)
+        elif isinstance(payload, list) and all(isinstance(a, tuple) for a in payload):
+            if all(a[0] != attr for a in payload):
+                payload.append((attr, default))
         else:
             payload = [(f"file_id[{i}]", fid) for i, fid in enumerate(payload, 1)]
             payload.append((attr, default))
@@ -12006,7 +12191,7 @@ class P115Client(P115OpenClient):
             - asc: 0 | 1 = <default> 💡 是否升序排列。0:降序 1:升序
             - count_folders: 0 | 1 = 1 💡 统计文件数和目录数，好像也可以写成 ``countfolders``
             - cur: 0 | 1 = <default> 💡 是否只搜索当前目录
-            - custom_order: 0 | 1 = <default> 💡 启用自定义排序，如果指定了 "asc"、"fc_mix"、"o" 中其一，则此参数会被自动设置为 1
+            - custom_order: 0 | 1 | 2 = <default> 💡 启用自定义排序，如果指定了 "asc"、"fc_mix"、"o" 中其一，则此参数会被自动设置为 1
 
                 - 0: 使用记忆排序（自定义排序失效） 
                 - 1: 使用自定义排序（不使用记忆排序） 
@@ -12030,6 +12215,7 @@ class P115Client(P115OpenClient):
                 - "user_utime": 修改时间
                 - "user_ptime": 创建时间
                 - "user_otime": 上一次打开时间
+                - "star_time": 星标时间 💡 如果 ``star=1``，此参数的默认值就是这个
 
             - oof_token: str = <default>
             - qid: int | str = <default>
@@ -12236,6 +12422,8 @@ class P115Client(P115OpenClient):
             payload.setdefault("custom_order", 2)
         return self.request(url=api, params=payload, async_=async_, **request_kwargs)
 
+    fs_files_app1 = fs_files_app
+
     @overload
     def fs_files_app2(
         self, 
@@ -12282,6 +12470,7 @@ class P115Client(P115OpenClient):
 
                 1. 当 custom_order=1 时，如果设定 limit=1 可能会报错
                 2. fc_mix 无论怎么设置，都和 fc_mix=0 的效果相同（即目录总是置顶），设置为 custom_order=2 也没用
+                3. 有很多参数不起作用
 
         :payload:
             - cid: int | str = 0 💡 目录 id，对应 parent_id
@@ -12372,6 +12561,142 @@ class P115Client(P115OpenClient):
         return self.request(url=api, params=payload, async_=async_, **request_kwargs)
 
     @overload
+    def fs_files_app3(
+        self, 
+        payload: None| int | str | dict = 0, 
+        /, 
+        app: str = "android", 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def fs_files_app3(
+        self, 
+        payload: None | int | str | dict = 0, 
+        /, 
+        app: str = "android", 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def fs_files_app3(
+        self, 
+        payload: None | int | str | dict = 0, 
+        /, 
+        app: str = "android", 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """获取目录中的文件列表和基本信息
+
+        GET https://proapi.115.com/{app}/files/update
+
+        .. hint::x
+            如果要遍历获取所有文件，需要指定 show_dir=0 且 cur=0（或不指定 cur），这个接口并没有 type=99 时获取所有文件的意义
+
+        .. caution::
+            这个接口有些问题：
+
+                1. 当 custom_order=1 时，如果设定 limit=1 可能会报错
+                2. fc_mix 无论怎么设置，都和 fc_mix=0 的效果相同（即目录总是置顶），设置为 custom_order=2 也没用
+                3. 有很多参数不起作用
+
+        :payload:
+            - cid: int | str = 0 💡 目录 id，对应 parent_id
+            - limit: int = 32 💡 分页大小，最大值不一定，看数据量，7,000 应该总是安全的，10,000 有可能报错，但有时也可以 20,000 而成功
+            - offset: int = 0 💡 分页开始的索引，索引从 0 开始计算
+
+            - aid: int = 1 💡 area_id
+
+                - 0: 会被视为 1
+                - 1: 正常文件
+                - 2: <unknown>
+                - 3: <unknown>
+                - 4: <unknown>
+                - 5: <unknown>
+                - 7: 回收站文件
+                - 9: <unknown>
+                - 12: 瞬间文件
+                - 15: <unknown>
+                - 120: 彻底删除文件、简历附件
+                - <其它>: 会被视为 0
+
+            - asc: 0 | 1 = <default> 💡 是否升序排列。0:降序 1:升序
+            - count_folders: 0 | 1 = 1 💡 统计文件数和目录数
+            - cur: 0 | 1 = <default> 💡 是否只搜索当前目录
+            - custom_order: 0 | 1 | 2 = <default> 💡 启用自定义排序，如果指定了 "asc"、"fc_mix"、"o" 中其一，则此参数会被自动设置为 2
+
+                - 0: 使用记忆排序（自定义排序失效） 
+                - 1: 使用自定义排序（不使用记忆排序） 
+                - 2: 自定义排序（非目录置顶）
+ 
+            - fc_mix: 0 | 1 = <default> 💡 是否目录和文件混合，如果为 0 则目录在前（目录置顶）
+            - for: str = <default> 💡 文件格式，例如 "doc"
+            - hide_data: str = <default> 💡 是否返回文件数据
+            - is_q: 0 | 1 = <default>
+            - is_share: 0 | 1 = <default>
+            - min_size: int = 0 💡 （⚠️ 似乎不可用）最小的文件大小
+            - max_size: int = 0 💡 （⚠️ 似乎不可用）最大的文件大小（含），<= 0 表示不限，因此并不能借此仅筛选出空文件
+            - natsort: 0 | 1 = <default> 💡 是否执行自然排序(natural sorting)
+            - nf: 0 | 1 = <default> 💡 不要显示文件（即仅显示目录），但如果 show_dir=0，则此参数无效
+            - o: str = <default> 💡 用某字段排序
+
+                - "file_name": 文件名
+                - "file_size": 文件大小
+                - "file_type": 文件种类
+                - "user_etime": 事件时间（无效，效果相当于 "user_utime"）
+                - "user_utime": 修改时间
+                - "user_ptime": 创建时间（无效，效果相当于 "user_utime"）
+                - "user_otime": 上一次打开时间（无效，效果相当于 "user_utime"）
+
+            - r_all: 0 | 1 = <default>
+            - record_open_time: 0 | 1 = 1 💡 是否要记录目录的打开时间
+            - scid: int | str = <default>
+            - show_dir: 0 | 1 = 1 💡 是否显示目录
+            - snap: 0 | 1 = <default>
+            - source: str = <default>
+            - sys_dir: int | str = <default>
+            - star: 0 | 1 = <default> 💡 是否星标文件
+            - stdir: 0 | 1 = <default> 💡 筛选文件时，是否显示目录：1:展示 0:不展示
+            - suffix: str = <default> 💡 后缀名（优先级高于 `type`）
+            - type: int = <default> 💡 文件类型
+
+                - 0: 全部（仅当前目录）
+                - 1: 文档
+                - 2: 图片
+                - 3: 音频
+                - 4: 视频
+                - 5: 压缩包
+                - 6: 软件/应用
+                - 7: 书籍
+                - 8-11: 大概相当于 1
+                - 12: 文档+图片+视频，相当于 1、2、4
+                - 13: ？？？，音频
+                - 14: 大概相当于 1
+                - 15: 图片+视频，相当于 2、4
+                - >= 16: 相当于 8
+        """
+        api = complete_url("/files/update", base_url=base_url, app=app, force_app=("wechatmini", "alipaymini"))
+        if payload is None:
+            return self.request(url=api, async_=async_, **request_kwargs)
+        if isinstance(payload, (int, str)):
+            payload = {"cid": payload}
+        payload = {
+            "aid": 1, "count_folders": 1, "limit": 32, "offset": 0, 
+            "record_open_time": 1, "show_dir": 1, "cid": 0, **payload, 
+        }
+        if payload.keys() & frozenset(("asc", "fc_mix", "o")):
+            payload.setdefault("custom_order", 2)
+        return self.request(url=api, params=payload, async_=async_, **request_kwargs)
+
+    @overload
     def fs_files_aps(
         self, 
         payload: None | int | str | dict = 0, 
@@ -12407,7 +12732,7 @@ class P115Client(P115OpenClient):
         GET https://aps.115.com/natsort/files.php
 
         .. tip::
-            这个接口的响应速度极快，在文件数特别多时，是 ``P115Client.fs_files`` 的数倍甚至数十倍的速度，更无论 ``P115Client.fs_files_app`` 了
+            这个接口的响应速度极快，在文件数特别多时，是 ``P115Client.fs_files`` 的数倍甚至数十倍的速度（但字段较少，例如时间只有更新时间 "te"），更无论 ``P115Client.fs_files_app`` 了
 
         .. caution::
             这个函数最多获取任何一种排序条件下的前 ``1200 + n`` 条数据（``n >= 0`` 是一个潜在的不定限制）。
@@ -12446,7 +12771,7 @@ class P115Client(P115OpenClient):
             - asc: 0 | 1 = <default> 💡 是否升序排列。0:降序 1:升序
             - count_folders: 0 | 1 = 1 💡 统计文件数和目录数
             - cur: 0 | 1 = <default> 💡 是否只搜索当前目录
-            - custom_order: 0 | 1 = <default> 💡 启用自定义排序，如果指定了 "asc"、"fc_mix" 中其一，则此参数会被自动设置为 1
+            - custom_order: 0 | 1 | 2 = <default> 💡 启用自定义排序，如果指定了 "asc"、"fc_mix" 中其一，则此参数会被自动设置为 1
 
                 - 0: 使用记忆排序（自定义排序失效） 
                 - 1: 使用自定义排序（不使用记忆排序） 
@@ -13227,7 +13552,7 @@ class P115Client(P115OpenClient):
             - file_id[1]: int | str
             - ...
             - file_desc: str = <default> 💡 可以用 html
-            - file_label: int | str = <default> 💡 标签 id，多个用逗号 "," 隔开
+            - file_label: int | str = <default> 💡 标签 id，多个用逗号 "," 隔开，可以是不存在的非零 id，也会成功关联，但不会产生操作事件 "folder_label"
             - file_name: str = <default>        💡 文件或目录名
             - fid_cover: int | str = <default>  💡 封面图片的文件 id，多个用逗号 "," 隔开，如果要删除，值设为 0 即可
             - show_play_long: 0 | 1 = <default> 💡 文件名称显示时长
@@ -13383,8 +13708,8 @@ class P115Client(P115OpenClient):
 
         :payload:
             - cid: int | str
-            - offset: int = 0
             - limit: int = 1150 💡 ⚠️ 无效，只能是默认获取 15 条
+            - offset: int = 0   💡 这个参数是有效的
             - user_id: int | str = <default> 💡 用户 id，不必是自己 🤪
             - aid: int = 1
             - ...
@@ -13810,7 +14135,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_history(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -13821,7 +14146,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_history(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -13831,7 +14156,7 @@ class P115Client(P115OpenClient):
         ...
     def fs_history(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -13851,6 +14176,8 @@ class P115Client(P115OpenClient):
         api = complete_url("/files/history", base_url=base_url)
         if isinstance(payload, str):
             payload = {"pick_code": payload}
+        elif isinstance(payload, int):
+            payload = {"pick_code": self.to_pickcode(payload)}
         payload = {"category": 1, "fetch": "one", **payload}
         return self.request(url=api, params=payload, async_=async_, **request_kwargs)
 
@@ -13859,7 +14186,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_history_app(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
@@ -13871,7 +14198,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_history_app(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
@@ -13882,7 +14209,7 @@ class P115Client(P115OpenClient):
         ...
     def fs_history_app(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
@@ -13903,6 +14230,8 @@ class P115Client(P115OpenClient):
         api = complete_url("/history", base_url=base_url, app=app)
         if isinstance(payload, str):
             payload = {"pick_code": payload}
+        elif isinstance(payload, int):
+            payload = {"pick_code": self.to_pickcode(payload)}
         payload = {"category": 1, "action": "get_one", **payload}
         return self.request(url=api, params=payload, async_=async_, **request_kwargs)
 
@@ -14528,7 +14857,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_history_set(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -14539,7 +14868,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_history_set(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -14549,7 +14878,7 @@ class P115Client(P115OpenClient):
         ...
     def fs_history_set(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -14573,6 +14902,8 @@ class P115Client(P115OpenClient):
         api = complete_url("/files/history", base_url=base_url)
         if isinstance(payload, str):
             payload = {"pick_code": payload}
+        elif isinstance(payload, int):
+            payload = {"pick_code": self.to_pickcode(payload)}
         payload = {"category": 1, "op": "update", **payload}
         return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
 
@@ -14581,7 +14912,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_history_set_app(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
@@ -14593,7 +14924,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_history_set_app(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
@@ -14604,7 +14935,7 @@ class P115Client(P115OpenClient):
         ...
     def fs_history_set_app(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
@@ -14629,6 +14960,8 @@ class P115Client(P115OpenClient):
         api = complete_url("/files/hiddenswitch", base_url=base_url, app=app)
         if isinstance(payload, str):
             payload = {"pick_code": payload}
+        elif isinstance(payload, int):
+            payload = {"pick_code": self.to_pickcode(payload)}
         payload = {"category": 1, "op": "update", **payload}
         return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
 
@@ -14637,7 +14970,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_image(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -14648,7 +14981,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_image(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -14658,7 +14991,7 @@ class P115Client(P115OpenClient):
         ...
     def fs_image(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -14677,6 +15010,8 @@ class P115Client(P115OpenClient):
         api = complete_url("/files/image", base_url=base_url)
         if isinstance(payload, str):
             payload = {"pickcode": payload}
+        elif isinstance(payload, int):
+            payload = {"pickcode": self.to_pickcode(payload)}
         return self.request(url=api, params=payload, async_=async_, **request_kwargs)
 
     @overload
@@ -15229,6 +15564,60 @@ class P115Client(P115OpenClient):
         return self.request(url=api, params=payload, async_=async_, **request_kwargs)
 
     @overload
+    def fs_label_list2(
+        self, 
+        payload: str | dict = "", 
+        /, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def fs_label_list2(
+        self, 
+        payload: str | dict = "", 
+        /, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def fs_label_list2(
+        self, 
+        payload: str | dict = "", 
+        /, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """罗列标签列表（如果要获取做了标签的文件列表，用 ``fs_search`` 接口）
+
+        GET https://webapi.115.com/label/search
+
+        :payload:
+            - offset: int = 0 💡 索引偏移，从 0 开始
+            - limit: int = 11500 💡 最多返回数量
+            - keyword: str = <default> 💡 搜索关键词
+            - sort: "name" | "update_time" | "create_time" = <default> 💡 排序字段
+
+                - 名称: "name"
+                - 添加时间: "create_time"
+                - 修改时间: "update_time"
+
+            - order: "asc" | "desc" = <default> 💡 排序顺序："asc"(升序), "desc"(降序)
+            - count_file: 0 | 1 = <default>
+        """
+        api = complete_url("/label/search", base_url=base_url)
+        if isinstance(payload, str):
+            payload = {"keyword": payload}
+        payload = {"offset": 0, "limit": 11500, **payload}
+        return self.request(url=api, params=payload, async_=async_, **request_kwargs)
+
+    @overload
     def fs_label_list_app(
         self, 
         payload: str | dict = "", 
@@ -15277,8 +15666,66 @@ class P115Client(P115OpenClient):
                 - 更新时间: "update_time"
 
             - order: "asc" | "desc" = <default> 💡 排序顺序："asc"(升序), "desc"(降序)
+            - count_file: 0 | 1 = <default>
         """
         api = complete_url("/label/list", base_url=base_url, app=app)
+        if isinstance(payload, str):
+            payload = {"keyword": payload}
+        payload = {"offset": 0, "limit": 11500, **payload}
+        return self.request(url=api, params=payload, async_=async_, **request_kwargs)
+
+    @overload
+    def fs_label_list_app2(
+        self, 
+        payload: str | dict = "", 
+        /, 
+        app: str = "android", 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def fs_label_list_app2(
+        self, 
+        payload: str | dict = "", 
+        /, 
+        app: str = "android", 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def fs_label_list_app2(
+        self, 
+        payload: str | dict = "", 
+        /, 
+        app: str = "android", 
+        base_url: str | Callable[[], str] = "https://proapi.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """罗列标签列表（如果要获取做了标签的文件列表，用 ``fs_search`` 接口）
+
+        GET https://proapi.115.com/{app}/label/search
+
+        :payload:
+            - offset: int = 0 💡 索引偏移，从 0 开始
+            - limit: int = 11500 💡 最多返回数量
+            - keyword: str = <default> 💡 搜索关键词
+            - sort: "name" | "update_time" | "create_time" = <default> 💡 排序字段
+
+                - 名称: "name"
+                - 创建时间: "create_time"
+                - 更新时间: "update_time"
+
+            - order: "asc" | "desc" = <default> 💡 排序顺序："asc"(升序), "desc"(降序)
+            - count_file: 0 | 1 = <default>
+        """
+        api = complete_url("/label/search", base_url=base_url, app=app)
         if isinstance(payload, str):
             payload = {"keyword": payload}
         payload = {"offset": 0, "limit": 11500, **payload}
@@ -15289,7 +15736,7 @@ class P115Client(P115OpenClient):
         self, 
         payload: int | str | Iterable[int | str] | list[tuple] | dict, 
         /, 
-        label: int | str = "", 
+        label_id: int | str = 0, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
         async_: Literal[False] = False, 
@@ -15301,7 +15748,7 @@ class P115Client(P115OpenClient):
         self, 
         payload: int | str | Iterable[int | str] | list[tuple] | dict, 
         /, 
-        label: int | str = "", 
+        label_id: int | str = 0, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
         async_: Literal[True], 
@@ -15312,7 +15759,7 @@ class P115Client(P115OpenClient):
         self, 
         payload: int | str | Iterable[int | str] | list[tuple] | dict, 
         /, 
-        label: int | str = "", 
+        label_id: int | str = 0, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
         async_: Literal[False, True] = False, 
@@ -15324,16 +15771,19 @@ class P115Client(P115OpenClient):
             这个接口会把标签列表进行替换，而不是追加
 
         .. hint::
-            为单个文件或目录，设置一个不存在的标签 id，比如 1，会清空标签，但可产生事件（批量设置时无事件，可能是 bug）
+            为单个文件或目录，设置一个不存在的非零标签 id，比如 1，会清空标签，但可产生事件（批量设置时无事件，可能是 bug）
 
             .. code:: python
 
                 client.fs_label_set(id, 1)
+
+        .. note::
+            ``label_id`` 的取值范围是 [-2⁶³, 2⁶³-1]，超出区间的，视同最近的边界值
         """
         return self._fs_edit_set(
             payload, 
             "file_label", 
-            default=label, 
+            default=label_id, 
             base_url=base_url, 
             async_=async_, 
             **request_kwargs, 
@@ -15344,7 +15794,7 @@ class P115Client(P115OpenClient):
         self, 
         payload: int | str | Iterable[int | str] | list[tuple] | dict, 
         /, 
-        label: int | str = "", 
+        label_id: int | str = 0, 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
         *, 
@@ -15357,7 +15807,7 @@ class P115Client(P115OpenClient):
         self, 
         payload: int | str | Iterable[int | str] | list[tuple] | dict, 
         /, 
-        label: int | str = "", 
+        label_id: int | str = 0, 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
         *, 
@@ -15369,7 +15819,7 @@ class P115Client(P115OpenClient):
         self, 
         payload: int | str | Iterable[int | str] | list[tuple] | dict, 
         /, 
-        label: int | str = "", 
+        label_id: int | str = 0, 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
         *, 
@@ -15380,11 +15830,21 @@ class P115Client(P115OpenClient):
 
         .. attention::
             这个接口会把标签列表进行替换，而不是追加
+
+        .. hint::
+            为单个文件或目录，设置一个不存在的非零标签 id，比如 1，会清空标签，但可产生事件（批量设置时无事件，可能是 bug）
+
+            .. code:: python
+
+                client.fs_label_set_app(id, 1)
+
+        .. note::
+            ``label_id`` 的取值范围是 [-2⁶³, 2⁶³-1]，超出区间的，视同最近的边界值
         """
         return self._fs_edit_set_app(
             payload, 
             "file_label", 
-            default=label, 
+            default=label_id, 
             app=app, 
             base_url=base_url, 
             async_=async_, 
@@ -15429,13 +15889,16 @@ class P115Client(P115OpenClient):
         .. caution::
             接口有缺陷，不仅速度比较慢，而且经常会出现遗漏，且可能有延迟
 
+        .. caution::
+            这个接口似乎不会产生操作事件 "folder_label"
+
         :payload:
             - action: "add" | "remove" | "reset" | "replace" 💡 操作名
 
                 - "add": 添加
                 - "remove": 移除
                 - "reset": 重设
-                - "replace": 替换
+                - "replace": 替换，多组一对一
 
             - file_ids: int | str 💡 文件或目录 id，多个用逗号 "," 隔开
             - file_label: int | str = <default> 💡 标签 id，多个用逗号 "," 隔开
@@ -15485,13 +15948,16 @@ class P115Client(P115OpenClient):
         .. caution::
             接口有缺陷，不仅速度比较慢，而且经常会出现遗漏，且可能有延迟
 
+        .. caution::
+            这个接口似乎不会产生操作事件 "folder_label"
+
         :payload:
             - action: "add" | "remove" | "reset" | "replace" 💡 操作名
 
                 - "add": 添加
                 - "remove": 移除
                 - "reset": 重设
-                - "replace": 替换
+                - "replace": 替换，多组一对一
 
             - file_ids: int | str 💡 文件或目录 id，多个用逗号 "," 隔开
             - file_label: int | str = <default> 💡 标签 id，多个用逗号 "," 隔开
@@ -15950,7 +16416,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_music(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -15961,7 +16427,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_music(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -15971,7 +16437,7 @@ class P115Client(P115OpenClient):
         ...
     def fs_music(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -15984,22 +16450,26 @@ class P115Client(P115OpenClient):
 
         :payload:
             - pickcode: str 💡 提取码
+            - pick_code: str 💡 提取码，和 "pickcode" 只取其一
             - topic_id: int = <default>
             - music_id: int = <default>
             - download: int = <default>
             - platform: str = <default> 💡 如果取值为 "weixin"，则会多一个字段 "audio_url"
             - share_id: int | str = 0
+            - play_origin: 0 | 1 = <default>
         """
         api = complete_url("/files/music", base_url=base_url)
         if isinstance(payload, str):
             payload = {"pickcode": payload}
+        elif isinstance(payload, int):
+            payload = {"pickcode": self.to_pickcode(payload)}
         request_kwargs.setdefault("follow_redirects", False)
         return self.request(url=api, params=payload, async_=async_, **request_kwargs)
 
     @overload
     def fs_music_app(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
@@ -16011,7 +16481,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_music_app(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
@@ -16022,7 +16492,7 @@ class P115Client(P115OpenClient):
         ...
     def fs_music_app(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
@@ -16045,12 +16515,14 @@ class P115Client(P115OpenClient):
         api = complete_url("/music/musicplay", base_url=base_url, app=app)
         if isinstance(payload, str):
             payload = {"pickcode": payload}
+        elif isinstance(payload, int):
+            payload = {"pickcode": self.to_pickcode(payload)}
         return self.request(url=api, params=payload, async_=async_, **request_kwargs)
 
     @overload
     def fs_music_file_exist(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -16061,7 +16533,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_music_file_exist(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -16071,7 +16543,7 @@ class P115Client(P115OpenClient):
         ...
     def fs_music_file_exist(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -16091,6 +16563,8 @@ class P115Client(P115OpenClient):
         api = complete_url("/files/music_file_exist", base_url=base_url)
         if isinstance(payload, str):
             payload = {"pickcode": payload}
+        elif isinstance(payload, int):
+            payload = {"pickcode": self.to_pickcode(payload)}
         return self.request(url=api, params=payload, async_=async_, **request_kwargs)
 
     @overload
@@ -16311,7 +16785,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_music_info(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -16322,7 +16796,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_music_info(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -16332,7 +16806,7 @@ class P115Client(P115OpenClient):
         ...
     def fs_music_info(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -16343,18 +16817,24 @@ class P115Client(P115OpenClient):
 
         GET https://webapi.115.com/files/music_info
 
+        .. note::
+            调用此接口后，可能返回失败信息 `{"state": false}`，后台会默默处理，等会再调用或许就能成功。无论是否音频，都能产生一条【最近操作】的【浏览音频】记录
+
         :payload:
             - pickcode: str 💡 提取码
+            - lrc: 0 | 1 = <default>
         """
         api = complete_url("/files/music_info", base_url=base_url)
         if isinstance(payload, str):
             payload = {"pickcode": payload}
+        elif isinstance(payload, int):
+            payload = {"pickcode": self.to_pickcode(payload)}
         return self.request(url=api, params=payload, async_=async_, **request_kwargs)
 
     @overload
     def fs_music_info_app(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
@@ -16366,7 +16846,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_music_info_app(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
@@ -16377,7 +16857,7 @@ class P115Client(P115OpenClient):
         ...
     def fs_music_info_app(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
@@ -16395,6 +16875,8 @@ class P115Client(P115OpenClient):
         api = complete_url("/music/musicdetail", base_url=base_url, app=app)
         if isinstance(payload, str):
             payload = {"pickcode": payload}
+        elif isinstance(payload, int):
+            payload = {"pickcode": self.to_pickcode(payload)}
         return self.request(url=api, params=payload, async_=async_, **request_kwargs)
 
     @overload
@@ -16643,7 +17125,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_music_status(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -16654,7 +17136,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_music_status(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -16664,7 +17146,7 @@ class P115Client(P115OpenClient):
         ...
     def fs_music_status(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -16681,6 +17163,8 @@ class P115Client(P115OpenClient):
         api = complete_url("/files/music_status", base_url=base_url)
         if isinstance(payload, str):
             payload = {"pickcode": payload}
+        elif isinstance(payload, int):
+            payload = {"pickcode": self.to_pickcode(payload)}
         return self.request(url=api, params=payload, async_=async_, **request_kwargs)
 
     @overload
@@ -16876,7 +17360,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_office_init(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -16887,7 +17371,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_office_init(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -16897,7 +17381,7 @@ class P115Client(P115OpenClient):
         ...
     def fs_office_init(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -16914,6 +17398,8 @@ class P115Client(P115OpenClient):
         api = complete_url("/files/office", base_url=base_url, query={"act": "office_init"})
         if isinstance(payload, str):
             payload = {"pickcode": payload}
+        elif isinstance(payload, int):
+            payload = {"pickcode": self.to_pickcode(payload)}
         return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
 
     @overload
@@ -17088,7 +17574,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_preview(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -17099,7 +17585,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_preview(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -17109,7 +17595,7 @@ class P115Client(P115OpenClient):
         ...
     def fs_preview(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -17127,6 +17613,8 @@ class P115Client(P115OpenClient):
         api = complete_url("/files/preview", base_url=base_url)
         if isinstance(payload, str):
             payload = {"pickcode": payload}
+        elif isinstance(payload, int):
+            payload = {"pickcode": self.to_pickcode(payload)}
         return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
 
     @overload
@@ -17641,7 +18129,7 @@ class P115Client(P115OpenClient):
             - fc_mix: 0 | 1 = <default> 💡 是否目录和文件混合，如果为 0 则目录在前（目录置顶）
             - file_label: int | str = <default> 💡 标签 id
             - gte_day: str 💡 搜索结果匹配的开始时间；格式：YYYY-MM-DD
-            - limit: int = 32 💡 一页大小，意思就是 page_size
+            - limit: int = 32 💡 一页大小，意思就是 page_size，最大为 1,150
             - lte_day: str 💡 搜索结果匹配的结束时间；格式：YYYY-MM-DD
             - o: str = <default> 💡 用某字段排序
 
@@ -17754,7 +18242,7 @@ class P115Client(P115OpenClient):
             - fc_mix: 0 | 1 = <default> 💡 是否目录和文件混合，如果为 0 则目录在前（目录置顶）
             - file_label: int | str = <default> 💡 标签 id（⚠️ 似乎不支持此参数）
             - gte_day: str 💡 搜索结果匹配的开始时间；格式：YYYY-MM-DD
-            - limit: int = 32 💡 一页大小，意思就是 page_size
+            - limit: int = 32 💡 一页大小，意思就是 page_size，最大为 1,150
             - lte_day: str 💡 搜索结果匹配的结束时间；格式：YYYY-MM-DD
             - o: str = <default> 💡 用某字段排序
 
@@ -18062,6 +18550,12 @@ class P115Client(P115OpenClient):
         .. note::
             如果其中任何一个 id 目前已经被删除，则会直接返回错误信息
 
+        .. attention::
+            传入的 id 最好不要超过 23,000，否则可能会失败，但如果遇到 HTTP 报错 "500: Internal Server Error"，可能并不意味着失败
+
+        .. note::
+            其实设置或取消星标非常快，但是这个接口的响应却非常慢
+
         :payload:
             - file_id: int | str 💡 文件或目录 id，多个用逗号 "," 隔开
             - star: 0 | 1 = 1
@@ -18119,6 +18613,12 @@ class P115Client(P115OpenClient):
         .. note::
             如果其中任何一个 id 目前已经被删除，则会直接返回错误信息
 
+        .. attention::
+            传入的 id 最好不要超过 11,000，否则可能会失败，但如果遇到 HTTP 报错 "500: Internal Server Error"，可能并不意味着失败
+
+        .. note::
+            其实设置或取消星标非常快，但是这个接口的响应却非常慢
+
         :payload:
             - ids: int | str 💡 文件或目录 id，多个用逗号 "," 隔开
             - star: 0 | 1 = 1
@@ -18172,7 +18672,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_supervision(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -18183,7 +18683,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_supervision(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -18193,7 +18693,7 @@ class P115Client(P115OpenClient):
         ...
     def fs_supervision(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -18213,13 +18713,15 @@ class P115Client(P115OpenClient):
         api = complete_url("/files/supervision", base_url=base_url)
         if isinstance(payload, str):
             payload = {"pickcode": payload}
+        elif isinstance(payload, int):
+            payload = {"pickcode": self.to_pickcode(payload)}
         payload = {"preview_type": "file", "module": 10, **payload}
         return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
 
     @overload
     def fs_supervision_app(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
@@ -18231,7 +18733,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_supervision_app(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
@@ -18242,7 +18744,7 @@ class P115Client(P115OpenClient):
         ...
     def fs_supervision_app(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
@@ -18263,6 +18765,8 @@ class P115Client(P115OpenClient):
         api = complete_url("/files/supervision", base_url=base_url, app=app)
         if isinstance(payload, str):
             payload = {"pickcode": payload}
+        elif isinstance(payload, int):
+            payload = {"pickcode": self.to_pickcode(payload)}
         payload = {"preview_type": "file", "module": 10, **payload}
         return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
 
@@ -18366,7 +18870,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_video(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -18377,7 +18881,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_video(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -18387,7 +18891,7 @@ class P115Client(P115OpenClient):
         ...
     def fs_video(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -18408,6 +18912,9 @@ class P115Client(P115OpenClient):
 
             如果视频从未被转码过，则会自动推送转码
 
+        .. note::
+            调用此接口后，只要是视频文件，就会产生一条【最近操作】的【浏览视频】记录
+
         :payload:
             - pickcode: str 💡 提取码
             - pick_code: str 💡 提取码，和 ``pickcode`` 只需提供其一
@@ -18418,12 +18925,14 @@ class P115Client(P115OpenClient):
         api = complete_url("/files/video", base_url=base_url)
         if isinstance(payload, str):
             payload = {"pickcode": payload}
+        elif isinstance(payload, int):
+            payload = {"pickcode": self.to_pickcode(payload)}
         return self.request(url=api, params=payload, async_=async_, **request_kwargs)
 
     @overload
     def fs_video_app(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
@@ -18435,7 +18944,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_video_app(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
@@ -18446,7 +18955,7 @@ class P115Client(P115OpenClient):
         ...
     def fs_video_app(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
@@ -18467,6 +18976,8 @@ class P115Client(P115OpenClient):
         api = complete_url("/2.0/video/play", base_url=base_url, app=app)
         if isinstance(payload, str):
             payload = {"pickcode": payload, "user_id": self.user_id}
+        elif isinstance(payload, int):
+            payload = {"pickcode": self.to_pickcode(payload), "user_id": self.user_id}
         else:
             payload = dict(payload, user_id=self.user_id)
         def parse(_, content: bytes, /) -> dict:
@@ -18574,7 +19085,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_video_is_transcode(
         self, 
-        payload: dict | str, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -18585,7 +19096,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_video_is_transcode(
         self, 
-        payload: dict | str, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -18595,7 +19106,7 @@ class P115Client(P115OpenClient):
         ...
     def fs_video_is_transcode(
         self, 
-        payload: dict | str, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -18612,6 +19123,8 @@ class P115Client(P115OpenClient):
         api = complete_url("/files/is_transcoded", base_url=base_url)
         if isinstance(payload, str):
             payload = {"pick_code": payload}
+        elif isinstance(payload, int):
+            payload = {"pick_code": self.to_pickcode(payload)}
         return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
 
     @overload
@@ -18718,7 +19231,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_video_push(
         self, 
-        payload: dict | str, 
+        payload: int | dict | str, 
         /, 
         base_url: str | Callable[[], str] = "https://115.com", 
         *, 
@@ -18729,7 +19242,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_video_push(
         self, 
-        payload: dict | str, 
+        payload: int | dict | str, 
         /, 
         base_url: str | Callable[[], str] = "https://115.com", 
         *, 
@@ -18739,7 +19252,7 @@ class P115Client(P115OpenClient):
         ...
     def fs_video_push(
         self, 
-        payload: dict | str, 
+        payload: int | dict | str, 
         /, 
         base_url: str | Callable[[], str] = "https://115.com", 
         *, 
@@ -18761,6 +19274,8 @@ class P115Client(P115OpenClient):
         api = complete_url(base_url=base_url, query={"ct": "play", "ac": "push"})
         if isinstance(payload, str):
             payload = {"pickcode": payload}
+        elif isinstance(payload, int):
+            payload = {"pickcode": self.to_pickcode(payload)}
         payload.setdefault("op", "vip_push")
         return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
 
@@ -18855,7 +19370,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_video_subtitle(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -18866,7 +19381,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_video_subtitle(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -18876,7 +19391,7 @@ class P115Client(P115OpenClient):
         ...
     def fs_video_subtitle(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -18893,12 +19408,14 @@ class P115Client(P115OpenClient):
         api = complete_url("/movies/subtitle", base_url=base_url)
         if isinstance(payload, str):
             payload = {"pickcode": payload}
+        elif isinstance(payload, int):
+            payload = {"pickcode": self.to_pickcode(payload)}
         return self.request(url=api, params=payload, async_=async_, **request_kwargs)
 
     @overload
     def fs_video_subtitle_app(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
@@ -18910,7 +19427,7 @@ class P115Client(P115OpenClient):
     @overload
     def fs_video_subtitle_app(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
@@ -18921,7 +19438,7 @@ class P115Client(P115OpenClient):
         ...
     def fs_video_subtitle_app(
         self, 
-        payload: str | dict, 
+        payload: int | str | dict, 
         /, 
         app: str = "android", 
         base_url: str | Callable[[], str] = "https://proapi.115.com", 
@@ -18939,6 +19456,8 @@ class P115Client(P115OpenClient):
         api = complete_url("/2.0/video/subtitle", base_url=base_url, app=app)
         if isinstance(payload, str):
             payload = {"pickcode": payload}
+        elif isinstance(payload, int):
+            payload = {"pickcode": self.to_pickcode(payload)}
         return self.request(url=api, params=payload, async_=async_, **request_kwargs)
 
     @overload
@@ -18992,6 +19511,7 @@ class P115Client(P115OpenClient):
         /, 
         app: str = "web", 
         base_url: str | Callable[[], str] = "https://transcode.115.com", 
+        method: str = "GET", 
         *, 
         async_: Literal[False] = False, 
         **request_kwargs, 
@@ -19004,6 +19524,7 @@ class P115Client(P115OpenClient):
         /, 
         app: str = "web", 
         base_url: str | Callable[[], str] = "https://transcode.115.com", 
+        method: str = "GET", 
         *, 
         async_: Literal[True], 
         **request_kwargs, 
@@ -19015,6 +19536,7 @@ class P115Client(P115OpenClient):
         /, 
         app: str = "web", 
         base_url: str | Callable[[], str] = "https://transcode.115.com", 
+        method: str = "GET", 
         *, 
         async_: Literal[False, True] = False, 
         **request_kwargs, 
@@ -19031,7 +19553,7 @@ class P115Client(P115OpenClient):
         if isinstance(payload, str):
             payload = {"sha1": payload}
         payload.setdefault("priority", 100)
-        return self.request(url=api, params=payload, async_=async_, **request_kwargs)
+        return self.request(url=api, params=payload, method=method, async_=async_, **request_kwargs)
 
     ########## Life API ##########
 
@@ -19240,6 +19762,54 @@ class P115Client(P115OpenClient):
             payload = {"type": payload}
         payload = {"limit": 1_000, "offset": 0, **payload}
         return self.request(url=api, params=payload, async_=async_, **request_kwargs)
+
+    @overload
+    def life_behavior_doc_post(
+        self, 
+        payload: int | str | dict, 
+        /, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def life_behavior_doc_post(
+        self, 
+        payload: int | str | dict, 
+        /, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def life_behavior_doc_post(
+        self, 
+        payload: int | str | dict, 
+        /, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """推送事件：浏览文档 "browse_document"
+
+        POST https://webapi.115.com/files/doc_behavior
+
+        .. caution::
+            一次只能推送一个文件，且必须是文档
+
+        :payload:
+            - pickcode: str
+        """
+        api = complete_url("/files/doc_behavior", base_url=base_url)
+        if isinstance(payload, str):
+            payload = {"pickcode": payload}
+        elif isinstance(payload, int):
+            payload = {"pickcode": self.to_pickcode(payload)}
+        return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
 
     @overload
     def life_behavior_doc_post_app(
@@ -20081,7 +20651,7 @@ class P115Client(P115OpenClient):
     @overload
     def life_recent_operation_items(
         self, 
-        payload: str | dict = "browse_document", 
+        payload: str | dict = "browse_image", 
         /, 
         app: str = "web", 
         base_url: str | Callable[[], str] = "https://life.115.com", 
@@ -20093,7 +20663,7 @@ class P115Client(P115OpenClient):
     @overload
     def life_recent_operation_items(
         self, 
-        payload: str | dict = "browse_document", 
+        payload: str | dict = "browse_image", 
         /, 
         app: str = "web", 
         base_url: str | Callable[[], str] = "https://life.115.com", 
@@ -20104,7 +20674,7 @@ class P115Client(P115OpenClient):
         ...
     def life_recent_operation_items(
         self, 
-        payload: str | dict = "browse_document", 
+        payload: str | dict = "browse_image", 
         /, 
         app: str = "web", 
         base_url: str | Callable[[], str] = "https://life.115.com", 
@@ -20151,7 +20721,7 @@ class P115Client(P115OpenClient):
         api = complete_url(f"/api/1.0/{app}/1.0/life/recent_operation_items", base_url=base_url)
         if isinstance(payload, str):
             payload = {"behavior_type": payload}
-        payload = {"limit": 100, "date": str(date.today()), **payload}
+        payload = {"limit": 100, "date": str(date.today()), "behavior_type": "browse_image", **payload}
         return self.request(url=api, params=payload, async_=async_, **request_kwargs)
 
     @overload
@@ -21452,7 +22022,6 @@ class P115Client(P115OpenClient):
             暂不清楚 ``sort`` 字段各个取值的含义
 
         :payload:
-            - channel_id: int = 1 💡 频道 id，已知：1:音乐 5:视频
             - limit: int = 32
             - offset: int = 0
             - sort: int = <default> 💡 排序依据
@@ -21461,7 +22030,7 @@ class P115Client(P115OpenClient):
         api = complete_url("/multimedia/collection_listen", base_url=base_url)
         if isinstance(payload, int):
             payload = {"offset": payload}
-        payload = {"channel_id": 1, "limit": 32, **payload}
+        payload = {"limit": 32, **payload}
         return self.request(url=api, params=payload, async_=async_, **request_kwargs)
 
     @overload
@@ -21501,7 +22070,6 @@ class P115Client(P115OpenClient):
 
         :payload:
             - multimedia_id: int 💡 专辑（详情） id
-            - channel_id: int = <default> 💡 频道 id，已知：1:音乐 5:视频
             - collection: 0 | 1 = 1 💡 是否设为合集：0:取消 1:设置（设为合集后，该内容将出现在【自建听单】列表中）
         """
         api = complete_url("/multimedia/collection_listen", base_url=base_url)
@@ -21549,7 +22117,6 @@ class P115Client(P115OpenClient):
             暂不清楚 ``sort`` 字段各个取值的含义
 
         :payload:
-            - channel_id: int = 5 💡 频道 id，已知：1:音乐 5:视频
             - limit: int = 32
             - offset: int = 0
             - sort: int = <default> 💡 排序依据
@@ -21558,7 +22125,7 @@ class P115Client(P115OpenClient):
         api = complete_url("/multimedia/collection_watch", base_url=base_url)
         if isinstance(payload, int):
             payload = {"offset": payload}
-        payload = {"channel_id": 5, "limit": 32, **payload}
+        payload = {"limit": 32, **payload}
         return self.request(url=api, params=payload, async_=async_, **request_kwargs)
 
     @overload
@@ -21598,13 +22165,12 @@ class P115Client(P115OpenClient):
 
         :payload:
             - multimedia_id: int 💡 专辑（详情） id
-            - channel_id: int = 5 💡 频道 id，已知：1:音乐 5:视频
             - collection: 0 | 1 = 1 💡 是否设为合集：0:取消 1:设置（设为合集后，该内容将出现在自建合集列表中）
         """
         api = complete_url("/multimedia/collection_watch", base_url=base_url)
         if isinstance(payload, int):
             payload = {"multimedia_id": payload}
-        payload = {"channel_id": 5, "collection": 1, **payload}
+        payload = {"collection": 1, **payload}
         return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
 
     @overload
@@ -21880,6 +22446,7 @@ class P115Client(P115OpenClient):
             - rating[6]: int | float | str = <default> 💡 评分：IMDB
             - extra_info: str = <default> 💡 附加信息，是一个 JSON object 序列化为字符串，初始值为 '{"version":"","timbre":"","track":"","scene":""}'
             - is_delete: 0 | 1 = <default> 💡 是否删除
+            - enable_cover: 0 | 1 = <default> 💡 是否显示封面
         """
         api = complete_url("/multimedia/listen", base_url=base_url)
         if isinstance(payload, dict):
@@ -22022,6 +22589,7 @@ class P115Client(P115OpenClient):
             - rating[6]: int | float | str = <default> 💡 评分：IMDB
             - extra_info: str = <default> 💡 附加信息，是一个 JSON object 序列化为字符串，初始值为 '{"version":"","timbre":"","track":"","scene":""}'
             - is_delete: 0 | 1 = <default> 💡 是否删除
+            - enable_cover: 0 | 1 = <default> 💡 是否显示封面
         """
         api = complete_url("/multimedia/watch", base_url=base_url)
         if isinstance(payload, dict):
@@ -22215,7 +22783,7 @@ class P115Client(P115OpenClient):
     @overload
     def multimedia_relate_file(
         self, 
-        payload: dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -22226,7 +22794,7 @@ class P115Client(P115OpenClient):
     @overload
     def multimedia_relate_file(
         self, 
-        payload: dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -22236,7 +22804,7 @@ class P115Client(P115OpenClient):
         ...
     def multimedia_relate_file(
         self, 
-        payload: dict, 
+        payload: int | str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://webapi.115.com", 
         *, 
@@ -22249,14 +22817,15 @@ class P115Client(P115OpenClient):
 
         :payload:
             - multimedia_id: int 💡 专辑（详情） id
-            - channel_id: int = 1 💡 频道 id，已知：1:音乐 5:视频
             - limit: int = 32
             - offset: int = 0
             - o: "custom_sort" | "file_name" | "file_size" | "created_time" = <default> 💡 排序依据
             - asc: 0 | 1 = <default> 💡 是否升序排列
         """
         api = complete_url("/multimedia/relate_file", base_url=base_url)
-        payload = {"channel_id": 1, "limit": 32, **payload}
+        if isinstance(payload, (int, str)):
+            payload = {"multimedia_id": payload}
+        payload = {"limit": 32, **payload}
         return self.request(url=api, params=payload, async_=async_, **request_kwargs)
 
     @overload
@@ -25068,7 +25637,11 @@ class P115Client(P115OpenClient):
             - cid: int | str = 0
             - limit: int = 32
             - offset: int = 0
-            - o: str = <default> 💡 排序依据：dtime:删除时间
+            - o: str = <default> 💡 排序依据
+
+                - dtime: 删除时间
+                - file_size: 文件大小
+
             - asc: 0 | 1 = <default>
             - source: str = <default>
         """ 
@@ -27635,9 +28208,44 @@ class P115Client(P115OpenClient):
         return run_gen_step(gen_step, async_)
 
     @overload
+    def upload_quota(
+        self, 
+        /, 
+        base_url: str | Callable[[], str] = "https://uplb.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def upload_quota(
+        self, 
+        /, 
+        base_url: str | Callable[[], str] = "https://uplb.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def upload_quota(
+        self, 
+        /, 
+        base_url: str | Callable[[], str] = "https://uplb.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """获取上传配额信息
+
+        GET https://uplb.115.com/3.0/getuploadquota.php
+        """
+        api = complete_url("/3.0/getuploadquota.php", base_url=base_url)
+        return self.request(url=api, async_=async_, **request_kwargs)
+
+    @overload
     def upload_resume(
         self, 
-        payload: dict | str, 
+        payload: str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://uplb.115.com", 
         *, 
@@ -27648,7 +28256,7 @@ class P115Client(P115OpenClient):
     @overload
     def upload_resume(
         self, 
-        payload: dict | str, 
+        payload: str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://uplb.115.com", 
         *, 
@@ -27658,7 +28266,7 @@ class P115Client(P115OpenClient):
         ...
     def upload_resume(
         self, 
-        payload: dict | str, 
+        payload: str | dict, 
         /, 
         base_url: str | Callable[[], str] = "https://uplb.115.com", 
         *, 
@@ -30022,6 +30630,41 @@ class P115Client(P115OpenClient):
         return self.request(url=api, method="POST", data=payload, async_=async_, **request_kwargs)
 
     @overload
+    def user_space_detail(
+        self, 
+        /, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict:
+        ...
+    @overload
+    def user_space_detail(
+        self, 
+        /, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict]:
+        ...
+    def user_space_detail(
+        self, 
+        /, 
+        base_url: str | Callable[[], str] = "https://webapi.115.com", 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict | Coroutine[Any, Any, dict]:
+        """获取存储空间的明细数据
+
+        GET https://webapi.115.com/user/space_detail
+        """
+        api = complete_url("/user/space_detail", base_url=base_url)
+        return self.request(url=api, async_=async_, **request_kwargs)
+
+    @overload
     def user_space_info(
         self, 
         /, 
@@ -30052,7 +30695,7 @@ class P115Client(P115OpenClient):
         async_: Literal[False, True] = False, 
         **request_kwargs, 
     ) -> dict | Coroutine[Any, Any, dict]:
-        """获取使用空间的统计数据（较为简略，如需更详细，请用 ``P115Client.fs_index_info()``）
+        """获取存储空间的统计数据（较为简略，如需更详细，请用 ``P115Client.fs_index_info()``）
 
         GET https://proapi.115.com/{app}/user/space_info
         """
@@ -30940,7 +31583,7 @@ class P115Client(P115OpenClient):
             - asc: 0 | 1 = <default> 💡 是否升序排列。0:降序 1:升序
             - count_folders: 0 | 1 = 1 💡 统计文件数和目录数，好像也可以写成 ``countfolders``
             - cur: 0 | 1 = <default> 💡 是否只搜索当前目录
-            - custom_order: 0 | 1 = <default> 💡 启用自定义排序，如果指定了 "asc"、"fc_mix"、"o" 中其一，则此参数会被自动设置为 1
+            - custom_order: 0 | 1 | 2 = <default> 💡 启用自定义排序，如果指定了 "asc"、"fc_mix"、"o" 中其一，则此参数会被自动设置为 1
 
                 - 0: 使用记忆排序（自定义排序失效） 
                 - 1: 使用自定义排序（不使用记忆排序） 
@@ -31032,7 +31675,7 @@ class P115Client(P115OpenClient):
             - asc: 0 | 1 = <default> 💡 是否升序排列。0:降序 1:升序
             - count_folders: 0 | 1 = 1 💡 统计文件数和目录数，好像也可以写成 ``countfolders``
             - cur: 0 | 1 = <default> 💡 是否只搜索当前目录
-            - custom_order: 0 | 1 = <default> 💡 启用自定义排序，如果指定了 "asc"、"fc_mix"、"o" 中其一，则此参数会被自动设置为 1
+            - custom_order: 0 | 1 | 2 = <default> 💡 启用自定义排序，如果指定了 "asc"、"fc_mix"、"o" 中其一，则此参数会被自动设置为 1
 
                 - 0: 使用记忆排序（自定义排序失效） 
                 - 1: 使用自定义排序（不使用记忆排序） 

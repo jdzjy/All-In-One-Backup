@@ -428,10 +428,17 @@ def _upload_token(
             if expiration < deadline.strftime("%FT%XZ"):
                 while True:
                     try:
-                        resp = yield upload_token(async_=async_, **request_kwargs)
+                        if (headers := request_kwargs.get("headers")) and headers.get("authorization"):
+                            resp = yield upload_token_open(async_=async_, **request_kwargs)
+                        else:
+                            resp = yield upload_token(async_=async_, **request_kwargs)
                     except Exception:
                         continue
-                    if resp.get("StatusCode") == "200":
+                    if "state" in resp:
+                        if resp["state"]:
+                            resp = resp["data"]
+                            break
+                    elif resp.get("StatusCode") == "200":
                         break
                 _UPLOAD_TOKEN.update(resp)
         finally:

@@ -194,8 +194,8 @@ def cache_loading[T](
 @overload
 def ensure_path[D: dict](
     client: str | PathLike | P115Client | P115OpenClient, 
-    cid: int | str | Mapping, 
-    attrs: Iterable[D] | AsyncIterable[D], 
+    attrs: Iterable[D], 
+    cid: None | int | str | Mapping = None, 
     with_ancestors: bool = False, 
     with_path: bool = True, 
     escape: None | bool | Callable[[str], str] = True, 
@@ -205,13 +205,13 @@ def ensure_path[D: dict](
     *, 
     async_: Literal[False] = False, 
     **request_kwargs, 
-) -> Iterator[D]:
+) -> Iterable[D]:
     ...
 @overload
 def ensure_path[D: dict](
     client: str | PathLike | P115Client | P115OpenClient, 
-    cid: int | str | Mapping, 
-    attrs: Iterable[D] | AsyncIterable[D], 
+    attrs: AsyncIterable[D], 
+    cid: None | int | str | Mapping = None, 
     with_ancestors: bool = False, 
     with_path: bool = True, 
     escape: None | bool | Callable[[str], str] = True, 
@@ -221,12 +221,12 @@ def ensure_path[D: dict](
     *, 
     async_: Literal[True], 
     **request_kwargs, 
-) -> AsyncIterator[D]:
+) -> AsyncIterable[D]:
     ...
 def ensure_path[D: dict](
     client: str | PathLike | P115Client | P115OpenClient, 
-    cid: int | str | Mapping, 
     attrs: Iterable[D] | AsyncIterable[D], 
+    cid: None | int | str | Mapping = None, 
     with_ancestors: bool = False, 
     with_path: bool = True, 
     escape: None | bool | Callable[[str], str] = True, 
@@ -236,12 +236,12 @@ def ensure_path[D: dict](
     *, 
     async_: Literal[False, True] = False, 
     **request_kwargs, 
-) -> Iterator[D] | AsyncIterator[D]:
+) -> Iterable[D] | AsyncIterable[D]:
     """为一组文件信息添加 "path" 字段，可选 "path" 或 "ancestors" 字段
 
     :param client: 115 客户端或 cookies
-    :param cid: 顶层目录 id 或 pickcode
     :param attrs: 一组文件或目录的信息
+    :param cid: 顶层目录 id 或 pickcode，如果为 None 或负数，则只会根据每条数据的 "parent_id" 进行向上逐层拉取，否则拉取此目录下所有子目录后再进行关联
     :param with_ancestors: 文件信息中是否要包含 "ancestors"
     :param with_path: 文件信息中是否要包含 "path"
     :param escape: 对文件名进行转义
@@ -259,6 +259,8 @@ def ensure_path[D: dict](
 
     :return: 迭代器
     """
+    if not (with_ancestors or with_path):
+        return attrs
     if isinstance(client, (str, PathLike)):
         client = P115Client(client)
     if id_to_dirnode is None:
@@ -309,6 +311,26 @@ def ensure_path[D: dict](
                                         dangling_ids.add(pid)
                             else:
                                 ok_ids_update(ls_pid)
+                    yield Yield(bind(attr))
+    elif cid is None or _get_id(cid) < 0:
+        from .iter_nodes import iter_nodes_and_ancestors_by_label
+        def gen_step():
+            nonlocal attrs
+            if not isinstance(attrs, Sequence):
+                attrs = cast(list[D], (yield collect(attrs)))
+            if attrs:
+                for attr in attrs:
+                    if attr["is_dir"]:
+                        id_to_dirnode[attr["id"]] = (attr["name"], attr["parent_id"])
+                yield through(iter_nodes_and_ancestors_by_label(
+                    client, 
+                    {a["parent_id"] for a in attrs}, 
+                    id_to_dirnode=id_to_dirnode, 
+                    max_workers=None, 
+                    async_=async_, # type: ignore
+                    **request_kwargs, 
+                ))
+                for attr in attrs:
                     yield Yield(bind(attr))
     else:
         from .download import iter_download_nodes
@@ -751,8 +773,8 @@ def iter_dirs(
             attrs = yield collect(attrs)
             yield YieldFrom(ensure_path(
                 client, 
-                cid, 
                 attrs, 
+                cid=cid, 
                 with_ancestors=with_ancestors, 
                 with_path=with_path, 
                 escape=escape, 
@@ -942,8 +964,8 @@ def iter_files(
     if with_path or with_ancestors:
         attrs = ensure_path(
             client, 
-            cid, 
             attrs, 
+            cid=cid, 
             with_ancestors=with_ancestors, 
             with_path=with_path, 
             escape=escape, 
@@ -1032,31 +1054,28 @@ def iter_files_skim(
         client = P115Client(client)
     cid = _get_id(cid)
     from .download import iter_download_nodes
-    attrs = iter_download_nodes(
+    return ensure_path(
         client, 
-        cid, 
-        ensure_name=True, 
-        cooldown=cooldown, 
-        max_workers=max_workers, 
-        app=app, 
-        async_=async_, 
-        **request_kwargs, 
-    )
-    if with_path or with_ancestors:
-        attrs = ensure_path(
+        iter_download_nodes(
             client, 
             cid, 
-            attrs, 
-            with_ancestors=with_ancestors, 
-            with_path=with_path, 
-            escape=escape, 
-            id_to_dirnode=id_to_dirnode, 
-            path_already=path_already, 
+            ensure_name=True, 
+            cooldown=cooldown, 
+            max_workers=max_workers, 
             app=app, 
-            async_=async_, 
+            async_=async_, # type: ignore
             **request_kwargs, 
-        )
-    return attrs
+        ), 
+        cid=cid, 
+        with_ancestors=with_ancestors, 
+        with_path=with_path, 
+        escape=escape, 
+        id_to_dirnode=id_to_dirnode, 
+        path_already=path_already, 
+        app=app, 
+        async_=async_, # type: ignore
+        **request_kwargs, 
+    )
 
 
 @overload
@@ -1174,15 +1193,15 @@ def traverse_tree(
         if with_path or with_ancestors:
             yield YieldFrom(ensure_path(
                 client, 
-                cid, 
                 chain_from_iterable((cache, files), async_=async_), # type: ignore
+                cid=cid, 
                 with_ancestors=with_ancestors, 
                 with_path=with_path, 
                 escape=escape, 
                 id_to_dirnode=id_to_dirnode, 
                 path_already=True, 
                 app=app, 
-                async_=async_, 
+                async_=async_, # type: ignore
                 **request_kwargs, 
             ))
         else:

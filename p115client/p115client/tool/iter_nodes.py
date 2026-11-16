@@ -4,11 +4,13 @@
 __all__ = [
     "iter_nodes", "iter_nodes_by_file", "iter_nodes_by_file_skim", "iter_nodes_by_info", 
     "iter_nodes_by_supervision", "iter_nodes_by_update", "iter_nodes_by_event",  
-    "iter_nodes_by_label", "iter_nodes_by_star", 
+    "iter_nodes_by_browse_event", "iter_nodes_by_label", "iter_nodes_and_ancestors_by_label", 
+    "iter_nodes_by_label_with_path", "iter_nodes_by_star", 
 ]
 __doc__ = "这个模块提供了一些和罗列节点信息有关的函数"
 
 from asyncio import sleep as async_sleep
+from base64 import b85encode
 from collections.abc import (
     AsyncIterator, Callable, Iterable, Iterator, Mapping, MutableMapping
 )
@@ -24,7 +26,7 @@ from warnings import warn
 from concurrenttools import conmap
 from iterutils import (
     as_gen_step, chain_from_iterable, run_gen_step_iter, with_iter_next, 
-    map as do_map, filter as do_filter, Yield,  
+    map as do_map, filter as do_filter, Yield, 
 )
 
 from ..client import check_response, P115Client, P115OpenClient
@@ -578,7 +580,7 @@ def iter_nodes_by_update(
     ))
 
 
-# TODO: 再增加一些其它事件，例如打星标、添加备注、浏览视频、浏览音频、重命名等，并且还要支持一种分块推送、拉取的模式，而不是一次性推送完，然后拉取
+# TODO: 再增加打星标（"star_image"和"star_file"）和打标签（"folder_label"），并且还要支持一种分块推送、拉取的模式，而不是一次性推送完，然后拉取
 @overload
 def iter_nodes_by_event(
     client: str | PathLike | P115Client, 
@@ -619,7 +621,7 @@ def iter_nodes_by_event(
         如果未收集到事件，则说明文件 id 不存在或者已删除，你也可以因此找出所有的无效 id
 
     .. note::
-        如果 ``app="web"``，则最多一次获取前 1 万条数据，此时必须克制 ``ids`` 的规模在 1 万以下
+        如果 ``app="web"``，则最多一次获取前 10,000 条数据，此时必须克制 ``ids`` 的规模在 10,000 以下
 
     :param client: 115 客户端或 cookies
     :param ids: 一组文件或目录的 id 或 pickcode
@@ -673,6 +675,104 @@ def iter_nodes_by_event(
 
 
 @overload
+def iter_nodes_by_browse_event(
+    client: str | PathLike | P115Client, 
+    ids: Iterable[int | str | Mapping], 
+    type: Literal["doc", "img"] = "img", 
+    big_batch: bool = False, 
+    app: str = "web", 
+    *, 
+    async_: Literal[False] = False, 
+    **request_kwargs, 
+) -> Iterator[dict]:
+    ...
+@overload
+def iter_nodes_by_browse_event(
+    client: str | PathLike | P115Client, 
+    ids: Iterable[int | str | Mapping], 
+    type: Literal["doc", "img"] = "img", 
+    big_batch: bool = False, 
+    app: str = "web", 
+    *, 
+    async_: Literal[True], 
+    **request_kwargs, 
+) -> AsyncIterator[dict]:
+    ...
+def iter_nodes_by_browse_event(
+    client: str | PathLike | P115Client, 
+    ids: Iterable[int | str | Mapping], 
+    type: Literal["doc", "img"] = "img", 
+    big_batch: bool = False, 
+    app: str = "web", 
+    *, 
+    async_: Literal[False, True] = False, 
+    **request_kwargs, 
+) -> Iterator[dict] | AsyncIterator[dict]:
+    """通过先发送事件，然后收集这个事件，来获取一组 id 的信息
+
+    .. note::
+        如果未收集到事件，则说明文件 id 不存在或者已删除，你也可以因此找出所有的无效 id
+
+    .. attention::
+        不要并发使用此函数，如果发现有遗漏，且确信遗漏的是存在的，可以专门对遗漏的再跑一次
+
+    :param client: 115 客户端或 cookies
+    :param ids: 一组文件或目录的 id 或 pickcode
+    :param type: 事件类型
+
+        - "doc": 推送 "browse_document" 事件
+        - "img": 推送 "browse_image" 事件
+
+    :param big_batch: 是否大批量，小批量一次推 90 个， 大批量一次推 950 个
+    :param app: 使用指定 app（设备）的接口
+    :param async_: 是否异步
+    :param request_kwargs: 其它请求参数
+
+    :return: 迭代器，产生详细的信息
+    """
+    if isinstance(client, (str, PathLike)):
+        client = P115Client(client)
+    if type == "doc":
+        event_name = "browse_document"
+    else:
+        event_name = "browse_image"
+    iter_items: Callable
+    if big_batch:
+        # NOTE: 每次最多获取 1,000 条，考虑到推送约需 8 秒，空出 50 条应对期间的随机混入
+        batch_size = 950
+        if app in ("", "web", "desktop", "aps"):
+            iter_items = client.life_behavior_detail
+        else:
+            iter_items = partial(client.life_behavior_detail_app, app=app)
+    else:
+        # NOTE: 每次最多获取 100 条，考虑到推送约需 1 秒，空出 5 条应对期间的随机混入
+        batch_size = 95
+        iter_items = partial(client.life_recent_operation_items, app=app)
+    def gen_step():
+        yield life_show(client, async_=async_, **request_kwargs)
+        for fids in batched(map(_get_id, ids), batch_size):
+            yield post_event(
+                client, 
+                fids, 
+                type=type, 
+                app=app, 
+                max_workers=0, 
+                async_=async_, 
+                **request_kwargs, 
+            )
+            resp = yield iter_items(
+                event_name, 
+                async_=async_, 
+                **request_kwargs, 
+            )
+            sids = set(map(str, fids))
+            for item in resp["data"]["list"]:
+                if item["file_id"] in sids:
+                    yield Yield(item)
+    return run_gen_step_iter(gen_step, async_)
+
+
+@overload
 def iter_nodes_by_label(
     client: str | PathLike | P115Client, 
     ids: Iterable[int | str | Mapping], 
@@ -720,8 +820,16 @@ def iter_nodes_by_label(
 ) -> Iterator[dict] | AsyncIterator[dict]:
     """通过先加标签，然后用文件列表接口获取一组 id 的信息
 
-    .. caution::
-        为了稳定起见，不要使用 web 接口
+    .. note::
+        可以对一组 id 批量获得各种信息，但如果想要获得备注 "desc"，要求指定 ``batch_size <= 1150``，且 ``app`` 不能是 ""、"web"、"desktop"、"aps"
+
+        .. code:: python
+
+            ids = (...)
+            id_to_desc = {a["id"]: a["desc"] for a in iter_nodes_by_label(client, ids, replace_label=False, batch_size=1150, max_workers=None)}
+
+    .. tip::
+        如果发现有遗漏的，而且你确信它们是现存的，你只要另外再对这些遗漏的拉取一次即可
 
     :param client: 115 客户端或 cookies
     :param ids: 一组目录的 id 或 pickcode（如果包括文件，则会被忽略）
@@ -730,7 +838,7 @@ def iter_nodes_by_label(
     :param max_workers: 最大并发数，如果为 None 或 < 0 则自动确定，如果为 0 则单工作者惰性执行
     :param sleep_interval: 拉取文件列表时，发现文件数不对时，睡眠一定时间后重试
     :param no_deletion: 确定所有 id 都是有效的，不会有已被删除的
-    :param replace_label: 是否替换所有标签
+    :param replace_label: 是否替换所有标签，如果为 True，速度会快得多，但会清空所有标签
     :param app: 使用指定 app（设备）的接口
     :param async_: 是否异步
     :param request_kwargs: 其它请求参数
@@ -752,21 +860,25 @@ def iter_nodes_by_label(
     is_webapi = app in ("", "web", "desktop", "aps")
     @as_gen_step
     def get_response(batch, /):
-        label_name = uuid4().bytes.decode("latin-1")
-        if is_webapi:
-            resp = yield client.fs_label_add(
-                label_name, 
-                async_=async_, 
-                **request_kwargs, 
-            )
-        else:
-            resp = yield client.fs_label_add_app(
-                label_name, 
-                app=app, 
-                async_=async_, 
-                **request_kwargs, 
-            )
-        check_response(resp)
+        label_name = b85encode(uuid4().bytes).decode("ascii")
+        while True:
+            if is_webapi:
+                resp = yield client.fs_label_add(
+                    label_name, 
+                    async_=async_, 
+                    **request_kwargs, 
+                )
+            else:
+                resp = yield client.fs_label_add_app(
+                    label_name[:20], 
+                    app=app, 
+                    async_=async_, 
+                    **request_kwargs, 
+                )
+            if resp.get("code") != 21001:
+                check_response(resp)
+                label_name = resp["data"][0]["name"]
+                break
         label_id = int(resp["data"][0]["id"])
         try:
             if replace_label:
@@ -788,28 +900,63 @@ def iter_nodes_by_label(
             count = -1
             size = len(batch)
             while True:
-                if is_webapi:
-                    resp = yield client.fs_search(
-                        {"file_label": label_id, "limit": 1}, 
-                        async_=async_, 
-                        **request_kwargs, 
-                    )
-                else:
-                    resp = yield client.fs_search_app(
-                        {"file_label": label_id, "limit": 1}, 
-                        app=app, 
-                        async_=async_, 
-                        **request_kwargs, 
-                    )
-                check_response(resp)
-                count_ = resp["count"]
-                if count_ == size or not no_deletion and count_ == count:
+                if label_name:
                     if is_webapi:
-                        resp = yield client.fs_label_files(
-                            {"label_id": label_id, "limit": size}, 
+                        resp = yield client.fs_label_list(
+                            {
+                                "keyword": label_name, 
+                                "sort": "create_time", 
+                                "order": "desc", 
+                                "limit": 1, 
+                                "count_file": 1, 
+                            }, 
                             async_=async_, 
                             **request_kwargs, 
                         )
+                    else:
+                        resp = yield client.fs_label_list_app(
+                            {
+                                "keyword": label_name, 
+                                "sort": "create_time", 
+                                "order": "desc", 
+                                "limit": 1, 
+                                "count_file": 1, 
+                            }, 
+                            async_=async_, 
+                            **request_kwargs, 
+                        )
+                    check_response(resp)
+                    count_ = resp["data"]["list"][0]["file_count"]
+                else:
+                    if is_webapi:
+                        resp = yield client.fs_search(
+                            {"file_label": label_id, "limit": 1}, 
+                            async_=async_, 
+                            **request_kwargs, 
+                        )
+                    else:
+                        resp = yield client.fs_search_app(
+                            {"file_label": label_id, "limit": 1}, 
+                            app=app, 
+                            async_=async_, 
+                            **request_kwargs, 
+                        )
+                    check_response(resp)
+                    count_ = resp["count"]
+                if count_ == size or not no_deletion and count_ == count:
+                    if is_webapi:
+                        if app:
+                            resp = yield client.fs_label_files(
+                                {"label_id": label_id, "limit": size}, 
+                                async_=async_, 
+                                **request_kwargs, 
+                            )
+                        else:
+                            resp = yield client.fs_search(
+                                {"file_label": label_id, "limit": size}, 
+                                async_=async_, 
+                                **request_kwargs, 
+                            )
                     elif size <= 1150:
                         resp = yield client.fs_search_app(
                             {"file_label": label_id, "limit": size}, 
@@ -860,7 +1007,211 @@ def iter_nodes_by_label(
     ))
 
 
-# TODO: 可以分批处理，首先去除所有的星标，然后按批进行打星标和获取文件信息，获取完成后清空星标，如此可以控制规模，加快拉取速度
+@overload
+def iter_nodes_and_ancestors_by_label(
+    client: str | PathLike | P115Client, 
+    ids: Iterable[int | str | Mapping], 
+    id_to_dirnode: None | EllipsisType | MutableMapping[int, tuple[str, int]] = None, 
+    batch_size: int = 5_000, 
+    max_workers: None | int = 0, 
+    sleep_interval: float = 1, 
+    no_deletion: bool = False, 
+    replace_label: bool = True, 
+    app: str = "android", 
+    *, 
+    async_: Literal[False] = False, 
+    **request_kwargs, 
+) -> Iterator[dict]:
+    ...
+@overload
+def iter_nodes_and_ancestors_by_label(
+    client: str | PathLike | P115Client, 
+    ids: Iterable[int | str | Mapping], 
+    id_to_dirnode: None | EllipsisType | MutableMapping[int, tuple[str, int]] = None, 
+    batch_size: int = 5_000, 
+    max_workers: None | int = 0, 
+    sleep_interval: float = 1, 
+    no_deletion: bool = False, 
+    replace_label: bool = True, 
+    app: str = "android", 
+    *, 
+    async_: Literal[True], 
+    **request_kwargs, 
+) -> AsyncIterator[dict]:
+    ...
+def iter_nodes_and_ancestors_by_label(
+    client: str | PathLike | P115Client, 
+    ids: Iterable[int | str | Mapping], 
+    id_to_dirnode: None | EllipsisType | MutableMapping[int, tuple[str, int]] = None, 
+    batch_size: int = 5_000, 
+    max_workers: None | int = 0, 
+    sleep_interval: float = 1, 
+    no_deletion: bool = False, 
+    replace_label: bool = True, 
+    app: str = "android", 
+    *, 
+    async_: Literal[False, True] = False, 
+    **request_kwargs, 
+) -> Iterator[dict] | AsyncIterator[dict]:
+    """通过先加标签，然后用文件列表接口获取一组 id 的信息
+
+    :param client: 115 客户端或 cookies
+    :param ids: 一组目录的 id 或 pickcode（如果包括文件，则会被忽略）
+    :param id_to_dirnode: 字典，保存 id 到对应文件的 ``(name, parent_id)`` 元组的字典，如果为 ...，则忽略
+    :param batch_size: 批次大小，分批次，每次提交的 id 数
+    :param max_workers: 最大并发数，如果为 None 或 < 0 则自动确定，如果为 0 则单工作者惰性执行
+    :param sleep_interval: 拉取文件列表时，发现文件数不对时，睡眠一定时间后重试
+    :param no_deletion: 确定所有 id 都是有效的，不会有已被删除的
+    :param replace_label: 是否替换所有标签，如果为 True，速度会快得多，但会清空所有标签
+    :param app: 使用指定 app（设备）的接口
+    :param async_: 是否异步
+    :param request_kwargs: 其它请求参数
+
+    :return: 迭代器，产生详细的信息
+    """
+    if isinstance(client, (str, PathLike)):
+        client = P115Client(client)
+    if id_to_dirnode is None:
+        id_to_dirnode = ID_TO_DIRNODE_CACHE[client.user_id]
+    elif id_to_dirnode is ...:
+        id_to_dirnode = {}
+    def gen_step():
+        fids = set(map(_get_id, ids))
+        add_fid = fids.add
+        while fids:
+            with with_iter_next(iter_nodes_by_label(
+                client, 
+                tuple(fids), 
+                batch_size=batch_size, 
+                max_workers=max_workers, 
+                sleep_interval=sleep_interval, 
+                no_deletion=no_deletion, 
+                replace_label=replace_label, 
+                app=app, 
+                async_=async_, 
+                **request_kwargs, 
+            )) as get_next:
+                fids.clear()
+                while True:
+                    attr = yield get_next()
+                    fid, pid = attr["id"], attr["parent_id"]
+                    if attr["is_dir"] and fid not in id_to_dirnode:
+                        id_to_dirnode[fid] = (attr["name"], pid)
+                    if pid and pid not in id_to_dirnode:
+                        add_fid(pid)
+                    yield Yield(attr)
+    return run_gen_step_iter(gen_step, async_)
+
+
+@overload
+def iter_nodes_by_label_with_path(
+    client: str | PathLike | P115Client, 
+    ids: Iterable[int | str | Mapping], 
+    with_ancestors: bool = False, 
+    with_path: bool = True, 
+    escape: None | bool | Callable[[str], str] = True, 
+    id_to_dirnode: None | EllipsisType | MutableMapping[int, tuple[str, int]] = None, 
+    batch_size: int = 5_000, 
+    max_workers: None | int = 0, 
+    sleep_interval: float = 1, 
+    no_deletion: bool = False, 
+    replace_label: bool = True, 
+    app: str = "android", 
+    *, 
+    async_: Literal[False] = False, 
+    **request_kwargs, 
+) -> Iterator[dict]:
+    ...
+@overload
+def iter_nodes_by_label_with_path(
+    client: str | PathLike | P115Client, 
+    ids: Iterable[int | str | Mapping], 
+    with_ancestors: bool = False, 
+    with_path: bool = True, 
+    escape: None | bool | Callable[[str], str] = True, 
+    id_to_dirnode: None | EllipsisType | MutableMapping[int, tuple[str, int]] = None, 
+    batch_size: int = 5_000, 
+    max_workers: None | int = 0, 
+    sleep_interval: float = 1, 
+    no_deletion: bool = False, 
+    replace_label: bool = True, 
+    app: str = "android", 
+    *, 
+    async_: Literal[True], 
+    **request_kwargs, 
+) -> AsyncIterator[dict]:
+    ...
+def iter_nodes_by_label_with_path(
+    client: str | PathLike | P115Client, 
+    ids: Iterable[int | str | Mapping], 
+    with_ancestors: bool = False, 
+    with_path: bool = True, 
+    escape: None | bool | Callable[[str], str] = True, 
+    id_to_dirnode: None | EllipsisType | MutableMapping[int, tuple[str, int]] = None, 
+    batch_size: int = 5_000, 
+    max_workers: None | int = 0, 
+    sleep_interval: float = 1, 
+    no_deletion: bool = False, 
+    replace_label: bool = True, 
+    app: str = "android", 
+    *, 
+    async_: Literal[False, True] = False, 
+    **request_kwargs, 
+) -> Iterator[dict] | AsyncIterator[dict]:
+    """通过先加标签，然后用文件列表接口获取一组 id 的信息
+
+    :param client: 115 客户端或 cookies
+    :param ids: 一组目录的 id 或 pickcode（如果包括文件，则会被忽略）
+    :param with_ancestors: 文件信息中是否要包含 "ancestors"
+    :param with_path: 文件信息中是否要包含 "path"
+    :param escape: 对文件名进行转义
+
+        - 如果为 None，则不处理；否则，这个函数用来对文件名中某些符号进行转义，例如 "/" 等
+        - 如果为 True，则使用 `posixpatht.escape`，会对文件名中 "/"，或单独出现的 "." 和 ".." 用 "\\" 进行转义
+        - 如果为 False，则使用 `posix_escape_name` 函数对名字进行转义，会把文件名中的 "/" 转换为 "|"
+        - 如果为 Callable，则用你所提供的调用，以或者转义后的名字
+
+    :param id_to_dirnode: 字典，保存 id 到对应文件的 ``(name, parent_id)`` 元组的字典，如果为 ...，则忽略
+    :param batch_size: 批次大小，分批次，每次提交的 id 数
+    :param max_workers: 最大并发数，如果为 None 或 < 0 则自动确定，如果为 0 则单工作者惰性执行
+    :param sleep_interval: 拉取文件列表时，发现文件数不对时，睡眠一定时间后重试
+    :param no_deletion: 确定所有 id 都是有效的，不会有已被删除的
+    :param replace_label: 是否替换所有标签，如果为 True，速度会快得多，但会清空所有标签
+    :param app: 使用指定 app（设备）的接口
+    :param async_: 是否异步
+    :param request_kwargs: 其它请求参数
+
+    :return: 迭代器，产生详细的信息
+    """
+    from .iterdir import ensure_path
+    if isinstance(client, (str, PathLike)):
+        client = P115Client(client)
+    return ensure_path(
+        client, 
+        iter_nodes_by_label(
+            client, 
+            ids, 
+            batch_size=batch_size, 
+            max_workers=max_workers, 
+            sleep_interval=sleep_interval, 
+            no_deletion=no_deletion, 
+            replace_label=replace_label, 
+            app=app, 
+            async_=async_, # type: ignore
+            **request_kwargs, 
+        ), 
+        cid=None, 
+        with_ancestors=with_ancestors, 
+        with_path=with_path, 
+        escape=escape, 
+        id_to_dirnode=id_to_dirnode, 
+        async_=async_, # type: ignore
+        **request_kwargs, 
+    )
+
+
+# TODO: 支持分批处理，首先去除所有的星标，然后按批进行打星标和获取文件信息，获取完成后清空星标，如此可以控制规模，加快拉取速度
+# TODO: client.fs_files 支持按星标时间排序，似乎很实用，但打星标比打标签慢，而且删掉星标也很慢
 @overload
 def iter_nodes_by_star(
     client: str | PathLike | P115Client, 
@@ -989,4 +1340,3 @@ def iter_nodes_by_star(
 # TODO: 还可以分享一些文件，然后直接罗列分享链接里面的文件列表，获取信息，但因此得不到父目录 id
 # TODO: 把文件列表添加到我听、我看、听单、相册等，然后从中拉取文件信息列表，可能因此也得不到父目录 id
 # TODO: 基于合集的拉取：更一般的来讲，把一堆 id 添加到某个合集，从此合集中获取信息，最后删除此合集
-

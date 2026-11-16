@@ -59,7 +59,7 @@ _get_webapi_origin_fs_dir_getid2: Final = cycle((
 
 def _get_id(id: int | str | Mapping, /) -> int:
     if isinstance(id, Mapping):
-        id = cast(int | str, get_first(id, "id", "pickcode"))
+        id = cast(int | str, get_first(id, "file_id", "id", "pickcode", "pick_code"))
     return to_id(id)
 
 
@@ -69,7 +69,7 @@ def _get_pickcode(
     /, 
 ) -> str:
     if isinstance(pickcode, Mapping):
-        pickcode = cast(str | int, get_first(pickcode, "pickcode", "id"))
+        pickcode = cast(str | int, get_first(pickcode, "pickcode", "pick_code", "file_id", "id"))
     if not isinstance(stable_point, str):
         stable_point = cast(str, stable_point.pickcode_stable_point)
     return to_pickcode(pickcode, stable_point=stable_point)
@@ -296,6 +296,7 @@ def normalize_attr_web(
             ("play_long", "play_long"), 
             ("played_end", "played_end"), 
             ("pt", "pick_time"), 
+            ("q", "is_q"), 
             ("score", "score"), 
             ("sh", "is_share"), 
             ("sta", "status"), 
@@ -553,6 +554,7 @@ def normalize_attr_app2(
             "has_desc", 
             "has_pass", 
             "is_collect", 
+            "is_family_share", 
             "is_mark", 
             "is_private", 
             "is_share", 

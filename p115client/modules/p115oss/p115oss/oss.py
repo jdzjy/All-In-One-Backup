@@ -117,9 +117,12 @@ def oss_url(
         else:
             urlp = urlsplit(endpoint)
             host = urlp.hostname or "oss-cn-shenzhen"
-            if "." not in host:
-                host += ".aliyuncs.com"
-            url = f"{urlp.scheme or "http"}://{bucket}.{host}/"
+            if host.endswith(".115.com"):
+                url = f"{urlp.scheme or "https"}://{host}/"
+            else:
+                if "." not in host:
+                    host += ".aliyuncs.com"
+                url = f"{urlp.scheme or "http"}://{bucket}.{host}/"
         if url_or_key:
             url += url_or_key
     if request_kwargs and (params := request_kwargs.pop("params", None)):
@@ -213,7 +216,11 @@ def oss_request(
         )
         if not token:
             from .api import _upload_token
-            token = yield _upload_token(request=request, async_=async_)
+            token = yield _upload_token(
+                request=request, 
+                async_=async_, 
+                headers=request_kwargs.get("headers"), 
+            )
         request_kwargs["headers"] = oss_sign(
             token=token, 
             method=method, 
