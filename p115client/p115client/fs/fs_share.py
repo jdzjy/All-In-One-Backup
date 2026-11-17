@@ -11,9 +11,10 @@ from collections.abc import (
 from datetime import datetime
 from functools import cached_property
 from os import PathLike
-from typing import overload, Any, ClassVar, Literal
+from typing import overload, Any, ClassVar, Literal, Self
 
-from iterutils import run_gen_step
+from dictattr import AttrDict
+from iterutils import map as do_map, run_gen_step, run_gen_step_iter, YieldFrom
 
 from ..client import check_response, P115Client
 from ..type import P115URL
@@ -64,6 +65,56 @@ class P115SharePath(P115PathBase):
             async_=async_, 
             **request_kwargs, 
         )
+
+    @overload
+    def search(
+        self, 
+        /, 
+        search_value: str = ".", 
+        page_size: int = 1_000, 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> Iterator[Self]:
+        ...
+    @overload
+    def search(
+        self, 
+        /, 
+        search_value: str = ".", 
+        page_size: int = 1_000, 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> AsyncIterator[Self]:
+        ...
+    def search(
+        self, 
+        /, 
+        search_value: str = ".", 
+        page_size: int = 1_000, 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> Iterator[Self] | AsyncIterator[Self]:
+        def gen_step():
+            if (yield self.is_dir(async_=async_, **request_kwargs)):
+                pid = self.id
+            else:
+                pid = self["parent_id"]
+            cls = type(self)
+            fs = self.fs
+            yield YieldFrom(do_map(
+                lambda a: cls(fs, AttrDict(a)), 
+                self.fs.search(
+                    search_value, 
+                    pid, 
+                    page_size=page_size, 
+                    async_=async_, 
+                    **request_kwargs, 
+                ), 
+            ))
+        return run_gen_step_iter(gen_step, async_)
 
 
 class P115ShareFileSystem(P115FileSystemBase):
@@ -303,6 +354,57 @@ class P115ShareFileSystem(P115FileSystemBase):
             async_=async_, 
             **request_kwargs, 
         ))
+
+    @overload
+    def search(
+        self, 
+        /, 
+        search_value: str = ".", 
+        pid: None | int = None, 
+        page_size: int = 1_000, 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> Iterator[dict]:
+        ...
+    @overload
+    def search(
+        self, 
+        /, 
+        search_value: str = ".", 
+        pid: None | int = None, 
+        page_size: int = 1_000, 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> AsyncIterator[dict]:
+        ...
+    def search(
+        self, 
+        /, 
+        search_value: str = ".", 
+        pid: None | int = None, 
+        page_size: int = 1_000, 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> Iterator[dict] | AsyncIterator[dict]:
+        """搜索
+        """
+        from ..tool import share_search_iter
+        if pid is None:
+            pid = self.id
+        return share_search_iter(
+            self.client, 
+            self.share_code, 
+            self.receive_code, 
+            search_value, 
+            cid=pid, 
+            page_size=page_size, 
+            async_=async_, 
+            **request_kwargs, 
+        )
+
 
 # TODO: 如果是自己的分享，可以尝试获取分享码（增加一个方法，用来拉取分享码，增加一个方法，可以从自己的分享中查询某个分享的信息）
 # TODO: 增加 search 方法

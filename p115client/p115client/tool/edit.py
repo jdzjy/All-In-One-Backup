@@ -868,16 +868,15 @@ def batch_unstar(
                     async_=async_, 
                     **request_kwargs, 
                 )
-                if len(resp["data"]):
-                    yield update_star(
+                if resp["count"]:
+                    update_star_fast(
                         client, 
                         (overview_attr(info).id for info in resp["data"]), 
                         star=False, 
-                        batch_size=len(resp["data"]), 
                         app=app, 
-                        async_=async_, 
-                        **request_kwargs, 
                     )
+                else:
+                    break
                 if not resp["has_next_page"]:
                     break
         else:
@@ -900,15 +899,11 @@ def batch_unstar(
                 )
             )
             if ids:
-                yield update_star(
+                update_star_fast(
                     client, 
                     ids, 
                     star=False, 
-                    batch_size=batch_size or 1_000, 
-                    max_workers=max_workers, 
                     app=app, 
-                    async_=async_, 
-                    **request_kwargs, 
                 )
     return run_gen_step(gen_step, async_)
 

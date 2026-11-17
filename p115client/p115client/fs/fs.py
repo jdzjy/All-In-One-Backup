@@ -14,11 +14,12 @@ from os import PathLike
 from threading import Lock
 from typing import overload, Any, ClassVar, Literal, Self
 
+from dictattr import AttrDict
 from dicttools import dict_key_to_lower_update
 from errno2 import errno
 from filewrap import Buffer, SupportsRead
 from http_request import SupportsGeturl
-from iterutils import run_gen_step
+from iterutils import map as do_map, run_gen_step, run_gen_step_iter, YieldFrom
 from p115pickcode import is_valid_pickcode
 from yarl import URL
 
@@ -239,6 +240,58 @@ class P115Path(P115PathBase):
             return self
         return run_gen_step(gen_step, async_)
 
+    @overload
+    def search(
+        self, 
+        /, 
+        search_value: int | str = ".", 
+        page_size: int = 1_000, 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> Iterator[Self]:
+        ...
+    @overload
+    def search(
+        self, 
+        /, 
+        search_value: int | str = ".", 
+        page_size: int = 1_000, 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> AsyncIterator[Self]:
+        ...
+    def search(
+        self, 
+        /, 
+        search_value: int | str = ".", 
+        page_size: int = 1_000, 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> Iterator[Self] | AsyncIterator[Self]:
+        def gen_step():
+            if (yield self.is_dir(async_=async_, **request_kwargs)):
+                pid = self.id
+            else:
+                pid = self["parent_id"]
+            cls = type(self)
+            fs = self.fs
+            yield YieldFrom(do_map(
+                lambda a: cls(fs, AttrDict(a)), 
+                self.fs.search(
+                    search_value, 
+                    pid, 
+                    page_size=page_size, 
+                    async_=async_, 
+                    **request_kwargs, 
+                ), 
+            ))
+        return run_gen_step_iter(gen_step, async_)
+
+    delete = remove
+
 
 class P115FileSystem(P115FileSystemBase[P115Path]):
     STAT_MODE: ClassVar = 0o777
@@ -301,12 +354,12 @@ class P115FileSystem(P115FileSystemBase[P115Path]):
             if not refresh:
                 if attr := id_to_attr.get(id):
                     return attr
-            attr = yield get_attr(
+            attr = AttrDict((yield get_attr(
                 self.client, 
                 id, 
                 async_=async_, 
                 **request_kwargs, 
-            )
+            )))
             if attr_old := id_to_attr.get(id):
                 attr_old.update(attr)
                 if id_to_readdir := self.id_to_readdir:
@@ -610,7 +663,7 @@ class P115FileSystem(P115FileSystemBase[P115Path]):
             info = resp["data"]
             fid = int(info["category_id"])
             cname = info["category_name"]
-            attr: dict = dict(
+            attr: AttrDict = AttrDict(
                 id=fid, 
                 parent_id=cid, 
                 is_dir=True, 
@@ -839,6 +892,54 @@ class P115FileSystem(P115FileSystemBase[P115Path]):
         return run_gen_step(gen_step, async_)
 
     @overload
+    def search(
+        self, 
+        /, 
+        search_value: int | str = ".", 
+        pid: None | int = None, 
+        page_size: int = 1_000, 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> Iterator[dict]:
+        ...
+    @overload
+    def search(
+        self, 
+        /, 
+        search_value: int | str = ".", 
+        pid: None | int = None, 
+        page_size: int = 1_000, 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> AsyncIterator[dict]:
+        ...
+    def search(
+        self, 
+        /, 
+        search_value: int | str = ".", 
+        pid: None | int = None, 
+        page_size: int = 1_000, 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> Iterator[dict] | AsyncIterator[dict]:
+        """搜索
+        """
+        from ..tool import search_iter
+        if pid is None:
+            pid = self.id
+        return search_iter(
+            self.client, 
+            search_value, 
+            cid=pid, 
+            page_size=page_size, 
+            async_=async_, 
+            **request_kwargs, 
+        )
+
+    @overload
     def upload(
         self, 
         id_or_path: IDOrPathType, 
@@ -962,6 +1063,8 @@ class P115FileSystem(P115FileSystemBase[P115Path]):
                 self._pid_name_to_attr[(cid, attr["name"])] = attr
             return attr
         return run_gen_step(gen_step, async_)
+
+    delete = remove
 
 # TODO: 实现 search 方法，以及可以设定 desc、label 等
 # TODO: 允许手动指定一个 escape 方法

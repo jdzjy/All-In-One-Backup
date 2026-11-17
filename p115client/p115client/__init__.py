@@ -9,7 +9,6 @@ from .const import *
 from .exception import *
 from .fs import *
 from .type import *
-from . import util
 
-from . import _init_ipython
-del _init_ipython
+from . import _init_ipython, _init_xonsh
+del _init_ipython, _init_xonsh

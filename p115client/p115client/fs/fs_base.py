@@ -26,8 +26,8 @@ from typing import (
 )
 from weakref import WeakValueDictionary
 
-from dictattr import AttrDict
 from cachedict import LRUDict
+from dictattr import AttrDict
 from download import download, download_async
 from ed2k import ed2k_hash, ed2k_hash_async
 from errno2 import errno
@@ -209,6 +209,88 @@ class P115PathBase:
         """
         """
         return ["." + part for part in self.name.lstrip(".").split(".")]
+
+    @overload
+    def dictdir(
+        self, 
+        /, 
+        refresh: None | bool = None, 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict[int, str]:
+        ...
+    @overload
+    def dictdir(
+        self, 
+        /, 
+        refresh: None | bool = None, 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict[int, str]]:
+        ...
+    def dictdir(
+        self, 
+        /, 
+        refresh: None | bool = None, 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict[int, str] | Coroutine[Any, Any, dict[int, str]]:
+        def gen_step():
+            if (yield self.is_dir(async_=async_, **request_kwargs)):
+                pid = self.id
+            else:
+                pid = self["parent_id"]
+            return self.fs.dictdir(
+                pid, 
+                refresh=refresh, 
+                async_=async_, 
+                **request_kwargs, 
+            )
+        return run_gen_step(gen_step, async_)
+
+    @overload
+    def dictdir_path(
+        self, 
+        /, 
+        refresh: None | bool = None, 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> dict[int, Self]:
+        ...
+    @overload
+    def dictdir_path(
+        self, 
+        /, 
+        refresh: None | bool = None, 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, dict[int, Self]]:
+        ...
+    def dictdir_path(
+        self, 
+        /, 
+        refresh: None | bool = None, 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> dict[int, Self] | Coroutine[Any, Any, dict[int, Self]]:
+        def gen_step():
+            if (yield self.is_dir(async_=async_, **request_kwargs)):
+                pid = self.id
+            else:
+                pid = self["parent_id"]
+            return self.fs.dictdir_path(
+                pid, 
+                refresh=refresh, 
+                async_=async_, 
+                **request_kwargs, 
+            )
+        return run_gen_step(gen_step, async_)
 
     @overload
     def download(
@@ -479,9 +561,7 @@ class P115PathBase:
                 async_=async_, 
                 **request_kwargs, 
             )
-            cls = type(self)
-            fs = self.fs
-            return [cls(fs, {"id": a["id"]}) for a in reversed(ancestors[:-1])]
+            return list(self.wrap_path_iter({"id": a["id"]} for a in reversed(ancestors[:-1])))
         return run_gen_step(gen_step, async_)
 
     @overload
@@ -626,15 +706,21 @@ class P115PathBase:
         async_: Literal[False, True] = False, 
         **request_kwargs, 
     ) -> Iterator[Self] | AsyncIterator[Self]:
-        return self.wrap_path_iter(self.fs.glob(
-            pattern, 
-            dirname=self, 
-            ignore_case=ignore_case, 
-            allow_escaped_slash=allow_escaped_slash, 
-            refresh=refresh, 
-            async_=async_, 
-            **request_kwargs, 
-        ))
+        def gen_step():
+            if (yield self.is_dir(async_=async_, **request_kwargs)):
+                pid = self.id
+            else:
+                pid = self["parent_id"]
+            yield YieldFrom(self.wrap_path_iter(self.fs.glob(
+                pattern, 
+                dirname=pid, 
+                ignore_case=ignore_case, 
+                allow_escaped_slash=allow_escaped_slash, 
+                refresh=refresh, 
+                async_=async_, 
+                **request_kwargs, 
+            )))
+        return run_gen_step_iter(gen_step, async_)
 
     @overload
     def has_child(
@@ -969,17 +1055,23 @@ class P115PathBase:
         async_: Literal[False, True] = False, 
         **request_kwargs, 
     ) -> Iterator[Self] | AsyncIterator[Self]:
-        return self.wrap_path_iter(self.fs.iter(
-            self,  
-            topdown=topdown, 
-            min_depth=min_depth, 
-            max_depth=max_depth, 
-            predicate=predicate, 
-            onerror=onerror, 
-            refresh=refresh, 
-            async_=async_, # type: ignore
-            **request_kwargs, 
-        ))
+        def gen_step():
+            if (yield self.is_dir(async_=async_, **request_kwargs)):
+                pid = self.id
+            else:
+                pid = self["parent_id"]
+            yield YieldFrom(self.wrap_path_iter(self.fs.iter(
+                pid, 
+                topdown=topdown, 
+                min_depth=min_depth, 
+                max_depth=max_depth, 
+                predicate=predicate, 
+                onerror=onerror, 
+                refresh=refresh, 
+                async_=async_, # type: ignore
+                **request_kwargs, 
+            )))
+        return run_gen_step_iter(gen_step, async_)
 
     @overload
     def iterdir(
@@ -1010,15 +1102,17 @@ class P115PathBase:
         **request_kwargs, 
     ) -> Iterator[Self] | AsyncIterator[Self]:
         def gen_step():
+            if (yield self.is_dir(async_=async_, **request_kwargs)):
+                pid = self.id
+            else:
+                pid = self["parent_id"]
             children = yield self.fs.readdir(
-                self, 
+                pid, 
                 refresh=refresh, 
                 async_=async_, 
                 **request_kwargs, 
             )
-            path_class = type(self)
-            fs = self.fs
-            return YieldFrom(path_class(fs, a) for a in children)
+            yield YieldFrom(self.wrap_path_iter(children))
         return run_gen_step_iter(gen_step, async_)
 
     @overload
@@ -1100,6 +1194,88 @@ class P115PathBase:
             if path == path_new:
                 return self
             return type(self)(self.fs, {"path": joinpath(path, path_new)})
+        return run_gen_step(gen_step, async_)
+
+    @overload
+    def listdir(
+        self, 
+        /, 
+        refresh: None | bool = None, 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> list[str]:
+        ...
+    @overload
+    def listdir(
+        self, 
+        /, 
+        refresh: None | bool = None, 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, list[str]]:
+        ...
+    def listdir(
+        self, 
+        /, 
+        refresh: None | bool = None, 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> list[str] | Coroutine[Any, Any, list[str]]:
+        def gen_step():
+            if (yield self.is_dir(async_=async_, **request_kwargs)):
+                pid = self.id
+            else:
+                pid = self["parent_id"]
+            return self.fs.listdir(
+                pid, 
+                refresh=refresh, 
+                async_=async_, 
+                **request_kwargs, 
+            )
+        return run_gen_step(gen_step, async_)
+
+    @overload
+    def listdir_path(
+        self, 
+        /, 
+        refresh: None | bool = None, 
+        *, 
+        async_: Literal[False] = False, 
+        **request_kwargs, 
+    ) -> list[Self]:
+        ...
+    @overload
+    def listdir_path(
+        self, 
+        /, 
+        refresh: None | bool = None, 
+        *, 
+        async_: Literal[True], 
+        **request_kwargs, 
+    ) -> Coroutine[Any, Any, list[Self]]:
+        ...
+    def listdir_path(
+        self, 
+        /, 
+        refresh: None | bool = None, 
+        *, 
+        async_: Literal[False, True] = False, 
+        **request_kwargs, 
+    ) -> list[Self] | Coroutine[Any, Any, list[Self]]:
+        def gen_step():
+            if (yield self.is_dir(async_=async_, **request_kwargs)):
+                pid = self.id
+            else:
+                pid = self["parent_id"]
+            return self.fs.listdir_path(
+                pid, 
+                refresh=refresh, 
+                async_=async_, 
+                **request_kwargs, 
+            )
         return run_gen_step(gen_step, async_)
 
     @overload
@@ -1454,15 +1630,21 @@ class P115PathBase:
         async_: Literal[False, True] = False, 
         **request_kwargs, 
     ) -> Iterator[Self] | AsyncIterator[Self]:
-        return self.wrap_path_iter(self.fs.rglob(
-            pattern, 
-            dirname=self, 
-            ignore_case=ignore_case, 
-            allow_escaped_slash=allow_escaped_slash, 
-            refresh=refresh, 
-            async_=async_, 
-            **request_kwargs, 
-        ))
+        def gen_step():
+            if (yield self.is_dir(async_=async_, **request_kwargs)):
+                pid = self.id
+            else:
+                pid = self["parent_id"]
+            yield YieldFrom(self.wrap_path_iter(self.fs.rglob(
+                pattern, 
+                dirname=pid, 
+                ignore_case=ignore_case, 
+                allow_escaped_slash=allow_escaped_slash, 
+                refresh=refresh, 
+                async_=async_, 
+                **request_kwargs, 
+            )))
+        return run_gen_step_iter(gen_step, async_)
 
     @overload
     def stat(
@@ -1529,10 +1711,14 @@ class P115PathBase:
         **request_kwargs, 
     ) -> Iterator[tuple[Self, list[Self], list[Self]]] | AsyncIterator[tuple[Self, list[Self], list[Self]]]:
         def gen_step():
+            if (yield self.is_dir(async_=async_, **request_kwargs)):
+                pid = self.id
+            else:
+                pid = self["parent_id"]
             path_class = type(self)
             fs = self.fs
             with with_iter_next(self.fs.walk(
-                self, 
+                pid, 
                 topdown=topdown, 
                 min_depth=min_depth, 
                 max_depth=max_depth, 
@@ -2479,12 +2665,12 @@ class P115FileSystemBase[P115PathType: P115PathBase](ABC):
                     id_or_path = [attr["name"]]
                 if "parent_id" in attr:
                     pid = attr["parent_id"]
-                if not refresh and pid == 0 and "id" in attr and "name" in attr:
+                if not refresh and pid == 0 and "id" in attr and attr.get("name"):
                     return [
                         {"id": 0, "parent_id": 0, "name": ""}, 
                         {"id": attr["id"], "parent_id": pid, "name": attr["name"]}, 
                     ]
-            if id_or_path == 0:
+            if not id_or_path:
                 return [{"id": 0, "parent_id": 0, "name": ""}]
             attr = yield self.get_attr(
                 id_or_path, 
@@ -2493,6 +2679,8 @@ class P115FileSystemBase[P115PathType: P115PathBase](ABC):
                 async_=async_, 
                 **request_kwargs, 
             )
+            if not attr["id"]:
+                return [{"id": 0, "parent_id": 0, "name": ""}]
             pid = attr["parent_id"]
             pancestors: None | list[AncestorDict] = None
             if not refresh:

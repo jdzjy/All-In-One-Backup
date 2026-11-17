@@ -20,7 +20,7 @@ from itertools import cycle
 from os import cpu_count, makedirs, PathLike
 from os.path import dirname, getsize
 from re import compile as re_compile
-from string import hexdigits, ascii_uppercase
+from string import ascii_uppercase, hexdigits
 from types import EllipsisType
 from typing import cast, overload, Any, Final, Literal
 from urllib.request import urlopen, Request
@@ -145,7 +145,6 @@ def get_url(
                 and isinstance(value, str)
                 and is_valid_sha1(value)
             ):
-                from .download import get_pic_url
                 return get_pic_url(
                     client, 
                     value if size else "DA39A3EE5E6B4B0D3255BFEF95601890AFD80709", 
@@ -314,8 +313,8 @@ def get_pic_url(
     """
     if select is None:
         select = cast(Literal["life_v1", "life_v2", "note_v1", "note_v2"], _get_pic_url_next_select())
-    def formalize_sha1(sha1):
-        if len(sha1) and not sha1.upper().lstrip(ascii_uppercase):
+    def formalize_sha1(sha1: str, /):
+        if len(sha1) == 32 and not sha1.strip(ascii_uppercase+"234567"):
             return b32decode(sha1).hex().upper()
         elif len(sha1) == 40 and not sha1.lstrip(hexdigits):
             return sha1.upper()

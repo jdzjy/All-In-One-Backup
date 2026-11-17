@@ -1,13 +1,22 @@
 #!/usr/bin/env python3
 # encoding: utf-8
 
-from .fs_base import *
-from .fs import *
-from .fs_share import *
-from .fs_zip import *
+if False:
+    from .fs import *
+    from .fs_base import *
+    from .fs_share import *
+    from .fs_zip import *
 
-def __getattr__(attr, /):
-    if attr == "__all__":
-        from . import fs_base, fs, fs_share, fs_zip
-        return fs_base.__all__ + fs.__all__ + fs_share.__all__ + fs_zip.__all__
-    raise AttributeError(attr)
+from importlib import import_module
+from pathlib import Path
+
+ns = globals()
+__all__: list[str] = []
+module_prefix = __name__ + "."
+for path in Path(__path__[0]).glob("*.py"):
+    if path.name.startswith(("_", "#")):
+        continue
+    module = import_module(module_prefix + path.stem)
+    __all__.extend(module.__all__)
+    for attr in module.__all__:
+        ns[attr] = getattr(module, attr)

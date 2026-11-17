@@ -1213,7 +1213,7 @@ def traverse_tree(
 @overload
 def search_iter(
     client: str | PathLike | P115Client | P115OpenClient, 
-    search_value: str = ".", 
+    search_value: int | str = ".", 
     cid: int | str | Mapping = 0, 
     suffix: str = "", 
     type: int = 0, 
@@ -1230,7 +1230,7 @@ def search_iter(
 @overload
 def search_iter(
     client: str | PathLike | P115Client | P115OpenClient, 
-    search_value: str = ".", 
+    search_value: int | str = ".", 
     cid: int | str | Mapping = 0, 
     suffix: str = "", 
     type: int = 0, 
@@ -1246,7 +1246,7 @@ def search_iter(
     ...
 def search_iter(
     client: str | PathLike | P115Client | P115OpenClient, 
-    search_value: str = ".", 
+    search_value: int | str = ".", 
     cid: int | str | Mapping = 0, 
     suffix: str = "", 
     type: int = 0, 
@@ -1265,7 +1265,7 @@ def search_iter(
         最多可取回 10,000，但接口有 bug，即使总数 >= 10,000，能取回的往往少于 10,000
 
     :param client: 115 客户端或 cookies
-    :param search_value: 搜索关键词，搜索到的文件名必须包含这个字符串
+    :param search_value: 如果为 str，则是搜索关键词，搜索到的文件名必须包含这个字符串；如果为 int，则是标签 id
     :param cid: 目录 id 或 pickcode
     :param suffix: 后缀名（优先级高于 type）
     :param type: 文件类型
@@ -1309,12 +1309,15 @@ def search_iter(
         nonlocal page_size, offset
         payload = {
             "cid": _get_id(cid), 
-            "search_value": search_value, 
             "suffix": suffix, 
             "type": type, 
             "limit": page_size, 
             "offset": offset, 
         }
+        if isinstance(search_value, int):
+            payload["file_label"] = search_value
+        else:
+            payload["search_value"] = search_value
         while offset < 10_000:
             if offset + page_size > 10_000:
                 page_size = 10_000 - offset
