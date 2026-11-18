@@ -15,7 +15,7 @@ from .util import is_valid_id, is_valid_pickcode
 
 def attr(client: P115Client, argv: str | list[str]):
     parser = ArgumentParser(prog="获取信息")
-    parser.add_argument("value", nargs="?", default="", help="取值，id、pickcode 或 path")
+    parser.add_argument("values", metavar="value", nargs="*", help="取值，id、pickcode 或 path")
     parser.add_argument("-r", "--refresh", action="store_true", help="是否刷新")
 
     if isinstance(argv, str):
@@ -25,13 +25,16 @@ def attr(client: P115Client, argv: str | list[str]):
     except SystemExit:
         return
 
-    id = get_id(client, value=args.value)
-    print(client.fs.get_attr(id, refresh=args.refresh))
+    if not (values := args.values):
+        values = 0,
+    for value in values:
+        id = get_id(client, value=value)
+        print(client.fs.get_attr(id, refresh=args.refresh))
 
 
 def ancestors(client: P115Client, argv: str | list[str]):
     parser = ArgumentParser(prog="获取祖先列表")
-    parser.add_argument("value", nargs="?", default="", help="取值，id、pickcode 或 path")
+    parser.add_argument("values", metavar="value", nargs="*", help="取值，id、pickcode 或 path")
     parser.add_argument("-r", "--refresh", action="store_true", help="是否刷新")
 
     if isinstance(argv, str):
@@ -41,17 +44,19 @@ def ancestors(client: P115Client, argv: str | list[str]):
     except SystemExit:
         return
 
-    value = args.value
-    if is_valid_id(value):
-        value = int(value)
-    elif is_valid_pickcode(value):
-        value = client.to_id(value)
-    print(client.fs.get_ancestors(value, refresh=args.refresh))
+    if not (values := args.values):
+        values = 0,
+    for value in values:
+        if is_valid_id(value):
+            value = int(value)
+        elif is_valid_pickcode(value):
+            value = client.to_id(value)
+        print(client.fs.get_ancestors(value, refresh=args.refresh))
 
 
 def path(client: P115Client, argv: str | list[str]):
     parser = ArgumentParser(prog="获取路径")
-    parser.add_argument("value", nargs="?", default="", help="取值，id、pickcode 或 path")
+    parser.add_argument("values", metavar="value", nargs="*", help="取值，id、pickcode 或 path")
     parser.add_argument("-r", "--refresh", action="store_true", help="是否刷新")
 
     if isinstance(argv, str):
@@ -61,17 +66,19 @@ def path(client: P115Client, argv: str | list[str]):
     except SystemExit:
         return
 
-    value = args.value
-    if is_valid_id(value):
-        value = int(value)
-    elif is_valid_pickcode(value):
-        value = client.to_id(value)
-    print(client.fs.get_path(value, refresh=args.refresh))
+    if not (values := args.values):
+        values = 0,
+    for value in values:
+        if is_valid_id(value):
+            value = int(value)
+        elif is_valid_pickcode(value):
+            value = client.to_id(value)
+        print(client.fs.get_path(value, refresh=args.refresh))
 
 
 def listdir(client: P115Client, argv: str | list[str]):
     parser = ArgumentParser(prog="罗列目录，获取名字")
-    parser.add_argument("value", nargs="?", default="", help="取值，id、pickcode 或 path")
+    parser.add_argument("value", nargs="?", default=0, help="取值，id、pickcode 或 path")
     parser.add_argument("-r", "--refresh", action="store_true", help="是否刷新")
 
     if isinstance(argv, str):
@@ -88,7 +95,7 @@ def listdir(client: P115Client, argv: str | list[str]):
 
 def dictdir(client: P115Client, argv: str | list[str]):
     parser = ArgumentParser(prog="罗列目录，获取id 和 名字")
-    parser.add_argument("value", nargs="?", default="", help="取值，id、pickcode 或 path")
+    parser.add_argument("value", nargs="?", default=0, help="取值，id、pickcode 或 path")
     parser.add_argument("-r", "--refresh", action="store_true", help="是否刷新")
 
     if isinstance(argv, str):
@@ -264,6 +271,5 @@ def m3u8(client: P115Client, argv: str | list[str]):
                 print("#", dumps(resp, ensure_ascii=False))
                 print(resp["video_url"])
             print()
-
 
 # TODO: 增加 %download, %upload，上传和下载允许指定数据库，以便下次继续

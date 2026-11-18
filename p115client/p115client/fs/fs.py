@@ -1066,6 +1066,8 @@ class P115FileSystem(P115FileSystemBase[P115Path]):
 
     delete = remove
 
+    # TODO: 实现 cp 和 mv，自动处理改名和移动
+
 # TODO: 实现 search 方法，以及可以设定 desc、label 等
 # TODO: 允许手动指定一个 escape 方法
 # TODO: 增加多种方法: copy_many, move_many, rename_many, remove_many

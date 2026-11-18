@@ -1345,7 +1345,7 @@ class P115PathBase:
         newline: None | str = None, 
         start: int = 0, 
         seek_threshold: int = 1 << 20, 
-        http_file_reader_cls: None | type[HTTPFileReader] = None, 
+        http_file_reader_cls: None | Callable[..., HTTPFileReader] = None, 
         refresh: None | bool = None, 
         *, 
         async_: Literal[False] = False, 
@@ -1363,7 +1363,7 @@ class P115PathBase:
         newline: None | str = None, 
         start: int = 0, 
         seek_threshold: int = 1 << 20, 
-        http_file_reader_cls: None | type[HTTPFileReader] = None, 
+        http_file_reader_cls: None | Callable[..., HTTPFileReader] = None, 
         refresh: None | bool = None, 
         *, 
         async_: Literal[False] = False, 
@@ -1381,7 +1381,7 @@ class P115PathBase:
         newline: None | str = None, 
         start: int = 0, 
         seek_threshold: int = 1 << 20, 
-        http_file_reader_cls: None | type[AsyncHTTPFileReader] = None, 
+        http_file_reader_cls: None | Callable[..., AsyncHTTPFileReader] = None, 
         refresh: None | bool = None, 
         *, 
         async_: Literal[True], 
@@ -1399,7 +1399,7 @@ class P115PathBase:
         newline: None | str = None, 
         start: int = 0, 
         seek_threshold: int = 1 << 20, 
-        http_file_reader_cls: None | type[AsyncHTTPFileReader] = None, 
+        http_file_reader_cls: None | Callable[..., AsyncHTTPFileReader] = None, 
         refresh: None | bool = None, 
         *, 
         async_: Literal[True], 
@@ -1416,7 +1416,7 @@ class P115PathBase:
         newline: None | str = None, 
         start: int = 0, 
         seek_threshold: int = 1 << 20, 
-        http_file_reader_cls: None | type[HTTPFileReader] | type[AsyncHTTPFileReader] = None, 
+        http_file_reader_cls: None | Callable[..., HTTPFileReader] | Callable[..., AsyncHTTPFileReader] = None, 
         refresh: None | bool = None, 
         *, 
         async_: Literal[False, True] = False, 
@@ -3958,7 +3958,7 @@ class P115FileSystemBase[P115PathType: P115PathBase](ABC):
         errors: None | str = None, 
         newline: None | str = None, 
         start: int = 0, 
-        http_file_reader_cls: None | type[HTTPFileReader] = None, 
+        http_file_reader_cls: None | Callable[..., HTTPFileReader] = None, 
         pid: None | int = None, 
         refresh: None | bool = None, 
         *, 
@@ -3976,7 +3976,7 @@ class P115FileSystemBase[P115PathType: P115PathBase](ABC):
         errors: None | str = None, 
         newline: None | str = None, 
         start: int = 0, 
-        http_file_reader_cls: None | type[HTTPFileReader] = None, 
+        http_file_reader_cls: None | Callable[..., HTTPFileReader] = None, 
         pid: None | int = None, 
         refresh: None | bool = None, 
         *, 
@@ -3994,7 +3994,7 @@ class P115FileSystemBase[P115PathType: P115PathBase](ABC):
         errors: None | str = None, 
         newline: None | str = None, 
         start: int = 0, 
-        http_file_reader_cls: None | type[AsyncHTTPFileReader] = None, 
+        http_file_reader_cls: None | Callable[..., AsyncHTTPFileReader] = None, 
         pid: None | int = None, 
         refresh: None | bool = None, 
         *, 
@@ -4012,7 +4012,7 @@ class P115FileSystemBase[P115PathType: P115PathBase](ABC):
         errors: None | str = None, 
         newline: None | str = None, 
         start: int = 0, 
-        http_file_reader_cls: None | type[AsyncHTTPFileReader] = None, 
+        http_file_reader_cls: None | Callable[..., AsyncHTTPFileReader] = None, 
         pid: None | int = None, 
         refresh: None | bool = None, 
         *, 
@@ -4029,7 +4029,7 @@ class P115FileSystemBase[P115PathType: P115PathBase](ABC):
         errors: None | str = None, 
         newline: None | str = None, 
         start: int = 0, 
-        http_file_reader_cls: None | type[HTTPFileReader] | type[AsyncHTTPFileReader] = None, 
+        http_file_reader_cls: None | Callable[..., HTTPFileReader] | Callable[..., AsyncHTTPFileReader] = None, 
         pid: None | int = None, 
         refresh: None | bool = None, 
         *, 
@@ -4043,20 +4043,17 @@ class P115FileSystemBase[P115PathType: P115PathBase](ABC):
             nonlocal http_file_reader_cls
             if http_file_reader_cls is None:
                 if async_:
-                    http_file_reader_cls = AsyncHTTPFileReader
+                    http_file_reader_cls = AsyncHTTPFileReader.new # type: ignore
                 else:
                     http_file_reader_cls = HTTPFileReader
+                http_file_reader_cls = cast(Callable, http_file_reader_cls)
             url = yield self.get_url(
                 id_or_path, 
                 pid=pid, 
                 refresh=refresh, 
                 async_=async_, 
             )
-            file = yield self.client.open(
-                url, 
-                start=start, 
-                http_file_reader_cls=http_file_reader_cls, 
-            )
+            file = yield http_file_reader_cls(url, start=start, headers=url.get("headers"))
             return file.wrap(
                 text_mode="b" not in mode, 
                 buffering=buffering, 
@@ -4516,6 +4513,8 @@ class P115FileSystemBase[P115PathType: P115PathBase](ABC):
             if attr["id"] == 0:
                 self.full_loaded = True
         return run_gen_step_iter(gen_step, async_)
+
+    cd = chdir
 
 # TODO: 增加方法 id_to_path 和 path_to_id 以加快查询速度
 # TODO: 尽量先用数据库查一下，再去做下一步（如果不确定是不是目录，先用数据库查一下，成功就ok，不行再另外搞）

@@ -20,3 +20,6 @@ for path in Path(__path__[0]).glob("*.py"):
     __all__.extend(module.__all__)
     for attr in module.__all__:
         ns[attr] = getattr(module, attr)
+
+# TODO: 各种接口支持 app 参数
+# TODO: 实现一下 fsspec 的各种方法，但不需要完全一致
